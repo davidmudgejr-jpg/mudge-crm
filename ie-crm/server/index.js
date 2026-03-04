@@ -60,6 +60,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, timestamp: new Date().toISOString() });
 });
 
+app.get('/robots.txt', (req, res) => {
+  res.type('text/plain');
+  res.send('User-agent: *\nAllow: /');
+});
+
 // ============================================================
 // DATABASE ROUTES
 // ============================================================
