@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   THEME: CSS Custom Properties
+   Automatically switches based on macOS appearance setting.
+   ============================================================ */
+:root {
+  /* Dark theme (default) */
+  --crm-bg: #0f1117;
+  --crm-sidebar: #1a1d27;
+  --crm-card: #1e2130;
+  --crm-accent: #f97316;
+  --crm-accent-hover: #ea580c;
+  --crm-text: #e2e8f0;
+  --crm-muted: #64748b;
+  --crm-success: #22c55e;
+  --crm-border: #2d3748;
+  --crm-hover: #262a3d;
+
+  /* Surfaces & overlays */
+  --crm-deep: #0d0f14;
+  --crm-overlay: rgba(0, 0, 0, 0.4);
+  --crm-tooltip: #111827;
+
+  /* Scrollbar */
+  --crm-scroll-track: #1a1d27;
+  --crm-scroll-thumb: #2d3748;
+  --crm-scroll-thumb-hover: #4a5568;
+
+  /* SQL syntax */
+  --crm-sql-keyword: #c084fc;
+  --crm-sql-string: #34d399;
+  --crm-sql-number: #fbbf24;
+  --crm-sql-comment: #64748b;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --crm-bg: #f8fafc;
+    --crm-sidebar: #f1f5f9;
+    --crm-card: #ffffff;
+    --crm-accent: #ea580c;
+    --crm-accent-hover: #dc2626;
+    --crm-text: #1e293b;
+    --crm-muted: #64748b;
+    --crm-success: #16a34a;
+    --crm-border: #e2e8f0;
+    --crm-hover: #f1f5f9;
+
+    --crm-deep: #f1f5f9;
+    --crm-overlay: rgba(0, 0, 0, 0.3);
+    --crm-tooltip: #1e293b;
+
+    --crm-scroll-track: #f1f5f9;
+    --crm-scroll-thumb: #cbd5e1;
+    --crm-scroll-thumb-hover: #94a3b8;
+
+    --crm-sql-keyword: #7c3aed;
+    --crm-sql-string: #059669;
+    --crm-sql-number: #d97706;
+    --crm-sql-comment: #94a3b8;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--crm-scroll-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--crm-scroll-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--crm-scroll-thumb-hover);
+}
+
+/* Drag region for titlebar */
+.drag-region {
+  -webkit-app-region: drag;
+}
+.no-drag {
+  -webkit-app-region: no-drag;
+}
+
+/* SQL syntax highlighting basics */
+.sql-keyword {
+  color: var(--crm-sql-keyword);
+  font-weight: 600;
+}
+.sql-string {
+  color: var(--crm-sql-string);
+}
+.sql-number {
+  color: var(--crm-sql-number);
+}
+.sql-comment {
+  color: var(--crm-sql-comment);
+  font-style: italic;
+}
