@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { syncTable, getAvailableTables, getStatus as getAirtableStatus } from '../api/airtable';
 import { query, migrateOldNotes, dropOldNotesColumns, ensureNotesFKColumns } from '../api/database';
+import { db, claude as claudeBridge, airtable as airtableBridge, settings } from '../api/bridge';
 
 function StatusBadge({ ok, label }) {
   return (
@@ -50,14 +51,14 @@ export default function Settings() {
 
   const checkStatuses = useCallback(async () => {
     try {
-      const dbRes = await window.iecrm?.db?.status();
+      const dbRes = await db.status();
       setDbStatus(dbRes?.connected || false);
     } catch {
       setDbStatus(false);
     }
 
     try {
-      const claudeRes = await window.iecrm?.claude?.status();
+      const claudeRes = await claudeBridge.status();
       setClaudeStatus(claudeRes?.configured || false);
     } catch {
       setClaudeStatus(false);
@@ -71,7 +72,7 @@ export default function Settings() {
     }
 
     try {
-      const env = await window.iecrm?.settings?.getEnv();
+      const env = await settings.getEnv();
       setEnvInfo(env || {});
     } catch {
       setEnvInfo({});
@@ -157,7 +158,7 @@ export default function Settings() {
     setTestResult(null);
     addLog(`Testing Airtable connection for "${tableName}"...`);
     try {
-      const result = await window.iecrm?.airtable?.test(tableName);
+      const result = await airtableBridge.test(tableName);
       setTestResult(result);
       if (result.ok) {
         addLog(`Test OK: ${result.recordCount} records returned, ${result.fieldNames?.length || 0} fields`, 'success');

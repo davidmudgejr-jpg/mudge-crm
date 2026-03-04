@@ -1,5 +1,7 @@
 // Claude AI API — dynamic schema, web search, file attachments, citation handling
 
+import { db, claude as claudeBridge } from './bridge';
+
 // ── Schema cache ─────────────────────────────────────────────────
 let _schemaCache = null;
 let _schemaCacheTime = 0;
@@ -10,7 +12,7 @@ export async function fetchSchema() {
   if (_schemaCache && now - _schemaCacheTime < SCHEMA_TTL) return _schemaCache;
 
   try {
-    const schema = await window.iecrm.db.schema();
+    const schema = await db.schema();
     _schemaCache = schema;
     _schemaCacheTime = now;
     return schema;
@@ -99,8 +101,6 @@ RULES:
 
 // ── Send message ─────────────────────────────────────────────────
 export async function sendMessage(messages, context = {}, options = {}) {
-  const claude = window.iecrm?.claude;
-  if (!claude) throw new Error('Claude bridge not available');
 
   // Build dynamic system prompt with live schema
   const schema = await fetchSchema();
@@ -139,7 +139,7 @@ export async function sendMessage(messages, context = {}, options = {}) {
     return { role: m.role, content: m.content };
   });
 
-  const result = await claude.chat(apiMessages, systemPrompt, {
+  const result = await claudeBridge.chat(apiMessages, systemPrompt, {
     enableWebSearch: options.enableWebSearch ?? true,
   });
 
@@ -169,7 +169,7 @@ export function parseClaudeResponse(text) {
 
 // ── Status ───────────────────────────────────────────────────────
 export function getStatus() {
-  return window.iecrm?.claude?.status() || Promise.resolve({ configured: false });
+  return claudeBridge.status();
 }
 
 // ── Suggested commands ───────────────────────────────────────────

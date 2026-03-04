@@ -1,6 +1,7 @@
 // Airtable Sync Module — pull records from Airtable and upsert into PostgreSQL
 
 import { query } from './database';
+import { airtable } from './bridge';
 
 // PostgreSQL column types — used for type-aware value cleaning
 const COLUMN_TYPES = {
@@ -286,8 +287,6 @@ function mapRecord(airtableFields, fieldMap) {
 }
 
 export async function syncTable(airtableTableName, onProgress) {
-  const airtable = window.iecrm?.airtable;
-  if (!airtable) throw new Error('Airtable bridge not available');
 
   const config = FIELD_MAPS[airtableTableName];
   if (!config) throw new Error(`No field map for table: ${airtableTableName}`);
@@ -338,5 +337,5 @@ export function getAvailableTables() {
 }
 
 export function getStatus() {
-  return window.iecrm?.airtable?.status() || Promise.resolve({ configured: false });
+  return airtable.status();
 }

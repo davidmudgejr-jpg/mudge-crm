@@ -1,14 +1,12 @@
-// Database API — all PostgreSQL operations go through Electron IPC
+// Database API — all PostgreSQL operations go through IPC (Electron) or HTTP (browser)
 
-const db = window.iecrm?.db;
+import { db } from './bridge';
 
 export async function query(sql, params = []) {
-  if (!db) throw new Error('Database bridge not available');
   return db.query(sql, params);
 }
 
 export async function getStatus() {
-  if (!db) return { connected: false, error: 'Not in Electron' };
   return db.status();
 }
 

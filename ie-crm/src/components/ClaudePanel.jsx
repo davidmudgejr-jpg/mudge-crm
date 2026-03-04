@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { sendMessage, parseClaudeResponse, SUGGESTED_COMMANDS } from '../api/claude';
+import { sendMessage, parseClaudeResponse, SUGGESTED_COMMANDS, getStatus as getClaudeStatus } from '../api/claude';
 import { query, logUndo, executeUndo } from '../api/database';
+import { file as fileBridge } from '../api/bridge';
 
 function highlightSQL(sql) {
   if (!sql) return '';
@@ -283,7 +284,7 @@ export default function ClaudePanel({ isOpen, onToggle, currentTable, rowCount }
   useEffect(() => {
     (async () => {
       try {
-        const status = await window.iecrm?.claude?.status();
+        const status = await getClaudeStatus();
         setConfigured(status?.configured || false);
       } catch {
         setConfigured(false);
@@ -305,7 +306,7 @@ export default function ClaudePanel({ isOpen, onToggle, currentTable, rowCount }
     }
     try {
       const arrayBuffer = await file.arrayBuffer();
-      const parsed = await window.iecrm.file.parse(arrayBuffer, file.name);
+      const parsed = await fileBridge.parse(arrayBuffer, file.name);
       return { ...parsed, fileName: file.name };
     } catch (err) {
       console.error('File parse error:', err);
