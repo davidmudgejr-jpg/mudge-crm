@@ -9,6 +9,7 @@ import DetailSkeleton from '../components/shared/DetailSkeleton';
 import NotesSection from '../components/shared/NotesSection';
 import TYPE_ICONS from '../config/typeIcons';
 import { formatDatePacific } from '../utils/timezone';
+import NewInteractionModal from '../components/shared/NewInteractionModal';
 
 export default function CompanyDetail({ companyId, id, onClose, onSave, onRefresh, isSlideOver }) {
   const resolvedId = id || companyId;
@@ -19,6 +20,7 @@ export default function CompanyDetail({ companyId, id, onClose, onSave, onRefres
   const [interactions, setInteractions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showNewInteraction, setShowNewInteraction] = useState(false);
 
   const saveField = useAutoSave(updateCompany, resolvedId, setCompany, onRefresh);
   const parseInt0 = (v) => (v ? parseInt(v, 10) : null);
@@ -140,7 +142,11 @@ export default function CompanyDetail({ companyId, id, onClose, onSave, onRefres
         </div>
       </Section>
 
-      <Section title="Activity" badge={interactions.length} defaultOpen={interactions.length > 0}>
+      <Section title="Activity" badge={interactions.length} defaultOpen={interactions.length > 0}
+        actions={
+          <button onClick={() => setShowNewInteraction(true)} className="text-crm-accent hover:text-crm-accent/70 text-xs font-medium">+ Activity</button>
+        }
+      >
         {interactions.length === 0 ? (
           <p className="text-xs text-crm-muted">No interactions</p>
         ) : (
@@ -169,6 +175,14 @@ export default function CompanyDetail({ companyId, id, onClose, onSave, onRefres
           </div>
         )}
       </Section>
+
+      {showNewInteraction && (
+        <NewInteractionModal
+          initialLinks={{ company: [{ id: resolvedId, label: company.company_name || 'Unnamed Company' }] }}
+          onCreated={() => { setShowNewInteraction(false); loadData(); }}
+          onClose={() => setShowNewInteraction(false)}
+        />
+      )}
 
       <NotesSection entityType="company" entityId={resolvedId} onRefresh={loadData} />
 

@@ -655,6 +655,152 @@ export async function getLastUndo() {
 }
 
 // ============================================================
+// BATCH LINKED RECORD FETCHING (for table column view)
+// ============================================================
+
+function groupBy(rows, key) {
+  const grouped = {};
+  for (const row of rows) {
+    (grouped[row[key]] ||= []).push(row);
+  }
+  return grouped;
+}
+
+// -- Property linked records --
+export async function batchGetPropertyContacts(propertyIds) {
+  if (!propertyIds.length) return {};
+  const r = await query(`
+    SELECT c.contact_id, c.full_name, c.type, pc.property_id
+    FROM contacts c JOIN property_contacts pc ON c.contact_id = pc.contact_id
+    WHERE pc.property_id = ANY($1) ORDER BY c.full_name
+  `, [propertyIds]);
+  return groupBy(r.rows, 'property_id');
+}
+
+export async function batchGetPropertyCompanies(propertyIds) {
+  if (!propertyIds.length) return {};
+  const r = await query(`
+    SELECT co.company_id, co.company_name, co.company_type, pc.property_id
+    FROM companies co JOIN property_companies pc ON co.company_id = pc.company_id
+    WHERE pc.property_id = ANY($1) ORDER BY co.company_name
+  `, [propertyIds]);
+  return groupBy(r.rows, 'property_id');
+}
+
+export async function batchGetPropertyDeals(propertyIds) {
+  if (!propertyIds.length) return {};
+  const r = await query(`
+    SELECT d.deal_id, d.deal_name, d.status, dp.property_id
+    FROM deals d JOIN deal_properties dp ON d.deal_id = dp.deal_id
+    WHERE dp.property_id = ANY($1) ORDER BY d.deal_name
+  `, [propertyIds]);
+  return groupBy(r.rows, 'property_id');
+}
+
+// -- Contact linked records --
+export async function batchGetContactProperties(contactIds) {
+  if (!contactIds.length) return {};
+  const r = await query(`
+    SELECT p.property_id, p.property_address, p.property_type, pc.contact_id
+    FROM properties p JOIN property_contacts pc ON p.property_id = pc.property_id
+    WHERE pc.contact_id = ANY($1) ORDER BY p.property_address
+  `, [contactIds]);
+  return groupBy(r.rows, 'contact_id');
+}
+
+export async function batchGetContactCompanies(contactIds) {
+  if (!contactIds.length) return {};
+  const r = await query(`
+    SELECT co.company_id, co.company_name, co.company_type, cc.contact_id
+    FROM companies co JOIN contact_companies cc ON co.company_id = cc.company_id
+    WHERE cc.contact_id = ANY($1) ORDER BY co.company_name
+  `, [contactIds]);
+  return groupBy(r.rows, 'contact_id');
+}
+
+export async function batchGetContactDeals(contactIds) {
+  if (!contactIds.length) return {};
+  const r = await query(`
+    SELECT d.deal_id, d.deal_name, d.status, dc.contact_id
+    FROM deals d JOIN deal_contacts dc ON d.deal_id = dc.deal_id
+    WHERE dc.contact_id = ANY($1) ORDER BY d.deal_name
+  `, [contactIds]);
+  return groupBy(r.rows, 'contact_id');
+}
+
+export async function batchGetContactCampaigns(contactIds) {
+  if (!contactIds.length) return {};
+  const r = await query(`
+    SELECT ca.campaign_id, ca.campaign_name, cc.contact_id
+    FROM campaigns ca JOIN campaign_contacts cc ON ca.campaign_id = cc.campaign_id
+    WHERE cc.contact_id = ANY($1) ORDER BY ca.campaign_name
+  `, [contactIds]);
+  return groupBy(r.rows, 'contact_id');
+}
+
+// -- Company linked records --
+export async function batchGetCompanyContacts(companyIds) {
+  if (!companyIds.length) return {};
+  const r = await query(`
+    SELECT c.contact_id, c.full_name, c.type, cc.company_id
+    FROM contacts c JOIN contact_companies cc ON c.contact_id = cc.contact_id
+    WHERE cc.company_id = ANY($1) ORDER BY c.full_name
+  `, [companyIds]);
+  return groupBy(r.rows, 'company_id');
+}
+
+export async function batchGetCompanyProperties(companyIds) {
+  if (!companyIds.length) return {};
+  const r = await query(`
+    SELECT p.property_id, p.property_address, p.property_type, pc.company_id
+    FROM properties p JOIN property_companies pc ON p.property_id = pc.property_id
+    WHERE pc.company_id = ANY($1) ORDER BY p.property_address
+  `, [companyIds]);
+  return groupBy(r.rows, 'company_id');
+}
+
+export async function batchGetCompanyDeals(companyIds) {
+  if (!companyIds.length) return {};
+  const r = await query(`
+    SELECT d.deal_id, d.deal_name, d.status, dc.company_id
+    FROM deals d JOIN deal_companies dc ON d.deal_id = dc.deal_id
+    WHERE dc.company_id = ANY($1) ORDER BY d.deal_name
+  `, [companyIds]);
+  return groupBy(r.rows, 'company_id');
+}
+
+// -- Deal linked records --
+export async function batchGetDealProperties(dealIds) {
+  if (!dealIds.length) return {};
+  const r = await query(`
+    SELECT p.property_id, p.property_address, p.property_type, dp.deal_id
+    FROM properties p JOIN deal_properties dp ON p.property_id = dp.property_id
+    WHERE dp.deal_id = ANY($1) ORDER BY p.property_address
+  `, [dealIds]);
+  return groupBy(r.rows, 'deal_id');
+}
+
+export async function batchGetDealContacts(dealIds) {
+  if (!dealIds.length) return {};
+  const r = await query(`
+    SELECT c.contact_id, c.full_name, c.type, dc.deal_id
+    FROM contacts c JOIN deal_contacts dc ON c.contact_id = dc.contact_id
+    WHERE dc.deal_id = ANY($1) ORDER BY c.full_name
+  `, [dealIds]);
+  return groupBy(r.rows, 'deal_id');
+}
+
+export async function batchGetDealCompanies(dealIds) {
+  if (!dealIds.length) return {};
+  const r = await query(`
+    SELECT co.company_id, co.company_name, co.company_type, dc.deal_id
+    FROM companies co JOIN deal_companies dc ON co.company_id = dc.company_id
+    WHERE dc.deal_id = ANY($1) ORDER BY co.company_name
+  `, [dealIds]);
+  return groupBy(r.rows, 'deal_id');
+}
+
+// ============================================================
 // TABLE COUNTS
 // ============================================================
 const ALLOWED_COUNT_TABLES = new Set(['properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns']);

@@ -1,16 +1,18 @@
 import { useState, useMemo, useCallback } from 'react';
 
 const STORAGE_PREFIX = 'crm_col_vis_';
+const LABELS_PREFIX = 'crm_col_labels_';
 
 /**
  * Hook for managing column visibility with localStorage persistence.
  *
  * @param {string} tableKey - Unique key for the table (e.g. 'properties')
  * @param {Array<{key: string, label: string, defaultVisible?: boolean}>} allColumns
- * @returns {{ visibleColumns: Array, toggleColumn: Function, showAll: Function, hideAll: Function, isVisible: Function }}
+ * @returns {{ visibleColumns: Array, toggleColumn: Function, showAll: Function, hideAll: Function, isVisible: Function, renameColumn: Function }}
  */
 export default function useColumnVisibility(tableKey, allColumns) {
   const storageKey = STORAGE_PREFIX + tableKey;
+  const labelsKey = LABELS_PREFIX + tableKey;
 
   const defaultVisible = useMemo(
     () => allColumns.filter((c) => c.defaultVisible !== false).map((c) => c.key),
@@ -67,10 +69,32 @@ export default function useColumnVisibility(tableKey, allColumns) {
     [visibleKeys]
   );
 
-  const visibleColumns = useMemo(
-    () => allColumns.filter((c) => visibleKeys.includes(c.key)),
-    [allColumns, visibleKeys]
+  // Column label overrides (rename support)
+  const [columnLabels, setColumnLabels] = useState(() => {
+    try {
+      const stored = localStorage.getItem(labelsKey);
+      if (stored) return JSON.parse(stored);
+    } catch { /* ignore */ }
+    return {};
+  });
+
+  const renameColumn = useCallback(
+    (key, newLabel) => {
+      setColumnLabels((prev) => {
+        const next = { ...prev, [key]: newLabel };
+        try { localStorage.setItem(labelsKey, JSON.stringify(next)); } catch { /* ignore */ }
+        return next;
+      });
+    },
+    [labelsKey]
   );
 
-  return { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, isVisible };
+  const visibleColumns = useMemo(
+    () => allColumns
+      .filter((c) => visibleKeys.includes(c.key))
+      .map((c) => (columnLabels[c.key] ? { ...c, label: columnLabels[c.key] } : c)),
+    [allColumns, visibleKeys, columnLabels]
+  );
+
+  return { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, isVisible, renameColumn };
 }

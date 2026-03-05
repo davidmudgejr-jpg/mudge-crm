@@ -103,9 +103,9 @@ function InlineCellEditor({ value, fieldDef, typeDef, onSave, onCancel }) {
   );
 }
 
-/* ── Custom column header with rename / delete ──────────────────────── */
+/* ── Column header with rename / delete or hide ──────────────────────── */
 
-function CustomColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onResizeStart }) {
+function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide, onResizeStart }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameVal, setNameVal] = useState(col.label);
@@ -122,6 +122,8 @@ function CustomColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, o
   useEffect(() => {
     if (renaming && inputRef.current) inputRef.current.focus();
   }, [renaming]);
+
+  useEffect(() => { setNameVal(col.label); }, [col.label]);
 
   const commitRename = () => {
     if (nameVal.trim()) onRename(col.key, nameVal.trim());
@@ -168,18 +170,30 @@ function CustomColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, o
 
       {menuOpen && (
         <div ref={menuRef} className="absolute top-full left-0 mt-1 w-36 bg-crm-sidebar border border-crm-border rounded-lg shadow-xl z-50 overflow-hidden animate-fade-in">
-          <button
-            onClick={() => setRenaming(true)}
-            className="w-full text-left px-3 py-1.5 text-xs text-crm-text hover:bg-crm-hover transition-colors"
-          >
-            Rename field
-          </button>
-          <button
-            onClick={() => { onDelete(col.key); setMenuOpen(false); }}
-            className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
-          >
-            Delete field
-          </button>
+          {onRename && (
+            <button
+              onClick={() => setRenaming(true)}
+              className="w-full text-left px-3 py-1.5 text-xs text-crm-text hover:bg-crm-hover transition-colors"
+            >
+              Rename field
+            </button>
+          )}
+          {onHide && (
+            <button
+              onClick={() => { onHide(col.key); setMenuOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-crm-muted hover:bg-crm-hover transition-colors"
+            >
+              Hide field
+            </button>
+          )}
+          {onDelete && (
+            <button
+              onClick={() => { onDelete(col.key); setMenuOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              Delete field
+            </button>
+          )}
         </div>
       )}
 
@@ -258,6 +272,9 @@ export default function CrmTable({
   formatCell: customFormatCell,
   emptyMessage = 'No records found',
   emptySubMessage = 'Try adjusting your filters',
+  // Built-in column actions
+  onRenameColumn,
+  onHideColumn,
   // Custom fields support
   customColumns = [],
   customValues = {},
@@ -380,7 +397,7 @@ export default function CrmTable({
                 onDragOver={(e) => handleColDragOver(e, col.key)}
                 onDragLeave={handleColDragLeave}
                 onDrop={(e) => handleColDrop(e, col.key)}
-                className={`relative px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider select-none cursor-grab active:cursor-grabbing transition-colors ${
+                className={`group relative px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider select-none cursor-grab active:cursor-grabbing transition-colors ${
                   dragCol === col.key ? 'opacity-30' : ''
                 } ${dragOverCol === col.key && dragCol !== col.key ? 'bg-crm-accent/10' : ''}`}
                 style={{
@@ -390,21 +407,14 @@ export default function CrmTable({
                     : {}),
                 }}
               >
-                <div
-                  className="flex items-center gap-1 cursor-grab hover:text-crm-text transition-colors"
-                  onClick={() => onSort(col.key)}
-                >
-                  <span className="truncate">{col.label}</span>
-                  {orderBy === col.key && (
-                    <span className="text-crm-accent flex-shrink-0">
-                      {order === 'ASC' ? '↑' : '↓'}
-                    </span>
-                  )}
-                </div>
-                <div
-                  draggable="false"
-                  className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-crm-accent/30 transition-colors"
-                  onMouseDown={(e) => onResizeStart(col.key, e)}
+                <ColumnHeader
+                  col={col}
+                  onSort={onSort}
+                  orderBy={orderBy}
+                  order={order}
+                  onRename={onRenameColumn}
+                  onHide={onHideColumn}
+                  onResizeStart={onResizeStart}
                 />
               </th>
             ))}
@@ -416,7 +426,7 @@ export default function CrmTable({
                 className="group relative px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider select-none"
                 style={{ width: widths[col.key] || col.defaultWidth || 150 }}
               >
-                <CustomColumnHeader
+                <ColumnHeader
                   col={col}
                   onSort={onSort}
                   orderBy={orderBy}

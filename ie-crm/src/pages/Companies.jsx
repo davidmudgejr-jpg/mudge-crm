@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { getCompanies } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
+import useLinkedRecords from '../hooks/useLinkedRecords';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import LinkedChips from '../components/shared/LinkedChips';
 import CompanyDetail from './CompanyDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
@@ -35,6 +37,13 @@ const ALL_COLUMNS = [
   { key: 'company_growth', label: 'Growth', defaultWidth: 80, defaultVisible: false },
   { key: 'lease_months_left', label: 'Lease Mo. Left', defaultWidth: 100, format: 'number', defaultVisible: false },
   { key: 'move_in_date', label: 'Move-In Date', defaultWidth: 100, format: 'date', defaultVisible: false },
+  // Linked record columns
+  { key: 'linked_contacts', label: 'Contacts', defaultWidth: 150, defaultVisible: false,
+    renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
+  { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false,
+    renderCell: (val) => <LinkedChips items={val} type="property" labelKey="property_address" /> },
+  { key: 'linked_deals', label: 'Deals', defaultWidth: 150, defaultVisible: false,
+    renderCell: (val) => <LinkedChips items={val} type="deal" labelKey="deal_name" /> },
 ];
 
 export default function Companies({ onCountChange }) {
@@ -50,7 +59,18 @@ export default function Companies({ onCountChange }) {
   const [totalCount, setTotalCount] = useState(0);
   const { formulas, evaluateFormulas } = useFormulaColumns('companies');
   const { customColumns, addField, updateField, removeField, setValue, values } = useCustomFields('companies');
-  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults } = useColumnVisibility('companies', ALL_COLUMNS);
+  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('companies', ALL_COLUMNS);
+  const linked = useLinkedRecords('companies', rows);
+
+  const augmentedRows = useMemo(() => {
+    if (!rows.length) return rows;
+    return rows.map((row) => ({
+      ...row,
+      linked_contacts: linked.linked_contacts?.[row.company_id] || [],
+      linked_properties: linked.linked_properties?.[row.company_id] || [],
+      linked_deals: linked.linked_deals?.[row.company_id] || [],
+    }));
+  }, [rows, linked]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -132,7 +152,7 @@ export default function Companies({ onCountChange }) {
         <CrmTable
           tableKey="companies"
           columns={visibleColumns}
-          rows={rows}
+          rows={augmentedRows}
           idField="company_id"
           loading={loading}
           onRowClick={(row) => setDetailId(row.company_id)}
@@ -144,6 +164,8 @@ export default function Companies({ onCountChange }) {
           onToggleAll={toggleAll}
           emptyMessage="No companies found"
           emptySubMessage="Try adjusting your search"
+          onRenameColumn={renameColumn}
+          onHideColumn={toggleColumn}
           customColumns={customColumns}
           customValues={values}
           onCustomCellChange={setValue}

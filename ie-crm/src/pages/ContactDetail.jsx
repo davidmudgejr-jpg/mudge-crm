@@ -10,6 +10,7 @@ import NotesSection from '../components/shared/NotesSection';
 import InteractionDetail from './InteractionDetail';
 import { formatDatePacific } from '../utils/timezone';
 import TYPE_ICONS from '../config/typeIcons';
+import NewInteractionModal from '../components/shared/NewInteractionModal';
 
 export const CONTACT_TYPES = ['Tenant', 'Landlord', 'Buyer', 'Seller', 'Investor', 'Developer', 'Broker', 'Lender', 'Attorney', 'Other'];
 export const CLIENT_LEVEL_OPTIONS = ['A', 'B', 'C', 'D'];
@@ -24,6 +25,7 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [selectedInteraction, setSelectedInteraction] = useState(null);
+  const [showNewInteraction, setShowNewInteraction] = useState(false);
 
   const saveField = useAutoSave(updateContact, resolvedId, setContact, onRefresh);
 
@@ -151,7 +153,11 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
         </div>
       </Section>
 
-      <Section title="Activity" badge={interactions.length} defaultOpen={interactions.length > 0}>
+      <Section title="Activity" badge={interactions.length} defaultOpen={interactions.length > 0}
+        actions={
+          <button onClick={() => setShowNewInteraction(true)} className="text-crm-accent hover:text-crm-accent/70 text-xs font-medium">+ Activity</button>
+        }
+      >
         {interactions.length === 0 ? (
           <p className="text-xs text-crm-muted">No interactions</p>
         ) : (
@@ -192,6 +198,14 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
             <InteractionDetail id={selectedInteraction} onClose={() => setSelectedInteraction(null)} onRefresh={loadData} isSlideOver />
           </div>
         </div>
+      )}
+
+      {showNewInteraction && (
+        <NewInteractionModal
+          initialLinks={{ contact: [{ id: resolvedId, label: contact.full_name || 'Unnamed' }] }}
+          onCreated={() => { setShowNewInteraction(false); loadData(); }}
+          onClose={() => setShowNewInteraction(false)}
+        />
       )}
 
       <NotesSection entityType="contact" entityId={resolvedId} onRefresh={loadData} />

@@ -130,12 +130,20 @@ function InlineSearch({ entityType, searchFn, selected, onSelect, onRemove }) {
   );
 }
 
-export default function NewInteractionModal({ onCreated, onClose }) {
+export default function NewInteractionModal({ onCreated, onClose, initialLinks }) {
   const [type, setType] = useState('');
   const [subject, setSubject] = useState('');
   const [date, setDate] = useState(todayPacific());
   const [notes, setNotes] = useState('');
-  const [links, setLinks] = useState({ contact: [], property: [], company: [], deal: [] });
+  const [links, setLinks] = useState(() => {
+    const base = { contact: [], property: [], company: [], deal: [] };
+    if (initialLinks) {
+      for (const [key, items] of Object.entries(initialLinks)) {
+        if (base[key] && Array.isArray(items)) base[key] = items;
+      }
+    }
+    return base;
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const firstRef = useRef(null);

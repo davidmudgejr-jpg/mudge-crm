@@ -49,7 +49,7 @@ function SlideOverRenderer() {
 }
 
 function AppShell() {
-  const [claudeOpen, setClaudeOpen] = useState(true);
+  const [claudeOpen, setClaudeOpen] = useState(false);
   const [currentTable, setCurrentTable] = useState('properties');
   const [rowCount, setRowCount] = useState(0);
   const { devMode } = useDevMode();

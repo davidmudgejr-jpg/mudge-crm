@@ -13,6 +13,7 @@ import useAutoSave from '../hooks/useAutoSave';
 import { SlideOverHeader } from '../components/shared/SlideOver';
 import DetailSkeleton from '../components/shared/DetailSkeleton';
 import TYPE_ICONS from '../config/typeIcons';
+import NewInteractionModal from '../components/shared/NewInteractionModal';
 
 const PRIORITY_OPTIONS = ['Hot', 'Warm', 'Cold', 'Dead'];
 const PROPERTY_TYPES = ['Office', 'Retail', 'Industrial', 'Multifamily', 'Mixed-Use', 'Land', 'Other'];
@@ -26,6 +27,7 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
   const [interactions, setInteractions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showNewInteraction, setShowNewInteraction] = useState(false);
 
   const saveField = useAutoSave(updateProperty, resolvedId, setProp, onRefresh);
 
@@ -176,7 +178,11 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
       <LinkedRecordSection title="Companies" entityType="company" records={companyRecords} defaultOpen={companies.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
       <LinkedRecordSection title="Deals" entityType="deal" records={dealRecords} defaultOpen={deals.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
 
-      <Section title="Activity" badge={interactions.length} defaultOpen={interactions.length > 0}>
+      <Section title="Activity" badge={interactions.length} defaultOpen={interactions.length > 0}
+        actions={
+          <button onClick={() => setShowNewInteraction(true)} className="text-crm-accent hover:text-crm-accent/70 text-xs font-medium">+ Activity</button>
+        }
+      >
         {interactions.length === 0 ? (
           <p className="text-xs text-crm-muted">No interactions</p>
         ) : (
@@ -205,6 +211,14 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
           </div>
         )}
       </Section>
+
+      {showNewInteraction && (
+        <NewInteractionModal
+          initialLinks={{ property: [{ id: resolvedId, label: prop.property_address || 'Untitled Property' }] }}
+          onCreated={() => { setShowNewInteraction(false); loadData(); }}
+          onClose={() => setShowNewInteraction(false)}
+        />
+      )}
 
       <NotesSection entityType="property" entityId={resolvedId} onRefresh={loadData} />
 
