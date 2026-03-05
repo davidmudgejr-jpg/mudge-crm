@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { useDevMode } from './shared/DevModeContext';
+import mcIcon from '../assets/mc-icon.png';
 
 const NAV_ITEMS = [
   { path: '/properties', label: 'Properties', icon: 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4' },
@@ -14,6 +16,16 @@ const NAV_ITEMS = [
 export default function Sidebar({ onTableChange }) {
   const navigate = useNavigate();
   const location = useLocation();
+  const { devMode, toggleDevMode } = useDevMode();
+
+  // Track whether the OS is in dark mode
+  const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = (e) => setIsDark(e.matches);
+    mq.addEventListener('change', handler);
+    return () => mq.removeEventListener('change', handler);
+  }, []);
 
   const handleClick = (item) => {
     navigate(item.path);
@@ -26,9 +38,7 @@ export default function Sidebar({ onTableChange }) {
   return (
     <aside className="w-16 bg-crm-sidebar border-r border-crm-border flex flex-col items-center pt-10 pb-4 z-10 flex-shrink-0">
       {/* Logo */}
-      <div className="mb-6 w-10 h-10 rounded-lg bg-crm-accent flex items-center justify-center text-white font-bold text-sm">
-        IE
-      </div>
+      <img src={mcIcon} alt="MC" className="mb-6 w-10 h-10 rounded-lg object-cover" />
 
       {/* Nav Items */}
       <nav className="flex-1 flex flex-col gap-1 w-full px-2">
@@ -61,6 +71,21 @@ export default function Sidebar({ onTableChange }) {
           );
         })}
       </nav>
+
+      {/* Dev Mode toggle — only visible in dark mode */}
+      {isDark && (
+        <button
+          onClick={toggleDevMode}
+          className={`no-drag mb-2 w-10 h-10 rounded-lg flex items-center justify-center text-xs font-mono font-bold transition-colors ${
+            devMode
+              ? 'bg-[#0e7ad3]/20 text-[#569cd6] ring-1 ring-[#569cd6]/40'
+              : 'text-crm-muted hover:text-crm-text hover:bg-crm-hover'
+          }`}
+          title={devMode ? 'Disable Developer Mode' : 'Enable Developer Mode'}
+        >
+          {'{ }'}
+        </button>
+      )}
     </aside>
   );
 }

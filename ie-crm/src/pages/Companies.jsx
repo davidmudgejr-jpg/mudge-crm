@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getCompanies } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
+import useColumnVisibility from '../hooks/useColumnVisibility';
 import CrmTable from '../components/shared/CrmTable';
+import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import CompanyDetail from './CompanyDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
@@ -16,7 +18,8 @@ function formatRevenue(val) {
   return `$${val.toLocaleString()}`;
 }
 
-const COLUMNS = [
+const ALL_COLUMNS = [
+  // Default visible
   { key: 'company_name', label: 'Company', defaultWidth: 180 },
   { key: 'company_type', label: 'Type', defaultWidth: 100 },
   { key: 'industry_type', label: 'Industry', defaultWidth: 100 },
@@ -26,6 +29,12 @@ const COLUMNS = [
   { key: 'revenue', label: 'Revenue', defaultWidth: 90, renderCell: (val) => formatRevenue(val) },
   { key: 'lease_exp', label: 'Lease Exp', defaultWidth: 90, format: 'date' },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags' },
+  // Hidden by default
+  { key: 'website', label: 'Website', defaultWidth: 160, defaultVisible: false },
+  { key: 'company_hq', label: 'HQ', defaultWidth: 140, defaultVisible: false },
+  { key: 'company_growth', label: 'Growth', defaultWidth: 80, defaultVisible: false },
+  { key: 'lease_months_left', label: 'Lease Mo. Left', defaultWidth: 100, format: 'number', defaultVisible: false },
+  { key: 'move_in_date', label: 'Move-In Date', defaultWidth: 100, format: 'date', defaultVisible: false },
 ];
 
 export default function Companies({ onCountChange }) {
@@ -41,6 +50,7 @@ export default function Companies({ onCountChange }) {
   const [totalCount, setTotalCount] = useState(0);
   const { formulas, evaluateFormulas } = useFormulaColumns('companies');
   const { customColumns, addField, updateField, removeField, setValue, values } = useCustomFields('companies');
+  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults } = useColumnVisibility('companies', ALL_COLUMNS);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -106,6 +116,14 @@ export default function Companies({ onCountChange }) {
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search companies..."
               className="w-full bg-crm-card border border-crm-border rounded-lg pl-8 pr-3 py-1.5 text-sm text-crm-text placeholder-crm-muted focus:outline-none focus:border-crm-accent/50" />
           </div>
+          <ColumnToggleMenu
+            allColumns={ALL_COLUMNS}
+            visibleKeys={visibleKeys}
+            toggleColumn={toggleColumn}
+            showAll={showAll}
+            hideAll={hideAll}
+            resetDefaults={resetDefaults}
+          />
           <button onClick={fetchData} className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors">Refresh</button>
         </div>
       </div>
@@ -113,7 +131,7 @@ export default function Companies({ onCountChange }) {
       <div className="flex-1 overflow-auto">
         <CrmTable
           tableKey="companies"
-          columns={COLUMNS}
+          columns={visibleColumns}
           rows={rows}
           idField="company_id"
           loading={loading}

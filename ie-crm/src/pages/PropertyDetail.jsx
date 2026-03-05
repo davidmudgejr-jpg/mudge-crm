@@ -8,9 +8,11 @@ import Section from '../components/shared/Section';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import InlineField from '../components/shared/InlineField';
 import NotesSection from '../components/shared/NotesSection';
+import { formatDatePacific } from '../utils/timezone';
 import useAutoSave from '../hooks/useAutoSave';
 import { SlideOverHeader } from '../components/shared/SlideOver';
 import DetailSkeleton from '../components/shared/DetailSkeleton';
+import TYPE_ICONS from '../config/typeIcons';
 
 const PRIORITY_OPTIONS = ['Hot', 'Warm', 'Cold', 'Dead'];
 const PROPERTY_TYPES = ['Office', 'Retail', 'Industrial', 'Multifamily', 'Mixed-Use', 'Land', 'Other'];
@@ -22,39 +24,71 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
   const [companies, setCompanies] = useState([]);
   const [deals, setDeals] = useState([]);
   const [interactions, setInteractions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const saveField = useAutoSave(updateProperty, resolvedId, setProp, onRefresh);
 
   const loadData = async () => {
     if (!resolvedId) return;
+    setLoading(true);
+    setError(null);
     try {
-      const [pRes, cRes, coRes, dRes, iRes] = await Promise.all([
-        getProperty(resolvedId),
+      const pRes = await getProperty(resolvedId);
+      const p = pRes.rows?.[0];
+      if (!p) {
+        setError('Property not found');
+        setProp(null);
+        setLoading(false);
+        return;
+      }
+      setProp(p);
+
+      const [cRes, coRes, dRes, iRes] = await Promise.allSettled([
         getPropertyContacts(resolvedId),
         getPropertyCompanies(resolvedId),
         getPropertyDeals(resolvedId),
         getPropertyInteractions(resolvedId),
       ]);
-      const p = pRes.rows[0];
-      setProp(p);
-      setContacts(cRes.rows || []);
-      setCompanies(coRes.rows || []);
-      setDeals(dRes.rows || []);
-      setInteractions(iRes.rows || []);
+      setContacts(cRes.status === 'fulfilled' ? cRes.value.rows || [] : []);
+      setCompanies(coRes.status === 'fulfilled' ? coRes.value.rows || [] : []);
+      setDeals(dRes.status === 'fulfilled' ? dRes.value.rows || [] : []);
+      setInteractions(iRes.status === 'fulfilled' ? iRes.value.rows || [] : []);
     } catch (err) {
       console.error('Failed to load property:', err);
+      setError(err.message || 'Failed to load property');
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => { loadData(); }, [resolvedId]);
 
-  if (!prop) {
+  if (loading) {
     if (isSlideOver) return <DetailSkeleton />;
     return (
       <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
         <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
         <div className="w-[520px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
           <DetailSkeleton />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !prop) {
+    const errorContent = (
+      <div className="px-5 py-10 text-center">
+        <p className="text-sm text-crm-muted">{error || 'Property not found'}</p>
+        <button onClick={onClose} className="mt-4 text-xs text-crm-accent hover:underline">Close</button>
+      </div>
+    );
+    if (isSlideOver) return errorContent;
+    return (
+      <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
+        <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
+        <div className="w-[520px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+          {errorContent}
         </div>
       </div>
     );
@@ -147,21 +181,32 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
           <p className="text-xs text-crm-muted">No interactions</p>
         ) : (
           <div className="space-y-2">
-            {interactions.slice(0, 10).map((int) => (
+            {interactions.slice(0, 10).map((int) => {
+              const typeInfo = TYPE_ICONS[int.type] || TYPE_ICONS.Other;
+              return (
               <div key={int.interaction_id} className="flex gap-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-crm-accent mt-1.5 flex-shrink-0" />
+                <div className={`w-[18px] h-[18px] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${typeInfo.color}`}>
+                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={typeInfo.icon} />
+                  </svg>
+                </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium">{int.type}{int.email_heading ? ` — ${int.email_heading}` : ''}</div>
-                  {int.notes && <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes}</div>}
-                  <div className="text-[10px] text-crm-muted mt-0.5">{int.date ? new Date(int.date).toLocaleDateString() : ''}</div>
+                  <div className="text-xs font-medium">
+                    {int.type === 'Note' && int.notes
+                      ? (() => { const clean = int.notes.split(/\n\n---\s/)[0].trim(); return clean.length > 60 ? clean.slice(0, 60) + '...' : clean; })()
+                      : <>{int.type}{int.email_heading ? ` — ${int.email_heading}` : ''}</>}
+                  </div>
+                  {int.type !== 'Note' && int.notes && <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes.split(/\n\n---\s/)[0].trim()}</div>}
+                  <div className="text-[10px] text-crm-muted mt-0.5">{formatDatePacific(int.date) || ''}</div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Section>
 
-      <NotesSection entityType="property" entityId={resolvedId} />
+      <NotesSection entityType="property" entityId={resolvedId} onRefresh={loadData} />
 
       <Section title="Status">
         <div className="grid grid-cols-2 gap-x-4">

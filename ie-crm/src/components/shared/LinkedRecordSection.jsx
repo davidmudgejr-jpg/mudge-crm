@@ -48,14 +48,20 @@ export default function LinkedRecordSection({
 
   const handleLink = async (targetId) => {
     const mapping = getColMapping();
-    if (!mapping || !sourceId) return;
-    try {
-      await linkRecords(junction.table, mapping.srcCol, sourceId, mapping.tgtCol, targetId);
-    } catch (err) {
-      console.error('Failed to link record:', err);
+    console.log('[handleLink]', { sourceType, entityType, sourceId, targetId, junction, mapping });
+    if (!mapping || !sourceId) {
+      console.warn('[handleLink] Aborted — missing mapping or sourceId', { mapping, sourceId });
+      return;
     }
-    setModal(null);
-    if (onRefresh) onRefresh();
+    try {
+      const result = await linkRecords(junction.table, mapping.srcCol, sourceId, mapping.tgtCol, targetId);
+      console.log('[handleLink] linkRecords returned:', result);
+      setModal(null);
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('[handleLink] Failed to link record:', err);
+      alert(`Failed to link: ${err.message || err}`);
+    }
   };
 
   const handleCreate = async (newId) => {
@@ -63,11 +69,12 @@ export default function LinkedRecordSection({
     if (!mapping || !sourceId || !newId) return;
     try {
       await linkRecords(junction.table, mapping.srcCol, sourceId, mapping.tgtCol, newId);
+      setModal(null);
+      if (onRefresh) onRefresh();
     } catch (err) {
-      console.error('Failed to link new record:', err);
+      console.error('[handleCreate] Failed to link new record:', err);
+      alert(`Failed to link: ${err.message || err}`);
     }
-    setModal(null);
-    if (onRefresh) onRefresh();
   };
 
   const handleUnlink = async (targetId) => {

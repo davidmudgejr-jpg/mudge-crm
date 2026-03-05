@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { getContacts } from '../api/database';
+import { getContacts, linkRecords } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
+import useColumnVisibility from '../hooks/useColumnVisibility';
 import CrmTable from '../components/shared/CrmTable';
+import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import ContactDetail from './ContactDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
+import LinkPickerModal from '../components/shared/LinkPickerModal';
 import { useToast } from '../components/shared/Toast';
 
 const TYPE_COLORS = {
@@ -16,7 +19,8 @@ const TYPE_COLORS = {
 
 const LEVEL_COLORS = { A: 'text-crm-success', B: 'text-yellow-400', C: 'text-crm-muted', D: 'text-red-400' };
 
-const COLUMNS = [
+const ALL_COLUMNS = [
+  // Default visible
   { key: 'full_name', label: 'Name', defaultWidth: 160 },
   {
     key: 'type', label: 'Type', defaultWidth: 90,
@@ -36,6 +40,20 @@ const COLUMNS = [
   { key: 'last_contacted', label: 'Last Contact', defaultWidth: 100, format: 'date' },
   { key: 'follow_up', label: 'Follow Up', defaultWidth: 100, format: 'date' },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags' },
+  // Hidden by default
+  { key: 'first_name', label: 'First Name', defaultWidth: 120, defaultVisible: false },
+  { key: 'email_2', label: 'Email 2', defaultWidth: 180, format: 'email', defaultVisible: false },
+  { key: 'phone_2', label: 'Phone 2', defaultWidth: 120, format: 'phone', defaultVisible: false },
+  { key: 'phone_hot', label: 'Phone Hot', defaultWidth: 80, format: 'bool', defaultVisible: false },
+  { key: 'email_hot', label: 'Email Hot', defaultWidth: 80, format: 'bool', defaultVisible: false },
+  { key: 'linkedin', label: 'LinkedIn', defaultWidth: 160, defaultVisible: false },
+  { key: 'active_need', label: 'Active Need', defaultWidth: 140, defaultVisible: false },
+  { key: 'home_address', label: 'Home Address', defaultWidth: 180, defaultVisible: false },
+  { key: 'work_address', label: 'Work Address', defaultWidth: 180, defaultVisible: false },
+  { key: 'work_city', label: 'Work City', defaultWidth: 100, defaultVisible: false },
+  { key: 'work_state', label: 'Work State', defaultWidth: 80, defaultVisible: false },
+  { key: 'work_zip', label: 'Work ZIP', defaultWidth: 70, defaultVisible: false },
+  { key: 'data_source', label: 'Source', defaultWidth: 100, defaultVisible: false },
 ];
 
 const CONTACT_TYPES = ['Owner', 'Broker', 'Tenant', 'Investor', 'Vendor', 'Attorney', 'Lender', 'Other'];
@@ -43,6 +61,7 @@ const CONTACT_TYPES = ['Owner', 'Broker', 'Tenant', 'Investor', 'Vendor', 'Attor
 export default function Contacts({ onCountChange }) {
   const { addToast } = useToast();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [showCampaignPicker, setShowCampaignPicker] = useState(false);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -54,6 +73,7 @@ export default function Contacts({ onCountChange }) {
   const [totalCount, setTotalCount] = useState(0);
   const { formulas } = useFormulaColumns('contacts');
   const { customColumns, addField, updateField, removeField, setValue, values } = useCustomFields('contacts');
+  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults } = useColumnVisibility('contacts', ALL_COLUMNS);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -89,6 +109,22 @@ export default function Contacts({ onCountChange }) {
     selected.size === rows.length ? setSelected(new Set()) : setSelected(new Set(rows.map((r) => r.contact_id)));
   };
 
+  const handleBulkCampaign = async (campaignId) => {
+    setShowCampaignPicker(false);
+    try {
+      await Promise.all(
+        [...selected].map((contactId) =>
+          linkRecords('campaign_contacts', 'campaign_id', campaignId, 'contact_id', contactId)
+        )
+      );
+      addToast(`${selected.size} contact(s) added to campaign`);
+      setSelected(new Set());
+    } catch (err) {
+      console.error('Bulk campaign assign failed:', err);
+      addToast('Failed to assign contacts to campaign');
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-shrink-0 px-6 py-4 border-b border-crm-border">
@@ -99,7 +135,18 @@ export default function Contacts({ onCountChange }) {
           </div>
           <div className="flex items-center gap-2">
             {selected.size > 0 && (
-              <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">{selected.size} selected</span>
+              <>
+                <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">{selected.size} selected</span>
+                <button
+                  onClick={() => setShowCampaignPicker(true)}
+                  className="text-xs bg-crm-card border border-crm-border hover:border-crm-accent/50 text-crm-text font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  Add to Campaign
+                </button>
+              </>
             )}
             <button
               onClick={() => setShowQuickAdd(true)}
@@ -125,6 +172,14 @@ export default function Contacts({ onCountChange }) {
             <option value="">All Types</option>
             {CONTACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
+          <ColumnToggleMenu
+            allColumns={ALL_COLUMNS}
+            visibleKeys={visibleKeys}
+            toggleColumn={toggleColumn}
+            showAll={showAll}
+            hideAll={hideAll}
+            resetDefaults={resetDefaults}
+          />
           <button onClick={fetchData} className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors">Refresh</button>
         </div>
       </div>
@@ -132,7 +187,7 @@ export default function Contacts({ onCountChange }) {
       <div className="flex-1 overflow-auto">
         <CrmTable
           tableKey="contacts"
-          columns={COLUMNS}
+          columns={visibleColumns}
           rows={rows}
           idField="contact_id"
           loading={loading}
@@ -156,6 +211,14 @@ export default function Contacts({ onCountChange }) {
 
       {detailId && (
         <ContactDetail contactId={detailId} onClose={() => setDetailId(null)} onSave={() => { setDetailId(null); fetchData(); }} onRefresh={fetchData} />
+      )}
+
+      {showCampaignPicker && (
+        <LinkPickerModal
+          entityType="campaign"
+          onLink={handleBulkCampaign}
+          onClose={() => setShowCampaignPicker(false)}
+        />
       )}
 
       {showQuickAdd && (

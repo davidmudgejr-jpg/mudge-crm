@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { getCampaigns, query } from '../api/database';
+import { getCampaigns, getCampaignContacts, query } from '../api/database';
 import QuickAddModal from '../components/shared/QuickAddModal';
+import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import { useToast } from '../components/shared/Toast';
+import { formatDatePacific, formatDateTimePacific } from '../utils/timezone';
 
 const COLUMNS = [
   { key: 'name', label: 'Campaign', width: 'min-w-[200px]' },
@@ -30,9 +32,9 @@ function formatCell(value, format) {
       return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${colors[value] || 'bg-crm-border text-crm-muted'}`}>{value}</span>;
     }
     case 'date':
-      return new Date(value).toLocaleDateString();
+      return formatDatePacific(value) || String(value);
     case 'datetime':
-      return new Date(value).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return formatDateTimePacific(value) || String(value);
     case 'truncate':
       return <span className="truncate max-w-[200px] block">{String(value)}</span>;
     default:
@@ -43,25 +45,30 @@ function formatCell(value, format) {
 /* ───── Campaign Detail Slide-in ───── */
 function CampaignDetail({ campaignId, onClose, onSave }) {
   const [campaign, setCampaign] = useState(null);
+  const [linkedContacts, setLinkedContacts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState({});
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await query('SELECT * FROM campaigns WHERE campaign_id = $1', [campaignId]);
-        const c = res.rows?.[0] || null;
-        setCampaign(c);
-        if (c) setDraft({ ...c });
-      } catch (err) {
-        console.error('Failed to load campaign:', err);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [campaignId]);
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [res, contactsRes] = await Promise.allSettled([
+        query('SELECT * FROM campaigns WHERE campaign_id = $1', [campaignId]),
+        getCampaignContacts(campaignId),
+      ]);
+      const c = res.status === 'fulfilled' ? (res.value.rows?.[0] || null) : null;
+      setCampaign(c);
+      if (c) setDraft({ ...c });
+      setLinkedContacts(contactsRes.status === 'fulfilled' ? (contactsRes.value.rows || []) : []);
+    } catch (err) {
+      console.error('Failed to load campaign:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { loadData(); }, [campaignId]);
 
   const handleSave = async () => {
     try {
@@ -111,7 +118,7 @@ function CampaignDetail({ campaignId, onClose, onSave }) {
                   <h2 className="text-lg font-semibold truncate">{campaign.name || 'Untitled Campaign'}</h2>
                 )}
                 <p className="text-xs text-crm-muted mt-1">
-                  Created {new Date(campaign.created_at).toLocaleDateString()}
+                  Created {formatDatePacific(campaign.created_at)}
                 </p>
               </div>
               <div className="flex items-center gap-2 ml-3">
@@ -167,7 +174,7 @@ function CampaignDetail({ campaignId, onClose, onSave }) {
                     className="w-full bg-crm-card border border-crm-border rounded px-2 py-1.5 text-sm text-crm-text"
                   />
                 ) : (
-                  <span>{campaign.sent_date ? new Date(campaign.sent_date).toLocaleDateString() : '--'}</span>
+                  <span>{campaign.sent_date ? formatDatePacific(campaign.sent_date) : '--'}</span>
                 )}
               </Field>
 
@@ -185,8 +192,24 @@ function CampaignDetail({ campaignId, onClose, onSave }) {
               </Field>
 
               <Field label="Last Modified">
-                <span className="text-xs text-crm-muted">{new Date(campaign.modified).toLocaleString()}</span>
+                <span className="text-xs text-crm-muted">{formatDateTimePacific(campaign.modified)}</span>
               </Field>
+            </div>
+
+            <div className="mt-6">
+              <LinkedRecordSection
+                title="Contacts"
+                entityType="contact"
+                records={linkedContacts.map((c) => ({
+                  id: c.contact_id,
+                  label: c.full_name || 'Unnamed',
+                  secondary: [c.type, c.phone_1].filter(Boolean).join(' · '),
+                }))}
+                defaultOpen={linkedContacts.length > 0}
+                sourceType="campaign"
+                sourceId={campaignId}
+                onRefresh={() => { loadData(); onSave(); }}
+              />
             </div>
           </div>
         )}

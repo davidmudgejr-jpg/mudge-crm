@@ -64,6 +64,47 @@
   }
 }
 
+/* ============================================================
+   DEVELOPER MODE: VS Code Dark+ inspired theme
+   Activated via the { } toggle in the sidebar (dark mode only).
+   Overrides all CSS custom properties for a code-editor feel.
+   ============================================================ */
+.dev-mode {
+  --crm-bg: #1e1e1e;
+  --crm-sidebar: #252526;
+  --crm-card: #2d2d30;
+  --crm-accent: #569cd6;
+  --crm-accent-hover: #4fc1ff;
+  --crm-text: #d4d4d4;
+  --crm-muted: #808080;
+  --crm-success: #6a9955;
+  --crm-border: #3e3e42;
+  --crm-hover: #2a2d2e;
+
+  --crm-deep: #1b1b1b;
+  --crm-overlay: rgba(0, 0, 0, 0.55);
+  --crm-tooltip: #252526;
+
+  --crm-scroll-track: #1e1e1e;
+  --crm-scroll-thumb: #424242;
+  --crm-scroll-thumb-hover: #4f4f4f;
+
+  /* Syntax-highlight accents (VS Code Dark+ palette) */
+  --crm-sql-keyword: #c586c0;
+  --crm-sql-string: #ce9178;
+  --crm-sql-number: #b5cea8;
+  --crm-sql-comment: #6a9955;
+
+  /* Dev-mode specific tokens for component accents */
+  --crm-dev-keyword: #c586c0;
+  --crm-dev-function: #dcdcaa;
+  --crm-dev-type: #4ec9b0;
+  --crm-dev-string: #ce9178;
+  --crm-dev-number: #b5cea8;
+  --crm-dev-variable: #9cdcfe;
+  --crm-dev-comment: #6a9955;
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

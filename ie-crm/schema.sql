@@ -289,6 +289,12 @@ CREATE TABLE interaction_companies (
     PRIMARY KEY (interaction_id, company_id)
 );
 
+CREATE TABLE campaign_contacts (
+    campaign_id UUID REFERENCES campaigns(campaign_id) ON DELETE CASCADE,
+    contact_id UUID REFERENCES contacts(contact_id) ON DELETE CASCADE,
+    PRIMARY KEY (campaign_id, contact_id)
+);
+
 -- ============================================================
 -- FORMULA COLUMNS (Claude-created live formulas)
 -- ============================================================

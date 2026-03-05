@@ -17,6 +17,7 @@ import Campaigns from './pages/Campaigns';
 import Settings from './pages/Settings';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
+import { DevModeProvider, useDevMode } from './components/shared/DevModeContext';
 import SlideOver, { SlideOverHeader } from './components/shared/SlideOver';
 import PropertyDetail from './pages/PropertyDetail';
 import ContactDetail from './pages/ContactDetail';
@@ -47,62 +48,71 @@ function SlideOverRenderer() {
   });
 }
 
-export default function App() {
+function AppShell() {
   const [claudeOpen, setClaudeOpen] = useState(true);
   const [currentTable, setCurrentTable] = useState('properties');
   const [rowCount, setRowCount] = useState(0);
+  const { devMode } = useDevMode();
 
   return (
+    <div className={`flex h-screen bg-crm-bg text-crm-text overflow-hidden ${devMode ? 'dev-mode' : ''}`}>
+      {/* Titlebar drag region */}
+      <div className="drag-region fixed top-0 left-0 right-0 h-8 z-50" />
+
+      {/* Left Sidebar */}
+      <Sidebar onTableChange={setCurrentTable} />
+
+      {/* Main Content */}
+      <main className={`flex-1 pt-8 overflow-hidden transition-all duration-200 ${claudeOpen ? 'mr-[420px]' : ''}`}>
+        <Routes>
+          <Route path="/" element={<Properties onCountChange={setRowCount} />} />
+          <Route path="/properties" element={<Properties onCountChange={setRowCount} />} />
+          <Route path="/contacts" element={<Contacts onCountChange={setRowCount} />} />
+          <Route path="/companies" element={<Companies onCountChange={setRowCount} />} />
+          <Route path="/deals" element={<Deals onCountChange={setRowCount} />} />
+          <Route path="/interactions" element={<Interactions onCountChange={setRowCount} />} />
+          <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
+          <Route path="/settings" element={<Settings />} />
+        </Routes>
+      </main>
+
+      {/* Claude AI Panel */}
+      <ClaudePanel
+        isOpen={claudeOpen}
+        onToggle={() => setClaudeOpen(!claudeOpen)}
+        currentTable={currentTable}
+        rowCount={rowCount}
+      />
+
+      {/* Toggle button when panel is closed */}
+      {!claudeOpen && (
+        <button
+          onClick={() => setClaudeOpen(true)}
+          className="fixed right-4 bottom-4 z-40 bg-crm-accent hover:bg-crm-accent-hover text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-colors"
+          title="Open Claude"
+        >
+          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+          </svg>
+        </button>
+      )}
+
+      {/* Nested SlideOver panels */}
+      <SlideOverRenderer />
+    </div>
+  );
+}
+
+export default function App() {
+  return (
     <Router future={routerFutureFlags}>
+      <DevModeProvider>
       <ToastProvider>
         <SlideOverProvider>
-          <div className="flex h-screen bg-crm-bg text-crm-text overflow-hidden">
-            {/* Titlebar drag region */}
-            <div className="drag-region fixed top-0 left-0 right-0 h-8 z-50" />
-
-            {/* Left Sidebar */}
-            <Sidebar onTableChange={setCurrentTable} />
-
-            {/* Main Content */}
-            <main className={`flex-1 pt-8 overflow-hidden transition-all duration-200 ${claudeOpen ? 'mr-[420px]' : ''}`}>
-              <Routes>
-                <Route path="/" element={<Properties onCountChange={setRowCount} />} />
-                <Route path="/properties" element={<Properties onCountChange={setRowCount} />} />
-                <Route path="/contacts" element={<Contacts onCountChange={setRowCount} />} />
-                <Route path="/companies" element={<Companies onCountChange={setRowCount} />} />
-                <Route path="/deals" element={<Deals onCountChange={setRowCount} />} />
-                <Route path="/interactions" element={<Interactions onCountChange={setRowCount} />} />
-                <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
-                <Route path="/settings" element={<Settings />} />
-              </Routes>
-            </main>
-
-            {/* Claude AI Panel */}
-            <ClaudePanel
-              isOpen={claudeOpen}
-              onToggle={() => setClaudeOpen(!claudeOpen)}
-              currentTable={currentTable}
-              rowCount={rowCount}
-            />
-
-            {/* Toggle button when panel is closed */}
-            {!claudeOpen && (
-              <button
-                onClick={() => setClaudeOpen(true)}
-                className="fixed right-4 bottom-4 z-40 bg-crm-accent hover:bg-crm-accent-hover text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-colors"
-                title="Open Claude"
-              >
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-                </svg>
-              </button>
-            )}
-
-            {/* Nested SlideOver panels */}
-            <SlideOverRenderer />
-          </div>
+          <AppShell />
         </SlideOverProvider>
       </ToastProvider>
+      </DevModeProvider>
     </Router>
   );
 }

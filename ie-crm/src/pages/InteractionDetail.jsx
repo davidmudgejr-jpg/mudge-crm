@@ -10,22 +10,14 @@ import { SlideOverHeader } from '../components/shared/SlideOver';
 import InlineField from '../components/shared/InlineField';
 import useAutoSave from '../hooks/useAutoSave';
 import DetailSkeleton from '../components/shared/DetailSkeleton';
-import NotesSection from '../components/shared/NotesSection';
+import { formatDatePacific, formatTimePacific } from '../utils/timezone';
 
 export function formatDate(val) {
-  if (!val) return null;
-  try {
-    const d = new Date(val);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  } catch { return String(val); }
+  return formatDatePacific(val);
 }
 
 export function formatTime(val) {
-  if (!val) return null;
-  try {
-    const d = new Date(val);
-    return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-  } catch { return null; }
+  return formatTimePacific(val);
 }
 
 export default function InteractionDetail({ interactionId, id, onClose, onRefresh, isSlideOver }) {
@@ -35,25 +27,35 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
   const [properties, setProperties] = useState([]);
   const [deals, setDeals] = useState([]);
   const [loading, setLoading] = useState(true);
-
+  const [error, setError] = useState(null);
   const saveField = useAutoSave(updateInteraction, resolvedId, setInteraction, onRefresh);
 
   const loadData = async () => {
     if (!resolvedId) return;
     setLoading(true);
+    setError(null);
     try {
-      const [iRes, cRes, pRes, dRes] = await Promise.all([
-        getInteraction(resolvedId),
+      const iRes = await getInteraction(resolvedId);
+      const data = iRes.rows?.[0];
+      if (!data) {
+        setError('Interaction not found');
+        setInteraction(null);
+        setLoading(false);
+        return;
+      }
+      setInteraction(data);
+
+      const [cRes, pRes, dRes] = await Promise.allSettled([
         getInteractionContacts(resolvedId),
         getInteractionProperties(resolvedId),
         getInteractionDeals(resolvedId),
       ]);
-      setInteraction(iRes.rows[0] || null);
-      setContacts(cRes.rows || []);
-      setProperties(pRes.rows || []);
-      setDeals(dRes.rows || []);
+      setContacts(cRes.status === 'fulfilled' ? cRes.value.rows || [] : []);
+      setProperties(pRes.status === 'fulfilled' ? pRes.value.rows || [] : []);
+      setDeals(dRes.status === 'fulfilled' ? dRes.value.rows || [] : []);
     } catch (err) {
       console.error('Failed to load interaction:', err);
+      setError(err.message || 'Failed to load interaction');
     } finally {
       setLoading(false);
     }
@@ -79,12 +81,29 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
     secondary: d.status,
   }));
 
-  if (loading || !interaction) {
+  if (loading) {
     if (isSlideOver) return <DetailSkeleton />;
     return (
       <div className="fixed inset-0 bg-crm-overlay z-40 flex justify-end animate-fade-in" onClick={onClose}>
         <div className="w-[480px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={e => e.stopPropagation()}>
           <DetailSkeleton />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !interaction) {
+    const errorContent = (
+      <div className="px-5 py-10 text-center">
+        <p className="text-sm text-crm-muted">{error || 'Interaction not found'}</p>
+        <button onClick={onClose} className="mt-4 text-xs text-crm-accent hover:underline">Close</button>
+      </div>
+    );
+    if (isSlideOver) return errorContent;
+    return (
+      <div className="fixed inset-0 bg-crm-overlay z-40 flex justify-end animate-fade-in" onClick={onClose}>
+        <div className="w-[480px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={e => e.stopPropagation()}>
+          {errorContent}
         </div>
       </div>
     );
@@ -109,20 +128,24 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
         onClose={onClose}
       />
 
-      <Section title="Email">
-        <InlineField label="Subject" value={interaction.email_heading} field="email_heading" onSave={saveField} />
-        <InlineField label="Body" value={interaction.email_body} field="email_body" type="textarea" onSave={saveField} placeholder="No email body" />
-      </Section>
+      {interaction.type === 'Email' && (
+        <Section title="Email">
+          <InlineField label="Subject" value={interaction.email_heading} field="email_heading" onSave={saveField} />
+          <InlineField label="Body" value={interaction.email_body} field="email_body" type="textarea" onSave={saveField} placeholder="No email body" />
+        </Section>
+      )}
 
-      <NotesSection entityType="interaction" entityId={resolvedId} />
-
-      <Section title="Details">
+      <Section title="Details" defaultOpen>
         <div className="grid grid-cols-2 gap-x-4">
           <InlineField label="Type" value={interaction.type} field="type" type="select" options={INTERACTION_TYPES} onSave={saveField} />
           <InlineField label="Team Member" value={interaction.team_member} field="team_member" onSave={saveField} />
           <InlineField label="Lead Source" value={interaction.lead_source} field="lead_source" onSave={saveField} />
           <InlineField label="Follow Up" value={interaction.follow_up} field="follow_up" type="date" onSave={saveField} />
-          <InlineField label="Created" value={interaction.created_at} field="created_at" readOnly format={(v) => v ? new Date(v).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : null} />
+          <InlineField label="Created" value={interaction.created_at} field="created_at" readOnly format={(v) => formatDatePacific(v)} />
+        </div>
+
+        <div className="mt-4 pt-3 border-t border-crm-border">
+          <InlineField label="Notes" value={interaction.notes} field="notes" type="textarea" onSave={saveField} placeholder="Click to add notes..." />
         </div>
       </Section>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { searchContacts, searchCompanies, searchProperties, searchDeals } from '../../api/database';
+import { searchContacts, searchCompanies, searchProperties, searchDeals, searchCampaigns } from '../../api/database';
 import ENTITY_TYPES from '../../config/entityTypes';
 
 const SEARCH_FNS = {
@@ -7,6 +7,7 @@ const SEARCH_FNS = {
   company: searchCompanies,
   property: searchProperties,
   deal: searchDeals,
+  campaign: searchCampaigns,
 };
 
 export default function LinkPickerModal({ entityType, onLink, onClose }) {

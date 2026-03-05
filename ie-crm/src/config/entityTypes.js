@@ -76,6 +76,7 @@ export const JUNCTIONS = {
   'interaction-property': { table: 'interaction_properties', col1: 'interaction_id', col2: 'property_id' },
   'interaction-deal': { table: 'interaction_deals', col1: 'interaction_id', col2: 'deal_id' },
   'interaction-company': { table: 'interaction_companies', col1: 'interaction_id', col2: 'company_id' },
+  'campaign-contact': { table: 'campaign_contacts', col1: 'campaign_id', col2: 'contact_id' },
 };
 
 // Helper: get junction config for two entity types (order-independent)

@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatDatePacific, formatDateTimePacific } from '../../utils/timezone';
 
 // Unified cell formatter — replaces 4 duplicate formatCell functions across pages
 
@@ -15,19 +16,11 @@ export default function formatCell(value, format) {
     case 'percent':
       return `${value}%`;
 
-    case 'date': {
-      try {
-        const d = new Date(value);
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-      } catch { return String(value); }
-    }
+    case 'date':
+      return formatDatePacific(value) || String(value);
 
-    case 'datetime': {
-      try {
-        const d = new Date(value);
-        return d.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
-      } catch { return String(value); }
-    }
+    case 'datetime':
+      return formatDateTimePacific(value) || String(value);
 
     case 'bool':
       return value === true || value === 'true' ? (

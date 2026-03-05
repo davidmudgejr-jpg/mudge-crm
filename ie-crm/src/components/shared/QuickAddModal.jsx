@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { createProperty, createContact, createCompany, createDeal, createInteraction, createCampaign } from '../../api/database';
 import ENTITY_TYPES from '../../config/entityTypes';
 import { QUICK_ADD_FIELDS } from '../../config/quickAddFields';
+import { todayPacific } from '../../utils/timezone';
 
 const CREATE_FNS = {
   property: createProperty,
@@ -20,7 +21,7 @@ export default function QuickAddModal({ entityType, onCreated, onClose }) {
   const [values, setValues] = useState(() => {
     const init = {};
     fields.forEach((f) => {
-      if (f.type === 'date') init[f.key] = new Date().toISOString().split('T')[0];
+      if (f.type === 'date') init[f.key] = todayPacific();
       else init[f.key] = '';
     });
     return init;

@@ -7,6 +7,8 @@ import useAutoSave from '../hooks/useAutoSave';
 import { SlideOverHeader } from '../components/shared/SlideOver';
 import DetailSkeleton from '../components/shared/DetailSkeleton';
 import NotesSection from '../components/shared/NotesSection';
+import TYPE_ICONS from '../config/typeIcons';
+import { formatDatePacific } from '../utils/timezone';
 
 export const STATUSES = ['Prospecting', 'Active', 'Under Contract', 'Closed', 'Dead'];
 export const DEAL_TYPES = ['Lease', 'Sale', 'Acquisition', 'Disposition', 'Investment', 'Development'];
@@ -19,6 +21,7 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
   const [linkedCompanies, setLinkedCompanies] = useState([]);
   const [interactions, setInteractions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const saveField = useAutoSave(updateDeal, resolvedId, setDeal, onRefresh);
   const parseInt0 = (v) => (v ? parseInt(v, 10) : null);
@@ -27,22 +30,31 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
   const loadData = async () => {
     if (!resolvedId) return;
     setLoading(true);
+    setError(null);
     try {
-      const [d, props, contacts, companies, iRes] = await Promise.all([
-        getDeal(resolvedId),
+      const d = await getDeal(resolvedId);
+      const dealData = d.rows?.[0];
+      if (!dealData) {
+        setError('Deal not found');
+        setDeal(null);
+        setLoading(false);
+        return;
+      }
+      setDeal(dealData);
+
+      const [props, contacts, companies, iRes] = await Promise.allSettled([
         getDealProperties(resolvedId),
         getDealContacts(resolvedId),
         getDealCompanies(resolvedId),
         getDealInteractions(resolvedId),
       ]);
-      const dealData = d.rows[0];
-      setDeal(dealData);
-      setLinkedProperties(props.rows || []);
-      setLinkedContacts(contacts.rows || []);
-      setLinkedCompanies(companies.rows || []);
-      setInteractions(iRes.rows || []);
+      setLinkedProperties(props.status === 'fulfilled' ? props.value.rows || [] : []);
+      setLinkedContacts(contacts.status === 'fulfilled' ? contacts.value.rows || [] : []);
+      setLinkedCompanies(companies.status === 'fulfilled' ? companies.value.rows || [] : []);
+      setInteractions(iRes.status === 'fulfilled' ? iRes.value.rows || [] : []);
     } catch (err) {
       console.error('Failed to load deal:', err);
+      setError(err.message || 'Failed to load deal');
     } finally {
       setLoading(false);
     }
@@ -65,13 +77,31 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
     secondary: co.city,
   }));
 
-  if (loading || !deal) {
+  if (loading) {
     if (isSlideOver) return <DetailSkeleton />;
     return (
       <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
         <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
         <div className="w-[520px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
           <DetailSkeleton />
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !deal) {
+    const errorContent = (
+      <div className="px-5 py-10 text-center">
+        <p className="text-sm text-crm-muted">{error || 'Deal not found'}</p>
+        <button onClick={onClose} className="mt-4 text-xs text-crm-accent hover:underline">Close</button>
+      </div>
+    );
+    if (isSlideOver) return errorContent;
+    return (
+      <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
+        <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
+        <div className="w-[520px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+          {errorContent}
         </div>
       </div>
     );
@@ -116,21 +146,32 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
           <p className="text-xs text-crm-muted">No interactions</p>
         ) : (
           <div className="space-y-2">
-            {interactions.slice(0, 10).map((int) => (
+            {interactions.slice(0, 10).map((int) => {
+              const typeInfo = TYPE_ICONS[int.type] || TYPE_ICONS.Other;
+              return (
               <div key={int.interaction_id} className="flex gap-3">
-                <div className="w-1.5 h-1.5 rounded-full bg-crm-accent mt-1.5 flex-shrink-0" />
+                <div className={`w-[18px] h-[18px] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${typeInfo.color}`}>
+                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={typeInfo.icon} />
+                  </svg>
+                </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium">{int.type}{int.email_heading ? ` — ${int.email_heading}` : ''}</div>
-                  {int.notes && <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes}</div>}
-                  <div className="text-[10px] text-crm-muted mt-0.5">{int.date ? new Date(int.date).toLocaleDateString() : ''}</div>
+                  <div className="text-xs font-medium">
+                    {int.type === 'Note' && int.notes
+                      ? (() => { const clean = int.notes.split(/\n\n---\s/)[0].trim(); return clean.length > 60 ? clean.slice(0, 60) + '...' : clean; })()
+                      : <>{int.type}{int.email_heading ? ` — ${int.email_heading}` : ''}</>}
+                  </div>
+                  {int.type !== 'Note' && int.notes && <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes.split(/\n\n---\s/)[0].trim()}</div>}
+                  <div className="text-[10px] text-crm-muted mt-0.5">{formatDatePacific(int.date) || ''}</div>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </Section>
 
-      <NotesSection entityType="deal" entityId={resolvedId} />
+      <NotesSection entityType="deal" entityId={resolvedId} onRefresh={loadData} />
 
       <LinkedRecordSection title="Properties" entityType="property" records={propertyRecords} defaultOpen={linkedProperties.length > 0} sourceType="deal" sourceId={resolvedId} onRefresh={loadData} />
       <LinkedRecordSection title="Contacts" entityType="contact" records={contactRecords} defaultOpen={linkedContacts.length > 0} sourceType="deal" sourceId={resolvedId} onRefresh={loadData} />

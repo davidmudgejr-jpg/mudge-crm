@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createInteraction, linkRecords, searchContacts, searchCompanies, searchProperties, searchDeals } from '../../api/database';
 import ENTITY_TYPES from '../../config/entityTypes';
+import { todayPacific } from '../../utils/timezone';
 
 const INTERACTION_TYPE_OPTIONS = ['Call', 'Email', 'Meeting', 'Tour', 'Note', 'Text', 'Other'];
 
@@ -132,7 +133,7 @@ function InlineSearch({ entityType, searchFn, selected, onSelect, onRemove }) {
 export default function NewInteractionModal({ onCreated, onClose }) {
   const [type, setType] = useState('');
   const [subject, setSubject] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(todayPacific());
   const [notes, setNotes] = useState('');
   const [links, setLinks] = useState({ contact: [], property: [], company: [], deal: [] });
   const [saving, setSaving] = useState(false);

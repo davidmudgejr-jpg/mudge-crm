@@ -2,7 +2,9 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getDeals } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
+import useColumnVisibility from '../hooks/useColumnVisibility';
 import CrmTable from '../components/shared/CrmTable';
+import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import DealDetail, { STATUSES } from './DealDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
@@ -15,7 +17,8 @@ const STATUS_COLORS = {
   Dead: 'bg-gray-500/20 text-gray-400',
 };
 
-const COLUMNS = [
+const ALL_COLUMNS = [
+  // Default visible
   { key: 'deal_name', label: 'Deal', defaultWidth: 180 },
   { key: 'deal_type', label: 'Type', defaultWidth: 100 },
   {
@@ -33,6 +36,15 @@ const COLUMNS = [
     key: 'priority_deal', label: 'Priority', defaultWidth: 70,
     renderCell: (val) => val ? <span className="text-crm-success">Yes</span> : <span className="text-crm-muted">No</span>,
   },
+  // Hidden by default
+  { key: 'deal_source', label: 'Source', defaultWidth: 100, defaultVisible: false },
+  { key: 'term', label: 'Term', defaultWidth: 70, defaultVisible: false },
+  { key: 'price', label: 'Price', defaultWidth: 100, format: 'currency', defaultVisible: false },
+  { key: 'commission_rate', label: 'Commission %', defaultWidth: 100, defaultVisible: false },
+  { key: 'net_potential', label: 'Net Potential', defaultWidth: 100, format: 'currency', defaultVisible: false },
+  { key: 'important_date', label: 'Important Date', defaultWidth: 100, format: 'date', defaultVisible: false },
+  { key: 'deal_dead_reason', label: 'Dead Reason', defaultWidth: 120, defaultVisible: false },
+  { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', defaultVisible: false },
 ];
 
 export default function Deals({ onCountChange }) {
@@ -49,6 +61,7 @@ export default function Deals({ onCountChange }) {
   const [totalCount, setTotalCount] = useState(0);
   const { formulas, evaluateFormulas } = useFormulaColumns('deals');
   const { customColumns, addField, updateField, removeField, setValue, values } = useCustomFields('deals');
+  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults } = useColumnVisibility('deals', ALL_COLUMNS);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -120,6 +133,14 @@ export default function Deals({ onCountChange }) {
             <option value="">All Statuses</option>
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
+          <ColumnToggleMenu
+            allColumns={ALL_COLUMNS}
+            visibleKeys={visibleKeys}
+            toggleColumn={toggleColumn}
+            showAll={showAll}
+            hideAll={hideAll}
+            resetDefaults={resetDefaults}
+          />
           <button onClick={fetchData} className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors">Refresh</button>
         </div>
       </div>
@@ -127,7 +148,7 @@ export default function Deals({ onCountChange }) {
       <div className="flex-1 overflow-auto">
         <CrmTable
           tableKey="deals"
-          columns={COLUMNS}
+          columns={visibleColumns}
           rows={rows}
           idField="deal_id"
           loading={loading}

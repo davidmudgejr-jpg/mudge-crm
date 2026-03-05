@@ -266,7 +266,62 @@ export default function CrmTable({
   onRenameField,
   onDeleteField,
 }) {
-  const allColumns = [...columns, ...customColumns];
+  /* ── Column order: drag-to-reorder with localStorage persistence ─── */
+  const colOrderKey = `crm_column_order_${tableKey}`;
+
+  const [columnOrder, setColumnOrder] = useState(() => {
+    try { const s = localStorage.getItem(colOrderKey); return s ? JSON.parse(s) : null; }
+    catch { return null; }
+  });
+  const [dragCol, setDragCol] = useState(null);
+  const [dragOverCol, setDragOverCol] = useState(null);
+
+  const orderedColumns = React.useMemo(() => {
+    if (!columnOrder) return columns;
+    const map = new Map(columns.map(c => [c.key, c]));
+    const out = [];
+    for (const k of columnOrder) {
+      if (map.has(k)) { out.push(map.get(k)); map.delete(k); }
+    }
+    for (const c of map.values()) out.push(c);
+    return out;
+  }, [columns, columnOrder]);
+
+  const handleColDragStart = useCallback((e, key) => {
+    setDragCol(key);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', key);
+  }, []);
+
+  const handleColDragEnd = useCallback(() => {
+    setDragCol(null);
+    setDragOverCol(null);
+  }, []);
+
+  const handleColDragOver = useCallback((e, key) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOverCol(key);
+  }, []);
+
+  const handleColDragLeave = useCallback(() => setDragOverCol(null), []);
+
+  const handleColDrop = useCallback((e, targetKey) => {
+    e.preventDefault();
+    if (!dragCol || dragCol === targetKey) { setDragCol(null); setDragOverCol(null); return; }
+    const keys = orderedColumns.map(c => c.key);
+    const si = keys.indexOf(dragCol), ti = keys.indexOf(targetKey);
+    if (si === -1 || ti === -1) return;
+    keys.splice(si, 1);
+    keys.splice(ti, 0, dragCol);
+    setColumnOrder(keys);
+    localStorage.setItem(colOrderKey, JSON.stringify(keys));
+    setDragCol(null);
+    setDragOverCol(null);
+  }, [dragCol, orderedColumns, colOrderKey]);
+  /* ─────────────────────────────────────────────────────────────────── */
+
+  const allColumns = [...orderedColumns, ...customColumns];
   const { widths, onResizeStart } = useColumnResize(tableKey, allColumns);
   const fmt = customFormatCell || defaultFormatCell;
 
@@ -276,10 +331,19 @@ export default function CrmTable({
 
   const allSelected = selected.size === rows.length && rows.length > 0;
 
+  const noColumnsVisible = allColumns.length === 0;
+
   const emptyBody = loading ? (
     <tr>
       <td colSpan={allColumns.length + 2} className="py-16 text-center text-crm-muted text-sm">
         Loading...
+      </td>
+    </tr>
+  ) : noColumnsVisible ? (
+    <tr>
+      <td colSpan={2} className="py-16 text-center text-crm-muted">
+        <p className="text-sm">No columns visible</p>
+        <p className="text-xs mt-1">Use the Columns menu to show columns</p>
       </td>
     </tr>
   ) : rows.length === 0 ? (
@@ -306,15 +370,28 @@ export default function CrmTable({
               />
             </th>
 
-            {/* Regular columns */}
-            {columns.map((col) => (
+            {/* Regular columns (draggable for reorder) */}
+            {orderedColumns.map((col) => (
               <th
                 key={col.key}
-                className="relative px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider select-none"
-                style={{ width: widths[col.key] || col.defaultWidth || 150 }}
+                draggable
+                onDragStart={(e) => handleColDragStart(e, col.key)}
+                onDragEnd={handleColDragEnd}
+                onDragOver={(e) => handleColDragOver(e, col.key)}
+                onDragLeave={handleColDragLeave}
+                onDrop={(e) => handleColDrop(e, col.key)}
+                className={`relative px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider select-none cursor-grab active:cursor-grabbing transition-colors ${
+                  dragCol === col.key ? 'opacity-30' : ''
+                } ${dragOverCol === col.key && dragCol !== col.key ? 'bg-crm-accent/10' : ''}`}
+                style={{
+                  width: widths[col.key] || col.defaultWidth || 150,
+                  ...(dragOverCol === col.key && dragCol !== col.key
+                    ? { boxShadow: 'inset 3px 0 0 0 #818cf8' }
+                    : {}),
+                }}
               >
                 <div
-                  className="flex items-center gap-1 cursor-pointer hover:text-crm-text transition-colors"
+                  className="flex items-center gap-1 cursor-grab hover:text-crm-text transition-colors"
                   onClick={() => onSort(col.key)}
                 >
                   <span className="truncate">{col.label}</span>
@@ -325,6 +402,7 @@ export default function CrmTable({
                   )}
                 </div>
                 <div
+                  draggable="false"
                   className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-crm-accent/30 transition-colors"
                   onMouseDown={(e) => onResizeStart(col.key, e)}
                 />
@@ -377,7 +455,7 @@ export default function CrmTable({
         </thead>
         <tbody>
           {emptyBody}
-          {rows.map((row) => {
+          {!noColumnsVisible && rows.map((row) => {
             const id = row[idField];
             const isSelected = selected.has(id);
             const extraClass = rowClassName ? rowClassName(row) : '';
@@ -401,8 +479,8 @@ export default function CrmTable({
                   />
                 </td>
 
-                {/* Regular cells */}
-                {columns.map((col) => (
+                {/* Regular cells (matching header order) */}
+                {orderedColumns.map((col) => (
                   <td
                     key={col.key}
                     className="px-3 py-2"

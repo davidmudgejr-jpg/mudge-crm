@@ -57,10 +57,11 @@ const ALLOWED_JUNCTION_TABLES = new Set([
   'property_contacts', 'property_companies', 'contact_companies',
   'deal_properties', 'deal_contacts', 'deal_companies',
   'interaction_contacts', 'interaction_properties', 'interaction_deals', 'interaction_companies',
+  'campaign_contacts',
 ]);
 
 const ALLOWED_JUNCTION_COLS = new Set([
-  'property_id', 'contact_id', 'company_id', 'deal_id', 'interaction_id', 'role',
+  'property_id', 'contact_id', 'company_id', 'deal_id', 'interaction_id', 'campaign_id', 'role',
 ]);
 
 function sanitizeCol(col, table, fallback) {
@@ -304,7 +305,7 @@ export async function updateInteraction(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'interactions');
   const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE interactions SET ${sets.join(', ')}, modified = NOW() WHERE interaction_id = $1 RETURNING *`;
+  const sql = `UPDATE interactions SET ${sets.join(', ')} WHERE interaction_id = $1 RETURNING *`;
   return query(sql, [id, ...Object.values(fields)]);
 }
 
@@ -457,7 +458,10 @@ export async function linkRecords(junctionTable, col1, id1, col2, id2, extras = 
   validateJunction(junctionTable, cols);
   const placeholders = vals.map((_, i) => `$${i + 1}`);
   const sql = `INSERT INTO ${junctionTable} (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) ON CONFLICT DO NOTHING RETURNING *`;
-  return query(sql, vals);
+  console.log('[linkRecords]', { junctionTable, cols, vals, sql });
+  const result = await query(sql, vals);
+  console.log('[linkRecords] result:', JSON.stringify(result));
+  return result;
 }
 
 export async function unlinkRecords(junctionTable, col1, id1, col2, id2) {
@@ -572,6 +576,38 @@ export async function searchDeals(term) {
   return result.rows;
 }
 
+export async function searchCampaigns(term) {
+  const result = await query(
+    `SELECT campaign_id, name, type, status FROM campaigns
+     WHERE name ILIKE $1 OR type ILIKE $1
+     ORDER BY name LIMIT 20`,
+    [`%${term}%`]
+  );
+  return result.rows;
+}
+
+export async function getContactCampaigns(contactId) {
+  return query(
+    `SELECT ca.campaign_id, ca.name, ca.type, ca.status, ca.sent_date
+     FROM campaigns ca
+     JOIN campaign_contacts cc ON ca.campaign_id = cc.campaign_id
+     WHERE cc.contact_id = $1
+     ORDER BY ca.name`,
+    [contactId]
+  );
+}
+
+export async function getCampaignContacts(campaignId) {
+  return query(
+    `SELECT c.contact_id, c.full_name, c.type, c.phone_1, c.email
+     FROM contacts c
+     JOIN campaign_contacts cc ON c.contact_id = cc.contact_id
+     WHERE cc.campaign_id = $1
+     ORDER BY c.full_name`,
+    [campaignId]
+  );
+}
+
 // ============================================================
 // CAMPAIGNS
 // ============================================================
@@ -616,110 +652,6 @@ export async function executeUndo(undoId) {
 
 export async function getLastUndo() {
   return query('SELECT * FROM undo_log WHERE undone = FALSE ORDER BY executed_at DESC LIMIT 1');
-}
-
-// ============================================================
-// NOTES
-// ============================================================
-const NOTE_FK_COLS = new Set(['contact_id', 'company_id', 'property_id', 'deal_id', 'interaction_id', 'campaign_id']);
-
-export async function createNote(content, links = {}) {
-  const id = (window.crypto || crypto).randomUUID();
-  const cols = ['note_id', 'content'];
-  const vals = [id, content];
-  for (const [k, v] of Object.entries(links)) {
-    if (!NOTE_FK_COLS.has(k)) throw new Error(`Invalid note link column: ${k}`);
-    if (v) { cols.push(k); vals.push(v); }
-  }
-  const placeholders = vals.map((_, i) => `$${i + 1}`);
-  const sql = `INSERT INTO notes (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, vals);
-}
-
-export async function getNotesForEntity(entityType, entityId) {
-  const colMap = {
-    contact: 'contact_id', company: 'company_id', property: 'property_id',
-    deal: 'deal_id', interaction: 'interaction_id', campaign: 'campaign_id',
-  };
-  const col = colMap[entityType];
-  if (!col) throw new Error(`Invalid entity type: ${entityType}`);
-  return query(`SELECT * FROM notes WHERE ${col} = $1 ORDER BY created_at DESC`, [entityId]);
-}
-
-export async function getAllNotes(limit = 200) {
-  return query(`
-    SELECT n.*,
-      c.full_name AS contact_name,
-      co.company_name,
-      p.property_address,
-      d.deal_name,
-      i.type AS interaction_type,
-      i.email_heading AS interaction_heading,
-      ca.name AS campaign_name
-    FROM notes n
-    LEFT JOIN contacts c ON n.contact_id = c.contact_id
-    LEFT JOIN companies co ON n.company_id = co.company_id
-    LEFT JOIN properties p ON n.property_id = p.property_id
-    LEFT JOIN deals d ON n.deal_id = d.deal_id
-    LEFT JOIN interactions i ON n.interaction_id = i.interaction_id
-    LEFT JOIN campaigns ca ON n.campaign_id = ca.campaign_id
-    ORDER BY n.created_at DESC
-    LIMIT $1
-  `, [limit]);
-}
-
-export async function deleteNote(noteId) {
-  return query('DELETE FROM notes WHERE note_id = $1', [noteId]);
-}
-
-// Migrate old notes columns into the notes table
-export async function migrateOldNotes() {
-  const migrations = [
-    { table: 'contacts', fk: 'contact_id', col: 'notes' },
-    { table: 'companies', fk: 'company_id', col: 'notes' },
-    { table: 'properties', fk: 'property_id', col: 'notes' },
-    { table: 'deals', fk: 'deal_id', col: 'notes' },
-    { table: 'interactions', fk: 'interaction_id', col: 'notes' },
-    { table: 'interactions', fk: 'interaction_id', col: 'follow_up_notes', prefix: '[Follow Up] ' },
-    { table: 'campaigns', fk: 'campaign_id', col: 'notes' },
-  ];
-  let migrated = 0;
-  for (const m of migrations) {
-    const prefix = m.prefix || '';
-    const res = await query(
-      `SELECT ${m.fk}, ${m.col} FROM ${m.table} WHERE ${m.col} IS NOT NULL AND TRIM(${m.col}) != ''`
-    );
-    for (const row of (res.rows || [])) {
-      const content = prefix + row[m.col];
-      await createNote(content, { [m.fk]: row[m.fk] });
-      migrated++;
-    }
-  }
-  return { migrated };
-}
-
-// Drop old notes columns after migration
-export async function dropOldNotesColumns() {
-  const drops = [
-    'ALTER TABLE contacts DROP COLUMN IF EXISTS notes',
-    'ALTER TABLE companies DROP COLUMN IF EXISTS notes',
-    'ALTER TABLE properties DROP COLUMN IF EXISTS notes',
-    'ALTER TABLE deals DROP COLUMN IF EXISTS notes',
-    'ALTER TABLE interactions DROP COLUMN IF EXISTS notes',
-    'ALTER TABLE interactions DROP COLUMN IF EXISTS follow_up_notes',
-    'ALTER TABLE campaigns DROP COLUMN IF EXISTS notes',
-  ];
-  for (const sql of drops) {
-    await query(sql);
-  }
-  return { dropped: true };
-}
-
-// Ensure notes table has interaction_id and campaign_id FK columns
-export async function ensureNotesFKColumns() {
-  await query(`ALTER TABLE notes ADD COLUMN IF NOT EXISTS interaction_id UUID REFERENCES interactions(interaction_id)`);
-  await query(`ALTER TABLE notes ADD COLUMN IF NOT EXISTS campaign_id UUID REFERENCES campaigns(campaign_id)`);
-  return { success: true };
 }
 
 // ============================================================

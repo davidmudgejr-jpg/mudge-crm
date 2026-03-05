@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { syncTable, getAvailableTables, getStatus as getAirtableStatus } from '../api/airtable';
-import { query, migrateOldNotes, dropOldNotesColumns, ensureNotesFKColumns } from '../api/database';
+import { query } from '../api/database';
 import { db, claude as claudeBridge, airtable as airtableBridge, settings } from '../api/bridge';
+import { formatTimeLogPacific } from '../utils/timezone';
 
 function StatusBadge({ ok, label }) {
   return (
@@ -45,7 +46,7 @@ export default function Settings() {
   const [dbStats, setDbStats] = useState(null);
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(false);
-  const [migrating, setMigrating] = useState(null);
+
 
   const tables = getAvailableTables();
 
@@ -99,7 +100,7 @@ export default function Settings() {
   }, [checkStatuses, fetchDbStats]);
 
   const addLog = (msg, type = 'info') => {
-    setSyncLog((prev) => [...prev, { time: new Date().toLocaleTimeString(), msg, type }]);
+    setSyncLog((prev) => [...prev, { time: formatTimeLogPacific(), msg, type }]);
   };
 
   const handleSync = async (tableName) => {
@@ -170,46 +171,6 @@ export default function Settings() {
       addLog(`Test error: ${err.message}`, 'error');
     } finally {
       setTesting(false);
-    }
-  };
-
-  const handleEnsureFKColumns = async () => {
-    setMigrating('fk');
-    addLog('Adding interaction_id and campaign_id FK columns to notes table...');
-    try {
-      await ensureNotesFKColumns();
-      addLog('FK columns added successfully.', 'success');
-    } catch (err) {
-      addLog(`Failed to add FK columns: ${err.message}`, 'error');
-    } finally {
-      setMigrating(null);
-    }
-  };
-
-  const handleMigrateNotes = async () => {
-    setMigrating('migrate');
-    addLog('Migrating old notes columns into notes table...');
-    try {
-      const result = await migrateOldNotes();
-      addLog(`Migration complete: ${result.migrated} notes migrated.`, 'success');
-    } catch (err) {
-      addLog(`Migration failed: ${err.message}`, 'error');
-    } finally {
-      setMigrating(null);
-    }
-  };
-
-  const handleDropOldColumns = async () => {
-    if (!window.confirm('This will permanently drop old notes columns from all entity tables. This cannot be undone. Continue?')) return;
-    setMigrating('drop');
-    addLog('Dropping old notes columns from entity tables...');
-    try {
-      await dropOldNotesColumns();
-      addLog('Old notes columns dropped successfully.', 'success');
-    } catch (err) {
-      addLog(`Failed to drop columns: ${err.message}`, 'error');
-    } finally {
-      setMigrating(null);
     }
   };
 
@@ -443,55 +404,6 @@ export default function Settings() {
           <p className="text-[10px] text-crm-muted mt-2">
             Environment variables are loaded from <code className="bg-crm-border/50 px-1 py-0.5 rounded">.env</code> in the project root. Restart the app after changes.
           </p>
-        </section>
-
-        {/* Notes Migration */}
-        <section>
-          <h2 className="text-sm font-medium text-crm-muted uppercase tracking-wider mb-3">Notes Migration</h2>
-          <p className="text-xs text-crm-muted mb-3">
-            Migrate old text-column notes into the unified notes table. Run steps in order.
-          </p>
-          <div className="space-y-2">
-            <div className="bg-crm-card border border-crm-border rounded-lg px-4 py-3 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">1. Ensure FK Columns</p>
-                <p className="text-[10px] text-crm-muted">Adds interaction_id and campaign_id to notes table</p>
-              </div>
-              <button
-                onClick={handleEnsureFKColumns}
-                disabled={!!migrating}
-                className="text-xs font-medium px-3 py-1.5 rounded transition-colors bg-crm-border/50 text-crm-muted hover:text-crm-text hover:bg-crm-border disabled:opacity-40"
-              >
-                {migrating === 'fk' ? 'Running...' : 'Run'}
-              </button>
-            </div>
-            <div className="bg-crm-card border border-crm-border rounded-lg px-4 py-3 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">2. Migrate Old Notes</p>
-                <p className="text-[10px] text-crm-muted">Copies notes from all entity tables into the notes table</p>
-              </div>
-              <button
-                onClick={handleMigrateNotes}
-                disabled={!!migrating}
-                className="text-xs font-medium px-3 py-1.5 rounded transition-colors bg-crm-border/50 text-crm-muted hover:text-crm-text hover:bg-crm-border disabled:opacity-40"
-              >
-                {migrating === 'migrate' ? 'Migrating...' : 'Run'}
-              </button>
-            </div>
-            <div className="bg-crm-card border border-crm-border rounded-lg px-4 py-3 flex items-center justify-between">
-              <div>
-                <p className="text-sm font-medium">3. Drop Old Columns</p>
-                <p className="text-[10px] text-red-400">Permanently removes old notes columns from entity tables</p>
-              </div>
-              <button
-                onClick={handleDropOldColumns}
-                disabled={!!migrating}
-                className="text-xs font-medium px-3 py-1.5 rounded transition-colors bg-red-500/20 text-red-400 hover:bg-red-500/30 disabled:opacity-40"
-              >
-                {migrating === 'drop' ? 'Dropping...' : 'Drop Columns'}
-              </button>
-            </div>
-          </div>
         </section>
 
         {/* About */}

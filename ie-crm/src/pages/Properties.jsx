@@ -2,12 +2,15 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { getProperties } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
+import useColumnVisibility from '../hooks/useColumnVisibility';
 import CrmTable from '../components/shared/CrmTable';
+import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import PropertyDetail from './PropertyDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
 
-const COLUMNS = [
+const ALL_COLUMNS = [
+  // Default visible
   { key: 'property_address', label: 'Address', defaultWidth: 200 },
   { key: 'city', label: 'City', defaultWidth: 100 },
   { key: 'county', label: 'County', defaultWidth: 90 },
@@ -19,6 +22,23 @@ const COLUMNS = [
   { key: 'priority', label: 'Priority', defaultWidth: 80, format: 'priority' },
   { key: 'contacted', label: 'Contacted', defaultWidth: 80, format: 'bool' },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags' },
+  // Hidden by default
+  { key: 'property_name', label: 'Property Name', defaultWidth: 160, defaultVisible: false },
+  { key: 'zip', label: 'ZIP', defaultWidth: 70, defaultVisible: false },
+  { key: 'apn', label: 'APN', defaultWidth: 100, defaultVisible: false },
+  { key: 'zoning', label: 'Zoning', defaultWidth: 80, defaultVisible: false },
+  { key: 'units', label: 'Units', defaultWidth: 60, format: 'number', defaultVisible: false },
+  { key: 'stories', label: 'Stories', defaultWidth: 60, format: 'number', defaultVisible: false },
+  { key: 'parking_spaces', label: 'Parking', defaultWidth: 70, format: 'number', defaultVisible: false },
+  { key: 'asking_price', label: 'Asking Price', defaultWidth: 110, format: 'currency', defaultVisible: false },
+  { key: 'price_per_sqft', label: 'Price/SF', defaultWidth: 90, format: 'currency', defaultVisible: false },
+  { key: 'rba', label: 'RBA', defaultWidth: 80, format: 'number', defaultVisible: false },
+  { key: 'far', label: 'FAR', defaultWidth: 60, defaultVisible: false },
+  { key: 'cap_rate', label: 'Cap Rate', defaultWidth: 80, defaultVisible: false },
+  { key: 'noi', label: 'NOI', defaultWidth: 100, format: 'currency', defaultVisible: false },
+  { key: 'owner_phone', label: 'Owner Phone', defaultWidth: 120, defaultVisible: false },
+  { key: 'owner_email', label: 'Owner Email', defaultWidth: 160, defaultVisible: false },
+  { key: 'owner_mailing_address', label: 'Owner Mailing', defaultWidth: 180, defaultVisible: false },
 ];
 
 const PRIORITIES = ['Hot', 'Warm', 'Cold', 'Dead'];
@@ -45,6 +65,7 @@ export default function Properties({ onCountChange }) {
   const [totalCount, setTotalCount] = useState(0);
   const { formulas, evaluateFormulas } = useFormulaColumns('properties');
   const { customColumns, addField, updateField, removeField, setValue, values } = useCustomFields('properties');
+  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults } = useColumnVisibility('properties', ALL_COLUMNS);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -153,6 +174,14 @@ export default function Properties({ onCountChange }) {
             <option value="">All Priorities</option>
             {PRIORITIES.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
+          <ColumnToggleMenu
+            allColumns={ALL_COLUMNS}
+            visibleKeys={visibleKeys}
+            toggleColumn={toggleColumn}
+            showAll={showAll}
+            hideAll={hideAll}
+            resetDefaults={resetDefaults}
+          />
           <button
             onClick={fetchData}
             className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors"
@@ -166,7 +195,7 @@ export default function Properties({ onCountChange }) {
       <div className="flex-1 overflow-auto">
         <CrmTable
           tableKey="properties"
-          columns={COLUMNS}
+          columns={visibleColumns}
           rows={rows}
           idField="property_id"
           loading={loading}
