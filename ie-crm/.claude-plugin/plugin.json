@@ -1,0 +1,9 @@
+{
+  "name": "ie-crm",
+  "version": "0.1.0",
+  "description": "Custom Claude Code skills for IE CRM development — context loading and full-stack scaffolding.",
+  "author": {
+    "name": "David Mudge"
+  },
+  "keywords": ["ie-crm", "crm", "scaffolding", "commercial-real-estate"]
+}
