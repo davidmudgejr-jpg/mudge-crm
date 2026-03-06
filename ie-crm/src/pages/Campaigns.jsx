@@ -1,45 +1,45 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getCampaigns, getCampaignContacts, query } from '../api/database';
+import { useCustomFields } from '../hooks/useCustomFields';
+import useColumnVisibility from '../hooks/useColumnVisibility';
+import CrmTable from '../components/shared/CrmTable';
+import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import { useToast } from '../components/shared/Toast';
 import { formatDatePacific, formatDateTimePacific } from '../utils/timezone';
 
-const COLUMNS = [
-  { key: 'name', label: 'Campaign', width: 'min-w-[200px]' },
-  { key: 'type', label: 'Type', width: 'min-w-[100px]' },
-  { key: 'status', label: 'Status', width: 'min-w-[90px]', format: 'status' },
-  { key: 'sent_date', label: 'Sent Date', width: 'min-w-[100px]', format: 'date' },
-  { key: 'notes', label: 'Notes', width: 'min-w-[200px]', format: 'truncate' },
-  { key: 'modified', label: 'Modified', width: 'min-w-[120px]', format: 'datetime' },
+const STATUS_COLORS = {
+  Draft: 'bg-gray-500/20 text-gray-400',
+  Scheduled: 'bg-blue-500/20 text-blue-400',
+  Active: 'bg-green-500/20 text-green-400',
+  Sent: 'bg-crm-accent/20 text-crm-accent',
+  Completed: 'bg-emerald-500/20 text-emerald-400',
+  Paused: 'bg-yellow-500/20 text-yellow-400',
+};
+
+const ALL_COLUMNS = [
+  { key: 'name', label: 'Campaign', defaultWidth: 200 },
+  { key: 'type', label: 'Type', defaultWidth: 100 },
+  {
+    key: 'status', label: 'Status', defaultWidth: 90,
+    renderCell: (val) => val ? (
+      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLORS[val] || 'bg-crm-border text-crm-muted'}`}>{val}</span>
+    ) : <span className="text-crm-muted">--</span>,
+  },
+  { key: 'sent_date', label: 'Sent Date', defaultWidth: 100, format: 'date' },
+  { key: 'notes', label: 'Notes', defaultWidth: 200 },
+  { key: 'modified', label: 'Modified', defaultWidth: 120, format: 'datetime' },
+  { key: 'created_at', label: 'Created', defaultWidth: 120, format: 'datetime', defaultVisible: false },
 ];
 
 const TYPES = ['Email', 'Direct Mail', 'Cold Call', 'Door Knock', 'SMS', 'Social Media', 'Event'];
 const STATUSES = ['Draft', 'Scheduled', 'Active', 'Sent', 'Completed', 'Paused'];
 
-function formatCell(value, format) {
-  if (value === null || value === undefined) return <span className="text-crm-muted italic text-xs">--</span>;
-  switch (format) {
-    case 'status': {
-      const colors = {
-        Draft: 'bg-gray-500/20 text-gray-400',
-        Scheduled: 'bg-blue-500/20 text-blue-400',
-        Active: 'bg-green-500/20 text-green-400',
-        Sent: 'bg-crm-accent/20 text-crm-accent',
-        Completed: 'bg-emerald-500/20 text-emerald-400',
-        Paused: 'bg-yellow-500/20 text-yellow-400',
-      };
-      return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${colors[value] || 'bg-crm-border text-crm-muted'}`}>{value}</span>;
-    }
-    case 'date':
-      return formatDatePacific(value) || String(value);
-    case 'datetime':
-      return formatDateTimePacific(value) || String(value);
-    case 'truncate':
-      return <span className="truncate max-w-[200px] block">{String(value)}</span>;
-    default:
-      return String(value);
-  }
+// formatCell for CampaignDetail only (status badge in detail panel)
+function formatCampaignStatus(value) {
+  if (!value) return <span className="text-crm-muted">--</span>;
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLORS[value] || 'bg-crm-border text-crm-muted'}`}>{value}</span>;
 }
 
 /* ───── Campaign Detail Slide-in ───── */
@@ -161,7 +161,7 @@ function CampaignDetail({ campaignId, onClose, onSave }) {
                     {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
                   </select>
                 ) : (
-                  formatCell(campaign.status, 'status')
+                  formatCampaignStatus(campaign.status)
                 )}
               </Field>
 
@@ -241,6 +241,8 @@ export default function Campaigns({ onCountChange }) {
   const [selected, setSelected] = useState(new Set());
   const [detailId, setDetailId] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
+  const { customColumns, addField, updateField, removeField, setValue, values } = useCustomFields('campaigns');
+  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('campaigns', ALL_COLUMNS);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -365,6 +367,14 @@ export default function Campaigns({ onCountChange }) {
             <option value="">All Statuses</option>
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
+          <ColumnToggleMenu
+            allColumns={ALL_COLUMNS}
+            visibleKeys={visibleKeys}
+            toggleColumn={toggleColumn}
+            showAll={showAll}
+            hideAll={hideAll}
+            resetDefaults={resetDefaults}
+          />
           <button
             onClick={fetchData}
             className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors"
@@ -376,68 +386,30 @@ export default function Campaigns({ onCountChange }) {
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        {loading ? (
-          <div className="flex items-center justify-center h-40 text-crm-muted text-sm">Loading...</div>
-        ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-crm-muted">
-            <p className="text-sm">No campaigns found</p>
-            <p className="text-xs mt-1">Create a new campaign to get started</p>
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-crm-sidebar z-10">
-              <tr className="border-b border-crm-border">
-                <th className="px-3 py-2 w-8">
-                  <input
-                    type="checkbox"
-                    checked={selected.size === rows.length && rows.length > 0}
-                    onChange={toggleAll}
-                    className="rounded border-crm-border"
-                  />
-                </th>
-                {COLUMNS.map((col) => (
-                  <th
-                    key={col.key}
-                    onClick={() => handleSort(col.key)}
-                    className={`px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider cursor-pointer hover:text-crm-text transition-colors ${col.width}`}
-                  >
-                    <div className="flex items-center gap-1">
-                      {col.label}
-                      {orderBy === col.key && (
-                        <span className="text-crm-accent">{order === 'ASC' ? '↑' : '↓'}</span>
-                      )}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr
-                  key={row.campaign_id}
-                  onClick={() => setDetailId(row.campaign_id)}
-                  className={`border-b border-crm-border/50 cursor-pointer transition-colors ${
-                    selected.has(row.campaign_id) ? 'bg-crm-accent/5' : 'hover:bg-crm-hover/50'
-                  }`}
-                >
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected.has(row.campaign_id)}
-                      onChange={() => toggleSelect(row.campaign_id)}
-                      className="rounded border-crm-border"
-                    />
-                  </td>
-                  {COLUMNS.map((col) => (
-                    <td key={col.key} className={`px-3 py-2 ${col.width}`}>
-                      {formatCell(row[col.key], col.format)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+        <CrmTable
+          tableKey="campaigns"
+          columns={visibleColumns}
+          rows={rows}
+          idField="campaign_id"
+          loading={loading}
+          onRowClick={(row) => setDetailId(row.campaign_id)}
+          onSort={handleSort}
+          orderBy={orderBy}
+          order={order}
+          selected={selected}
+          onToggleSelect={toggleSelect}
+          onToggleAll={toggleAll}
+          emptyMessage="No campaigns found"
+          emptySubMessage="Create a new campaign to get started"
+          onRenameColumn={renameColumn}
+          onHideColumn={toggleColumn}
+          customColumns={customColumns}
+          customValues={values}
+          onCustomCellChange={setValue}
+          onAddField={addField}
+          onRenameField={(id, name) => updateField(id, { name })}
+          onDeleteField={removeField}
+        />
       </div>
 
       {/* Campaign Detail Slide-in */}

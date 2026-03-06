@@ -7,6 +7,7 @@
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
     "dev:react": "vite",
     "dev:electron": "wait-on http://localhost:5173 && electron .",
+    "dev:web": "concurrently \"npm run dev:react\" \"npm run dev:server\"",
     "dev:server": "node server/index.js",
     "build": "vite build && electron-builder",
     "build:web": "vite build",
