@@ -58,12 +58,12 @@ Last updated: March 2026
 - [x] Migrate database from Railway PostgreSQL to Neon PostgreSQL (March 2026)
 - [x] Update DATABASE_URL in Railway environment variables to point to Neon
 - [x] Use Neon pooled connection string in DATABASE_URL (not direct connection)
-- [ ] Add ANTHROPIC_API_KEY to Railway environment variables
+- [x] Add ANTHROPIC_API_KEY to Railway environment variables
 - [ ] Add indexes to all columns that are filtered, searched, or sorted on
 - [ ] Add latitude, longitude, parcel_number to Properties table (for future GIS)
 - [ ] Add source, source_id, canonical_id to Properties and Contacts (for CSV deduplication)
 - [ ] Add created_by, updated_by audit fields to any tables missing them
-- [ ] Commit ROADMAP.md and ARCHITECTURE.md to GitHub repo root
+- [x] Commit ROADMAP.md and ARCHITECTURE.md to GitHub repo root
 - [ ] Set up Neon branching workflow for future schema changes
 - [ ] Confirm Vercel frontend works end-to-end after Railway redeploy
 
