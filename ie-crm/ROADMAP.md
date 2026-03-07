@@ -134,20 +134,39 @@ Last updated: March 2026
 - [ ] Expand interaction types from 7 to 17 in NewInteractionModal + detail view
 - [ ] Types: Phone Call, Cold Call, Voicemail, Outbound Email, Inbound Email, Cold Email, Check in Email, Email Campaign, Text, Meeting, Tour, Door Knock, Drive By, Snail Mail, Offer Sent, Survey Sent, BOV Sent
 
-### 1G — Migrate Airtable Data
-*Last step of Phase 1 — load real data into completed schema*
+### 1G — CSV Import Engine
+*General-purpose import with address normalization, fuzzy matching, batch INSERT. Handles 10K+ row imports. Full spec in HANDOFF.md.*
 
-- [ ] Batch import from all Airtable tables (Properties, Contacts, Companies, Jr Deal Tracker, Campaigns, Action Items, Interactions)
+- [ ] Address normalizer utility — standardize Street>St, Avenue>Ave, strip city/state/zip, lowercase, etc.
+- [ ] `normalized_address` column on properties table (auto-computed trigger)
+- [ ] Fuzzy matcher — Levenshtein distance for properties (by address) and companies (by name), confidence scoring
+- [ ] Batch INSERT endpoint (`POST /api/import/batch`) — single SQL transaction for 10K+ rows
+- [ ] Import target configs for all tables: properties, contacts, companies, deals, lease_comps, sale_comps, loan_maturities, property_distress, tenant_growth, action_items
+- [ ] CRM Import UI (Settings > Import) — target picker, file upload, column mapping, preview, flagged row review, execute
+- [ ] Refactor existing Comps CSV import to use the new engine
+- [ ] Dedup detection with `ON CONFLICT` handling (skip, update, or flag)
+- [ ] Contact matching by email (primary) and name (fallback)
+- [ ] Source tracking on every imported record
+
+### 1H — SQL VIEWs & Formula Computation
+- [ ] SQL VIEW `property_tpe_scores` — live TPE scoring across all properties
+- [ ] SQL VIEW or computed SELECT for Deals formulas (Team Gross, Individual Gross/Net, Price)
+- [ ] Commission split logic — Jr, Sarah, Dave different splits via CASE or config table
+
+### 1I — Data Migration
+*Initial bulk load via Claude Code scripts, then ongoing imports via CRM CSV tool*
+
+- [ ] Claude Code script: export Airtable tables to CSV, run through import engine
+- [ ] Claude Code script: import TPE Excel data (loan maturities, distressed, tenant growth, ownership)
 - [ ] Merge Dads Deals + Sarah Deals + Jr Deal Tracker into single deals table with run_by attribution
 - [ ] Merge S Interactions into main interactions table with team_member = 'Missy'
-- [ ] Import TPE data from Excel: loan maturities, distressed properties, tenant growth, ownership data
 - [ ] Verify cross-links, deduplication, and data integrity
 - [ ] Retire Airtable as source of truth
 
 ---
 
-## Phase 2 — Smart Filters & Data Import
-*Goal: Power-user list building and ongoing data refresh*
+## Phase 2 — Smart Filters
+*Goal: Power-user list building*
 
 ### 2A — Smart Filters & Lists
 - [ ] Filter pills in list view header
@@ -155,17 +174,6 @@ Last updated: March 2026
 - [ ] Saved filter sets ("Smart Lists") in left sidebar
 - [ ] Auto-updating lists based on filter logic
 - [ ] Works across all tabs including Comps and Action Items
-
-### 2B — CSV Import Pipeline (general)
-- [ ] CSV import for Properties (CoStar, Landvision)
-- [ ] CSV import for Contacts and Companies
-- [ ] Address normalization and fuzzy matching for deduplication
-- [ ] Intelligent field mapping UI
-- [ ] Conflict detection — flag potential duplicate records
-- [ ] Import preview before committing
-- [ ] Source tracking on every imported record
-- [ ] Comp-specific CSV import (Company DB lease comps, CoStar sale comps)
-- [ ] TPE data CSV import (Title Rep loan maturity, distressed, debt & stress)
 
 ---
 

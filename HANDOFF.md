@@ -676,14 +676,150 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 6. ~~**Map Comps**~~ ✅ DONE
 7. ~~**Map TPE**~~ ✅ DONE — 3 new tables (loan_maturities, property_distress, tenant_growth), SQL VIEW, source field on action_items
 8. ~~**Audit remaining Airtable tables**~~ ✅ DONE — missing Contact fields, Deals consolidation gaps, deferred tables identified
-9. **Batch ALTER TABLE** — one clean migration adding all new columns across all tables + new tables (action_items, lease_comps, sale_comps, loan_maturities, property_distress, tenant_growth) + junction tables
-10. **Update ALL_COLUMNS arrays** — wire new columns into each page's UI
-11. **Update API routes** — ensure new columns are included in SELECT/INSERT/UPDATE queries
-12. **Update Interaction type options** — expand from 7 to 17 in NewInteractionModal + detail view
-13. **Build action_items page + 4 junction tables** — Apple Reminders-inspired UI, separate My Tasks vs Houston sections
-14. **Build comps page** — Lease/Sale toggle, CSV import, property/company linking
-15. **Build formula computation** — SQL VIEWs for Deals formulas + TPE scoring + commission splits
-16. **Migrate Airtable data** — batch import from all Airtable tables + merge S Interactions into main Interactions
+9. ~~**Batch ALTER TABLE**~~ ✅ DONE
+10. ~~**Update ALL_COLUMNS arrays**~~ ✅ DONE
+11. ~~**Update API routes**~~ ✅ DONE
+12. ~~**Update Interaction type options**~~ ✅ DONE
+13. ~~**Build action_items page + 4 junction tables**~~ ✅ DONE
+14. ~~**Build comps page**~~ ✅ DONE — Lease/Sale toggle, CSV import (comps-only), property/company linking
+15. **Build CSV Import Engine** — general-purpose import with address normalization, fuzzy matching, batch INSERT, dedup detection. See full spec below.
+16. **Build formula computation** — SQL VIEWs for Deals formulas + TPE scoring + commission splits
+17. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
+
+---
+
+### CSV Import Engine — Full Spec (Step 15)
+
+**Problem:** The current CSV import only handles comps. Data needs to flow into ALL tables from multiple sources (CoStar, Company DB, Title Rep, Airtable exports, Landvision). Addresses are the primary linking key but every source formats them differently. Imports can be 10K+ rows.
+
+**Two import paths:**
+
+| Path | Use case | Tool |
+|---|---|---|
+| **CRM CSV Import** (in-browser) | Ongoing imports — monthly comps, quarterly Title Rep data | Settings > Import page in the CRM UI |
+| **Claude Code migration scripts** | One-time initial data load — Airtable exports, TPE Excel | Node scripts run directly against DB |
+
+Both paths share the same address normalizer and fuzzy matcher utilities.
+
+#### 1. Address Normalizer (`ie-crm/server/utils/addressNormalizer.js`)
+
+Shared utility used by both CRM imports and Claude Code scripts.
+
+**Normalization rules:**
+- Lowercase everything
+- Trim whitespace, strip trailing commas/periods
+- Standardize abbreviations: Street→St, Avenue→Ave, Boulevard→Blvd, Drive→Dr, Road→Rd, Lane→Ln, Circle→Cir, Court→Ct, Place→Pl, Way→Way, Suite→Ste, Building→Bldg, North→N, South→S, East→E, West→W
+- Remove unit/suite suffixes when matching (store separately)
+- Strip city/state/zip if appended (match on street address only)
+- Remove # symbols, extra spaces, dashes in unit numbers
+- Output: normalized string for matching + parsed components (street_number, street_name, unit, city, state, zip)
+
+**Example:**
+```
+Input:  "1234 Main Street, Suite 200, Riverside, CA 92507"
+Output: { normalized: "1234 main st", unit: "ste 200", city: "riverside", state: "ca", zip: "92507" }
+
+Input:  "1234 MAIN ST."
+Output: { normalized: "1234 main st", unit: null, city: null, state: null, zip: null }
+```
+
+Both match → same property.
+
+#### 2. Fuzzy Matcher (`ie-crm/server/utils/fuzzyMatcher.js`)
+
+**Property matching (by address):**
+1. Normalize incoming address
+2. Exact match against `properties.property_address` (also normalized) → auto-link
+3. If no exact match, Levenshtein distance against all properties in same city/zip → return candidates with confidence score
+4. Above 95% confidence → auto-link with log entry
+5. Below 95% → flag for user review (show in import results)
+6. No match at all → optionally create new property record (user chooses)
+
+**Company matching (by name):**
+- Same approach but for company names
+- Normalize: lowercase, strip "Inc", "LLC", "Corp", "Co", "Ltd", trailing periods
+- Exact match → auto-link
+- Fuzzy match with candidates → flag for review
+- Used when importing lease comps (tenant name → companies.company_name)
+
+**Contact matching (by name + email):**
+- Match by email first (most unique)
+- Fallback: match by normalized full_name
+- Used when importing contacts from Airtable or other sources
+
+#### 3. Batch INSERT Endpoint (`POST /api/import/batch`)
+
+**Why:** Current import calls `createLeaseComp()` one row at a time. 10K rows = 10K API calls = timeout. Batch INSERT does it in one SQL transaction.
+
+**Request body:**
+```json
+{
+  "target": "lease_comps",        // which table
+  "rows": [ { ... }, { ... } ],   // 10K+ rows
+  "source": "Company DB",         // data source tag
+  "matchProperties": true,        // run address matching
+  "matchCompanies": true,         // run company name matching
+  "onDuplicate": "skip"           // "skip", "update", or "flag"
+}
+```
+
+**Response:**
+```json
+{
+  "inserted": 9842,
+  "skipped": 103,        // duplicates skipped
+  "updated": 0,
+  "flagged": 55,         // needs manual review (fuzzy matches below threshold)
+  "errors": 0,
+  "flaggedRows": [ { row: 47, address: "1234 Main", candidates: [...] } ]
+}
+```
+
+**Implementation:** Single SQL transaction using `INSERT INTO ... VALUES (...), (...), (...)` with `ON CONFLICT` handling. Postgres handles 10K+ rows in under a second.
+
+#### 4. Import Target Configs
+
+Each target table has a config defining its column mapping, required fields, and matching behavior:
+
+| Target | Match by | Auto-link FK | Source column examples |
+|---|---|---|---|
+| `properties` | address (dedup) | — | CoStar export, Landvision export |
+| `contacts` | email, then name | — | Airtable export |
+| `companies` | company name | — | Airtable export |
+| `deals` | deal name + contact | contact_id, property_id | Airtable export |
+| `lease_comps` | address + tenant + date | property_id, company_id | Company DB, CoStar |
+| `sale_comps` | address + sale_date | property_id | CoStar |
+| `loan_maturities` | address + lender + maturity_date | property_id | Title Rep CSV |
+| `property_distress` | address + distress_type + filing_date | property_id | Title Rep CSV |
+| `tenant_growth` | company name + data_date | company_id | CoStar/Vibe CSV |
+| `action_items` | name (dedup) | contact_id, property_id, deal_id | Airtable export |
+
+#### 5. CRM Import UI (Settings > Import)
+
+- **Step 1:** User picks target table from dropdown
+- **Step 2:** User uploads CSV file
+- **Step 3:** Column mapping screen (auto-mapped with fuzzy header matching, user can override)
+- **Step 4:** Preview — show first 20 rows, highlight unmapped columns, show match results (auto-linked, flagged, new)
+- **Step 5:** User reviews flagged rows — pick correct match or "create new"
+- **Step 6:** Execute import → show results summary
+
+#### 6. Upgrade Existing Comps Import
+
+Refactor `Comps.jsx` CSV import to use the new engine:
+- Replace client-side `parseCSV()` with server-side batch endpoint
+- Keep the Comps-specific column maps (LEASE_CSV_MAP, SALE_CSV_MAP) as target configs
+- Add address matching to link comps to existing properties
+- Add company name matching to link lease comps to existing companies
+
+#### 7. Properties Table Addition (for dedup)
+
+| Column | Schema Name | Type | Notes |
+|---|---|---|---|
+| Normalized Address | `normalized_address` | TEXT | Auto-computed on insert/update, used for matching |
+
+Add a trigger or computed column: whenever `property_address` changes, `normalized_address` is recomputed. This makes address matching a simple `WHERE normalized_address = $1` instead of normalizing on every query.
+
+---
 
 ## Future Considerations (not now)
 
@@ -692,7 +828,6 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 - Email automation / webhook capture (auto-log emails as Interactions)
 - TPE Dashboard view — heatmap, top 50 targets, score change alerts
 - Building image storage workflow (Costar PDF extraction → local file storage)
-- CSV import feature for other entities (natural moment to consider Option C / EAV)
 - File attachment storage approach (local filesystem vs S3)
 - Prop 13 building tax live formula (needs tax_rate setting per city/county)
 - Report generation (BOV reports pulling comps by geography/size/type)
