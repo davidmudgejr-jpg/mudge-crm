@@ -28,7 +28,9 @@ const ALL_COLUMNS = [
     ) : <span className="text-crm-muted">--</span>,
   },
   { key: 'sent_date', label: 'Sent Date', defaultWidth: 100, format: 'date' },
+  { key: 'assignee', label: 'Assignee', defaultWidth: 110 },
   { key: 'notes', label: 'Notes', defaultWidth: 200 },
+  { key: 'day_time_hits', label: 'Day/Time Hits', defaultWidth: 120, defaultVisible: false },
   { key: 'modified', label: 'Modified', defaultWidth: 120, format: 'datetime' },
   { key: 'created_at', label: 'Created', defaultWidth: 120, format: 'datetime', defaultVisible: false },
 ];

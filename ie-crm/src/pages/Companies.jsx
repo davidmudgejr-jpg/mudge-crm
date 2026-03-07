@@ -37,6 +37,10 @@ const ALL_COLUMNS = [
   { key: 'company_growth', label: 'Growth', defaultWidth: 80, defaultVisible: false },
   { key: 'lease_months_left', label: 'Lease Mo. Left', defaultWidth: 100, format: 'number', defaultVisible: false },
   { key: 'move_in_date', label: 'Move-In Date', defaultWidth: 100, format: 'date', defaultVisible: false },
+  { key: 'tenant_sic', label: 'SIC', defaultWidth: 80, defaultVisible: false },
+  { key: 'tenant_naics', label: 'NAICS', defaultWidth: 80, defaultVisible: false },
+  { key: 'suite', label: 'Suite', defaultWidth: 80, defaultVisible: false },
+  { key: 'notes', label: 'Notes', defaultWidth: 200, defaultVisible: false },
   // Linked record columns
   { key: 'linked_contacts', label: 'Contacts', defaultWidth: 150, defaultVisible: false,
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },

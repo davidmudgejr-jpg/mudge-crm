@@ -31,7 +31,7 @@ export const QUICK_ADD_FIELDS = {
   ],
 
   interaction: [
-    { key: 'type', label: 'Type', type: 'select', required: true, options: ['Call', 'Email', 'Meeting', 'Tour', 'Note', 'Text', 'Other'] },
+    { key: 'type', label: 'Type', type: 'select', required: true, options: ['Phone Call', 'Cold Call', 'Voicemail', 'Outbound Email', 'Inbound Email', 'Cold Email', 'Check in Email', 'Email Campaign', 'Text', 'Meeting', 'Tour', 'Door Knock', 'Drive By', 'Snail Mail', 'Offer Sent', 'Survey Sent', 'BOV Sent'] },
     { key: 'subject', label: 'Subject', type: 'text', required: true, placeholder: 'Follow-up call' },
     { key: 'date', label: 'Date', type: 'date' },
     { key: 'notes', label: 'Notes', type: 'textarea', placeholder: 'Details...' },

@@ -3,7 +3,7 @@ import {
   getInteraction, updateInteraction,
   getInteractionContacts, getInteractionProperties, getInteractionDeals,
 } from '../api/database';
-import TYPE_ICONS, { INTERACTION_TYPES } from '../config/typeIcons';
+import TYPE_ICONS, { INTERACTION_TYPES, EMAIL_TYPES } from '../config/typeIcons';
 import Section from '../components/shared/Section';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import { SlideOverHeader } from '../components/shared/SlideOver';
@@ -128,7 +128,7 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
         onClose={onClose}
       />
 
-      {interaction.type === 'Email' && (
+      {EMAIL_TYPES.includes(interaction.type) && (
         <Section title="Email">
           <InlineField label="Subject" value={interaction.email_heading} field="email_heading" onSave={saveField} />
           <InlineField label="Body" value={interaction.email_body} field="email_body" type="textarea" onSave={saveField} placeholder="No email body" />

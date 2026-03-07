@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createInteraction, linkRecords, searchContacts, searchCompanies, searchProperties, searchDeals } from '../../api/database';
 import ENTITY_TYPES from '../../config/entityTypes';
+import { INTERACTION_TYPES } from '../../config/typeIcons';
 import { todayPacific } from '../../utils/timezone';
-
-const INTERACTION_TYPE_OPTIONS = ['Call', 'Email', 'Meeting', 'Tour', 'Note', 'Text', 'Other'];
 
 const LINK_TYPES = [
   { key: 'contact', label: 'Contact', searchFn: searchContacts },
@@ -231,7 +230,7 @@ export default function NewInteractionModal({ onCreated, onClose, initialLinks }
                 className="w-full bg-crm-bg border border-crm-border rounded-lg px-3 py-2 text-sm text-crm-text focus:outline-none focus:border-crm-accent/50"
               >
                 <option value="">Select...</option>
-                {INTERACTION_TYPE_OPTIONS.map((t) => <option key={t} value={t}>{t}</option>)}
+                {INTERACTION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
               </select>
             </div>
 

@@ -12,11 +12,13 @@ import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
 
 const STATUS_COLORS = {
-  Prospecting: 'bg-yellow-500/20 text-yellow-400',
   Active: 'bg-blue-500/20 text-blue-400',
-  'Under Contract': 'bg-purple-500/20 text-purple-400',
+  Lead: 'bg-cyan-500/20 text-cyan-400',
+  Prospect: 'bg-yellow-500/20 text-yellow-400',
+  'Long Leads': 'bg-orange-500/20 text-orange-400',
   Closed: 'bg-green-500/20 text-green-400',
-  Dead: 'bg-gray-500/20 text-gray-400',
+  'Deal fell through': 'bg-red-500/20 text-red-400',
+  'Dead Lead': 'bg-gray-500/20 text-gray-400',
 };
 
 const ALL_COLUMNS = [
@@ -29,7 +31,7 @@ const ALL_COLUMNS = [
       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLORS[val] || 'bg-crm-border text-crm-muted'}`}>{val}</span>
     ) : <span className="text-crm-muted">--</span>,
   },
-  { key: 'repping', label: 'Repping', defaultWidth: 80 },
+  { key: 'repping', label: 'Repping', defaultWidth: 100, format: 'tags' },
   { key: 'sf', label: 'SF', defaultWidth: 70, format: 'number' },
   { key: 'rate', label: 'Rate', defaultWidth: 70, format: 'currency' },
   { key: 'gross_fee_potential', label: 'Gross Fee', defaultWidth: 90, format: 'currency' },
@@ -39,13 +41,21 @@ const ALL_COLUMNS = [
     renderCell: (val) => val ? <span className="text-crm-success">Yes</span> : <span className="text-crm-muted">No</span>,
   },
   // Hidden by default
-  { key: 'deal_source', label: 'Source', defaultWidth: 100, defaultVisible: false },
-  { key: 'term', label: 'Term', defaultWidth: 70, defaultVisible: false },
+  { key: 'deal_source', label: 'Source', defaultWidth: 120, format: 'tags', defaultVisible: false },
+  { key: 'term', label: 'Term (mo)', defaultWidth: 80, format: 'number', defaultVisible: false },
   { key: 'price', label: 'Price', defaultWidth: 100, format: 'currency', defaultVisible: false },
   { key: 'commission_rate', label: 'Commission %', defaultWidth: 100, defaultVisible: false },
   { key: 'net_potential', label: 'Net Potential', defaultWidth: 100, format: 'currency', defaultVisible: false },
   { key: 'important_date', label: 'Important Date', defaultWidth: 100, format: 'date', defaultVisible: false },
-  { key: 'deal_dead_reason', label: 'Dead Reason', defaultWidth: 120, defaultVisible: false },
+  { key: 'deal_dead_reason', label: 'Dead Reason', defaultWidth: 140, format: 'tags', defaultVisible: false },
+  { key: 'increases', label: 'Escalation %', defaultWidth: 90, format: 'number', defaultVisible: false },
+  { key: 'run_by', label: 'Run By', defaultWidth: 120, format: 'tags', defaultVisible: false },
+  { key: 'other_broker', label: 'Other Broker', defaultWidth: 120, defaultVisible: false },
+  { key: 'industry', label: 'Industry', defaultWidth: 100, defaultVisible: false },
+  { key: 'deadline', label: 'Deadline', defaultWidth: 90, format: 'date', defaultVisible: false },
+  { key: 'fell_through_reason', label: 'Fell Through', defaultWidth: 120, defaultVisible: false },
+  { key: 'escrow_url', label: 'Escrow', defaultWidth: 80, defaultVisible: false },
+  { key: 'surveys_brochures_url', label: 'Surveys/Brochures', defaultWidth: 80, defaultVisible: false },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', defaultVisible: false },
   // Linked record columns
   { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false,

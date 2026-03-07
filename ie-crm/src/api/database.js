@@ -17,39 +17,101 @@ const IDENTIFIER_RE = /^[a-z_][a-z0-9_]*$/;
 
 const ALLOWED_COLS = {
   properties: new Set([
-    'property_id', 'property_address', 'property_name', 'city', 'county', 'zip', 'apn',
-    'property_type', 'zoning', 'building_sqft', 'lot_sqft', 'year_built', 'units', 'stories',
-    'parking_spaces', 'asking_price', 'price_per_sqft', 'rba', 'far', 'cap_rate', 'noi',
-    'owner_name', 'owner_phone', 'owner_email', 'owner_mailing_address',
-    'priority', 'contacted', 'notes', 'created_at', 'last_modified',
+    'property_id', 'airtable_id', 'property_address', 'property_name', 'city', 'county', 'state', 'zip',
+    'rba', 'land_area_ac', 'land_sf', 'far', 'property_type', 'building_class', 'building_status',
+    'year_built', 'year_renovated', 'ceiling_ht', 'clear_ht', 'number_of_loading_docks', 'drive_ins',
+    'column_spacing', 'sprinklers', 'power', 'construction_material', 'zoning', 'features',
+    'last_sale_date', 'last_sale_price', 'price_psf', 'plsf', 'loan_amount', 'debt_date',
+    'holding_period_years', 'rent_psf_mo', 'cap_rate', 'vacancy_pct', 'percent_leased',
+    'owner_name', 'owner_phone', 'owner_address', 'owner_city_state_zip',
+    'recorded_owner_name', 'true_owner_name', 'contacted', 'priority', 'off_market_deal',
+    'target', 'target_for', 'building_park', 'market_name', 'submarket_name', 'submarket_cluster',
+    'tenancy', 'lease_type', 'notes', 'costar_url', 'num_properties_owned', 'data_confirmed',
+    'tags', 'created_at', 'last_modified',
+    // New columns (migration 001)
+    'parking_ratio', 'owner_type', 'owner_contact', 'building_tax', 'building_opex',
+    'leasing_company', 'broker_contact', 'for_sale_price', 'ops_expense_psf',
+    'sewer', 'water', 'gas', 'heating',
+    'total_available_sf', 'direct_available_sf', 'direct_vacant_space',
+    'number_of_cranes', 'rail_lines', 'parcel_number', 'landvision_url',
+    'sb_county_zoning', 'google_maps_url', 'zoning_map_url', 'listing_url',
+    'avg_weighted_rent', 'building_image_path', 'latitude', 'longitude',
+    'owner_user_or_investor', 'out_of_area_owner', 'office_courtesy',
   ]),
   contacts: new Set([
-    'contact_id', 'full_name', 'first_name', 'email', 'email_2', 'phone_1', 'phone_2',
-    'phone_hot', 'email_hot', 'type', 'title', 'linkedin', 'client_level',
+    'contact_id', 'airtable_id', 'full_name', 'first_name', 'type', 'title',
+    'email', 'email_2', 'email_3', 'phone_1', 'phone_2', 'phone_3',
+    'phone_hot', 'email_hot', 'email_kickback',
     'home_address', 'work_address', 'work_city', 'work_state', 'work_zip',
-    'active_need', 'follow_up', 'last_contacted', 'data_source', 'notes',
-    'created_at', 'modified',
+    'born', 'age', 'client_level', 'active_need', 'notes', 'linkedin',
+    'follow_up', 'last_contacted', 'data_source',
+    'white_pages_url', 'been_verified_url', 'zoom_info_url',
+    'property_type_interest', 'lease_months_left', 'tenant_space_fit',
+    'tenant_ownership_intent', 'business_trajectory', 'last_call_outcome',
+    'follow_up_behavior', 'decision_authority', 'price_cost_awareness',
+    'frustration_signals', 'exit_trigger_events',
+    'tags', 'created_at', 'modified',
   ]),
   companies: new Set([
-    'company_id', 'company_name', 'company_type', 'industry_type', 'website', 'company_hq',
-    'city', 'sf', 'employees', 'revenue', 'company_growth',
-    'lease_exp', 'lease_months_left', 'move_in_date', 'notes',
-    'created_at', 'modified',
+    'company_id', 'airtable_id', 'company_name', 'company_type', 'industry_type',
+    'website', 'sf', 'employees', 'revenue', 'company_growth', 'company_hq',
+    'lease_exp', 'lease_months_left', 'move_in_date', 'notes', 'city',
+    'tenant_sic', 'tenant_naics', 'suite',
+    'tags', 'created_at', 'modified',
   ]),
   deals: new Set([
-    'deal_id', 'deal_name', 'deal_type', 'status', 'deal_source', 'repping', 'term',
-    'sf', 'rate', 'price', 'commission_rate', 'gross_fee_potential', 'net_potential',
-    'close_date', 'important_date', 'priority_deal', 'deal_dead_reason', 'notes',
+    'deal_id', 'airtable_id', 'deal_name', 'deal_type', 'deal_source', 'status',
+    'repping', 'term', 'rate', 'sf', 'price', 'commission_rate',
+    'gross_fee_potential', 'net_potential', 'close_date', 'important_date',
+    'deal_dead_reason', 'notes', 'priority_deal',
+    'increases', 'escrow_url', 'surveys_brochures_url',
+    'run_by', 'other_broker', 'industry', 'deadline', 'fell_through_reason',
     'created_at', 'modified',
   ]),
   interactions: new Set([
-    'interaction_id', 'type', 'subject', 'date', 'email_heading', 'email_body', 'notes',
-    'team_member', 'lead_source', 'follow_up', 'follow_up_notes',
-    'created_at', 'modified',
+    'interaction_id', 'airtable_id', 'type', 'subject', 'date',
+    'notes', 'email_heading', 'email_body',
+    'follow_up', 'follow_up_notes', 'lead_source', 'team_member',
+    'email_url', 'email_id',
+    'created_at',
   ]),
   campaigns: new Set([
-    'campaign_id', 'name', 'type', 'status', 'sent_date', 'notes',
+    'campaign_id', 'airtable_id', 'name', 'type', 'status', 'notes', 'sent_date',
+    'assignee', 'day_time_hits',
     'created_at', 'modified',
+  ]),
+  action_items: new Set([
+    'action_item_id', 'name', 'notes', 'notes_on_date', 'responsibility',
+    'high_priority', 'status', 'due_date', 'date_completed', 'source',
+    'created_at', 'updated_at',
+  ]),
+  lease_comps: new Set([
+    'id', 'property_id', 'company_id', 'tenant_name', 'property_type',
+    'space_use', 'space_type', 'sf', 'building_rba', 'floor_suite',
+    'sign_date', 'commencement_date', 'move_in_date', 'expiration_date', 'term_months',
+    'rate', 'escalations', 'rent_type', 'lease_type', 'concessions',
+    'free_rent_months', 'ti_psf',
+    'tenant_rep_company', 'tenant_rep_agents', 'landlord_rep_company', 'landlord_rep_agents',
+    'notes', 'source', 'created_at', 'updated_at',
+  ]),
+  sale_comps: new Set([
+    'id', 'property_id', 'sale_date', 'sale_price', 'price_psf', 'price_plsf',
+    'cap_rate', 'sf', 'land_sf', 'buyer_name', 'seller_name', 'property_type',
+    'notes', 'source', 'created_at', 'updated_at',
+  ]),
+  loan_maturities: new Set([
+    'id', 'property_id', 'lender', 'loan_amount', 'maturity_date', 'ltv',
+    'loan_purpose', 'loan_duration_years', 'interest_rate',
+    'notes', 'source', 'created_at', 'updated_at',
+  ]),
+  property_distress: new Set([
+    'id', 'property_id', 'distress_type', 'filing_date', 'amount', 'trustee',
+    'notes', 'source', 'created_at', 'updated_at',
+  ]),
+  tenant_growth: new Set([
+    'id', 'company_id', 'headcount_current', 'headcount_previous', 'growth_rate',
+    'revenue_current', 'revenue_previous', 'data_date',
+    'source', 'created_at', 'updated_at',
   ]),
 };
 
@@ -58,10 +120,12 @@ const ALLOWED_JUNCTION_TABLES = new Set([
   'deal_properties', 'deal_contacts', 'deal_companies',
   'interaction_contacts', 'interaction_properties', 'interaction_deals', 'interaction_companies',
   'campaign_contacts',
+  'action_item_contacts', 'action_item_properties', 'action_item_deals', 'action_item_companies',
 ]);
 
 const ALLOWED_JUNCTION_COLS = new Set([
-  'property_id', 'contact_id', 'company_id', 'deal_id', 'interaction_id', 'campaign_id', 'role',
+  'property_id', 'contact_id', 'company_id', 'deal_id', 'interaction_id', 'campaign_id',
+  'action_item_id', 'role',
 ]);
 
 function sanitizeCol(col, table, fallback) {
@@ -99,7 +163,7 @@ export async function getProperties({ limit = 200, offset = 0, orderBy = 'create
   if (filters.city) { where.push(`city ILIKE $${i++}`); params.push(`%${filters.city}%`); }
   if (filters.property_type) { where.push(`property_type = $${i++}`); params.push(filters.property_type); }
   if (filters.priority) { where.push(`priority = $${i++}`); params.push(filters.priority); }
-  if (filters.contacted !== undefined) { where.push(`contacted = $${i++}`); params.push(filters.contacted); }
+  if (filters.contacted) { where.push(`$${i++} = ANY(contacted)`); params.push(filters.contacted); }
   if (filters.search) {
     where.push(`(property_address ILIKE $${i} OR owner_name ILIKE $${i} OR city ILIKE $${i} OR property_name ILIKE $${i})`);
     params.push(`%${filters.search}%`);
@@ -616,6 +680,96 @@ export async function getCampaigns({ limit = 200, offset = 0 } = {}) {
 }
 
 // ============================================================
+// ACTION ITEMS
+// ============================================================
+export async function getActionItems({ limit = 200, offset = 0, orderBy = 'due_date', order = 'ASC', filters = {} } = {}) {
+  let where = [];
+  let params = [];
+  let i = 1;
+
+  if (filters.status) { where.push(`status = $${i++}`); params.push(filters.status); }
+  if (filters.responsibility) { where.push(`$${i++} = ANY(responsibility)`); params.push(filters.responsibility); }
+  if (filters.source) { where.push(`source = $${i++}`); params.push(filters.source); }
+  if (filters.high_priority) { where.push(`high_priority = TRUE`); }
+  if (filters.search) {
+    where.push(`(name ILIKE $${i} OR notes ILIKE $${i})`);
+    params.push(`%${filters.search}%`);
+    i++;
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const safeOrder = sanitizeCol(orderBy, 'action_items', 'due_date');
+  const safeDir = sanitizeDir(order);
+  const sql = `SELECT * FROM action_items ${whereClause} ORDER BY ${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
+  params.push(limit, offset);
+
+  return query(sql, params);
+}
+
+export async function getActionItem(id) {
+  return query('SELECT * FROM action_items WHERE action_item_id = $1', [id]);
+}
+
+export async function createActionItem(fields) {
+  const keys = Object.keys(fields);
+  validateFieldKeys(keys, 'action_items');
+  const cols = ['action_item_id', ...keys];
+  const placeholders = cols.map((_, i) => `$${i + 1}`);
+  const id = crypto.randomUUID();
+  const sql = `INSERT INTO action_items (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
+  return query(sql, [id, ...Object.values(fields)]);
+}
+
+export async function updateActionItem(id, fields) {
+  const keys = Object.keys(fields);
+  validateFieldKeys(keys, 'action_items');
+  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
+  const sql = `UPDATE action_items SET ${sets.join(', ')}, updated_at = NOW() WHERE action_item_id = $1 RETURNING *`;
+  return query(sql, [id, ...Object.values(fields)]);
+}
+
+export async function deleteActionItem(id) {
+  return query('DELETE FROM action_items WHERE action_item_id = $1 RETURNING *', [id]);
+}
+
+// Action item linked record queries
+export async function getActionItemContacts(actionItemId) {
+  return query(`
+    SELECT c.* FROM contacts c
+    JOIN action_item_contacts ac ON c.contact_id = ac.contact_id
+    WHERE ac.action_item_id = $1
+    ORDER BY c.full_name
+  `, [actionItemId]);
+}
+
+export async function getActionItemProperties(actionItemId) {
+  return query(`
+    SELECT p.* FROM properties p
+    JOIN action_item_properties ap ON p.property_id = ap.property_id
+    WHERE ap.action_item_id = $1
+    ORDER BY p.property_address
+  `, [actionItemId]);
+}
+
+export async function getActionItemDeals(actionItemId) {
+  return query(`
+    SELECT d.* FROM deals d
+    JOIN action_item_deals ad ON d.deal_id = ad.deal_id
+    WHERE ad.action_item_id = $1
+    ORDER BY d.deal_name
+  `, [actionItemId]);
+}
+
+export async function getActionItemCompanies(actionItemId) {
+  return query(`
+    SELECT co.* FROM companies co
+    JOIN action_item_companies ac ON co.company_id = ac.company_id
+    WHERE ac.action_item_id = $1
+    ORDER BY co.company_name
+  `, [actionItemId]);
+}
+
+// ============================================================
 // FORMULA COLUMNS
 // ============================================================
 export async function getFormulaColumns(tableName) {
@@ -731,9 +885,9 @@ export async function batchGetContactDeals(contactIds) {
 export async function batchGetContactCampaigns(contactIds) {
   if (!contactIds.length) return {};
   const r = await query(`
-    SELECT ca.campaign_id, ca.campaign_name, cc.contact_id
+    SELECT ca.campaign_id, ca.name AS campaign_name, cc.contact_id
     FROM campaigns ca JOIN campaign_contacts cc ON ca.campaign_id = cc.campaign_id
-    WHERE cc.contact_id = ANY($1) ORDER BY ca.campaign_name
+    WHERE cc.contact_id = ANY($1) ORDER BY ca.name
   `, [contactIds]);
   return groupBy(r.rows, 'contact_id');
 }
@@ -803,10 +957,10 @@ export async function batchGetDealCompanies(dealIds) {
 // ============================================================
 // TABLE COUNTS
 // ============================================================
-const ALLOWED_COUNT_TABLES = new Set(['properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns']);
+const ALLOWED_COUNT_TABLES = new Set(['properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns', 'action_items']);
 
 export async function getTableCounts() {
-  const tables = ['properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns'];
+  const tables = ['properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns', 'action_items'];
   const results = {};
   for (const t of tables) {
     if (!ALLOWED_COUNT_TABLES.has(t)) throw new Error(`Disallowed table: ${t}`);

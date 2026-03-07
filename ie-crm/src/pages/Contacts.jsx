@@ -56,6 +56,28 @@ const ALL_COLUMNS = [
   { key: 'work_state', label: 'Work State', defaultWidth: 80, defaultVisible: false },
   { key: 'work_zip', label: 'Work ZIP', defaultWidth: 70, defaultVisible: false },
   { key: 'data_source', label: 'Source', defaultWidth: 100, defaultVisible: false },
+  { key: 'email_3', label: 'Email 3', defaultWidth: 180, format: 'email', defaultVisible: false },
+  { key: 'phone_3', label: 'Phone 3', defaultWidth: 120, format: 'phone', defaultVisible: false },
+  { key: 'email_kickback', label: 'Email Kickback', defaultWidth: 100, format: 'bool', defaultVisible: false },
+  { key: 'born', label: 'Birthday', defaultWidth: 90, format: 'date', defaultVisible: false },
+  { key: 'age', label: 'Age', defaultWidth: 50, format: 'number', defaultVisible: false },
+  // Research links
+  { key: 'white_pages_url', label: 'White Pages', defaultWidth: 80, defaultVisible: false },
+  { key: 'been_verified_url', label: 'Been Verified', defaultWidth: 80, defaultVisible: false },
+  { key: 'zoom_info_url', label: 'ZoomInfo', defaultWidth: 80, defaultVisible: false },
+  // Tenant intel
+  { key: 'property_type_interest', label: 'Property Interest', defaultWidth: 120, defaultVisible: false },
+  { key: 'lease_months_left', label: 'Lease Mo Left', defaultWidth: 100, format: 'number', defaultVisible: false },
+  { key: 'tenant_space_fit', label: 'Space Fit', defaultWidth: 100, defaultVisible: false },
+  { key: 'tenant_ownership_intent', label: 'Own/Lease', defaultWidth: 90, defaultVisible: false },
+  { key: 'business_trajectory', label: 'Trajectory', defaultWidth: 90, defaultVisible: false },
+  // Outreach intel
+  { key: 'last_call_outcome', label: 'Last Call', defaultWidth: 100, defaultVisible: false },
+  { key: 'follow_up_behavior', label: 'Follow-Up', defaultWidth: 100, defaultVisible: false },
+  { key: 'decision_authority', label: 'Authority', defaultWidth: 100, defaultVisible: false },
+  { key: 'price_cost_awareness', label: 'Price Aware', defaultWidth: 100, defaultVisible: false },
+  { key: 'frustration_signals', label: 'Frustrations', defaultWidth: 100, defaultVisible: false },
+  { key: 'exit_trigger_events', label: 'Exit Triggers', defaultWidth: 100, defaultVisible: false },
   // Linked record columns
   { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false,
     renderCell: (val) => <LinkedChips items={val} type="property" labelKey="property_address" /> },
