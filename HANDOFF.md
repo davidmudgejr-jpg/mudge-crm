@@ -469,10 +469,10 @@ WHERE p.property_type = 'Industrial'
 
 ---
 
-### Transaction Probability Engine (TPE) — COMPLETE MODEL (from Score Weights tab)
+### Transaction Probability Engine (TPE) — COMPLETE MODEL (from actual Excel formulas)
 
 **Source:** TPE Excel file (`docs/TPE_Master_List_v2_20_11.xlsx`) — 9 sheets, 3,700 properties scored.
-**Reference:** The Excel is in `docs/` for reference. This section IS the implementation spec — every formula, tier, and weight from the Score Weights tab is documented here.
+**Reference:** The Excel is in `docs/` for reference. This section IS the implementation spec. **Values match the actual Excel formulas (row 4+), NOT the Score Weights documentation tab** — the two diverge in several places. Where they differ, formulas win because they're what actually scored 3,700 properties. Differences are noted inline so you can adjust via `tpe_config` later.
 **Decision:** DISCARD the Airtable lead scoring fields. Use the TPE Excel model instead — it's far more sophisticated.
 
 **Architecture:** TPE scores are **not stored** — they're a **SQL VIEW** on top of `properties`, joining against supporting data tables. All scoring weights live in a `tpe_config` table so they're adjustable without changing SQL. Scores recompute live on every query (3,700 rows = milliseconds). No stale data.
@@ -489,26 +489,32 @@ Source: `lease_comps.expiration_date` → nearest expiration per property
 | Expiring ≤ 12 months | 30 | Hard deadline — highest urgency |
 | Expiring 12–18 months | 22 | Inside decision window |
 | Expiring 18–24 months | 15 | Approaching window |
-| No expiration data or > 24 months | 0 | |
+| Expiring 24–36 months | 8 | Long-range signal |
+| No expiration data or > 36 months | 0 | |
+
+*Note: Score Weights tab only lists 3 tiers. The actual formula includes a 4th tier (≤36mo = 8).*
 
 Data path: `properties` → `lease_comps` (via property_id) → `expiration_date`. Also check `companies.lease_exp` (via lease_comps.company_id) as fallback.
 
-##### Category 2: OWNERSHIP PROFILE (25 pts max)
-Source: `properties` (owner entity type, hold duration, location)
+##### Category 2: OWNERSHIP PROFILE (25 pts max — capped)
+Source: `properties` (owner entity type, hold duration, owner-user status)
 
-Three factors that **stack** (all can apply to same property):
+Three factors that **stack** (all can apply to same property), capped at 25:
 
 | Factor | Signal | Points | Logic |
 |---|---|---|---|
-| Entity type | Individual / Family LLC | 10 | Non-institutional = higher sell probability |
-| Hold duration | 20+ years | 10 | Maximum equity, maximum motivation |
-| Hold duration | 15–20 years | 7 | Strong equity position |
-| Hold duration | 10–15 years | 4 | Building equity |
-| Location | Out-of-area owner | 5 | Absentee = lower emotional attachment |
+| Entity type | Individual / Private / Partnership | 8 | Non-institutional = higher sell probability |
+| Entity type | Trust | 10 | Estate/succession planning likely |
+| Hold duration | ≥ 15 years | 10 | Strong equity position, maximum motivation |
+| Hold duration | ≥ 10 years | 7 | Building equity |
+| Hold duration | ≥ 7 years | 4 | Some equity |
+| Owner-User bonus | Owner-User (occupant, not investor) | 7 | Owner-occupants have different exit triggers than investors |
 
-Max 25 = entity (10) + hold 20yr (10) + out-of-area (5).
+Max 25 = entity Trust (10) + hold 15yr (10) + owner-user (7) = 27 → capped at 25.
 
-Hold duration computed from: `EXTRACT(YEAR FROM AGE(NOW(), properties.last_sale_date))`. Requires `last_sale_date` on properties.
+Hold duration computed from: `EXTRACT(YEAR FROM AGE(NOW(), properties.last_sale_date))` or imported directly as `hold_duration_years`.
+
+*Note: Score Weights tab says "Individual/Family LLC = 10, Out-of-area = 5." The actual formula uses Individual/Private/Partnership = 8, Trust = 10, Owner-User = 7 instead of out-of-area. The `out_of_area` column exists in the data but is NOT used in the scoring formula. Both values are in `tpe_config` — you can switch to the Score Weights version later if preferred.*
 
 ##### Category 3: OWNER AGE (20 pts max)
 Source: `properties.owner_age_est` (estimated owner age)
@@ -536,16 +542,30 @@ Source: `tenant_growth.growth_rate` (via lease_comps → companies → tenant_gr
 Data path: `properties` → `lease_comps` (property_id) → `companies` (company_id) → `tenant_growth` (company_id).
 
 ##### Category 5: DEBT / STRESS (10 pts max — capped)
-Source: `loan_maturities` (balloon data) + `property_distress` (liens/delinquency)
+Source: `debt_stress.balloon_confidence` + `property_distress` (liens/delinquency)
 
-| Signal | Points | Logic |
+Two factors that stack, capped at 10:
+
+**Balloon Confidence** (from Debt & Stress tab — estimated balloon scenarios):
+
+| Balloon Confidence | Points | Logic |
 |---|---|---|
-| SBA/estimated balloon ≤ 24 months | 7 | Financing forcing function |
-| Mechanic's/tax lien | 5 | Financial stress indicator |
-| Property tax delinquent | 5 | Direct stress signal |
-| **Cap at 10 combined** | | Multiple signals don't exceed 10 |
+| 🔴 HIGH | 10 | Strong evidence of near-term balloon |
+| 🟠 MEDIUM | 7 | Moderate balloon likelihood |
+| 🟡 LOW | 4 | Some balloon risk |
+| No data | 0 | |
 
-Balloon confidence levels from Debt & Stress data: HIGH (🔴), MEDIUM (🟠), LOW (🟡). Three balloon scenarios: 5yr, 7yr, 10yr — use the one matching the confidence level.
+The confidence level is determined from three balloon scenarios (5yr, 7yr, 10yr) in the `debt_stress` table. HIGH = shortest scenario is near-term, MEDIUM = mid scenario, LOW = only long scenario applies.
+
+**Lien/Delinquency** (currently 0 records, column exists for future data):
+
+| Signal | Points |
+|---|---|
+| Any lien or delinquency flag | +5 |
+
+**Cap at 10 combined.** If balloon HIGH (10) + lien (5) = 15 → capped to 10.
+
+*Note: Score Weights tab describes this as "SBA balloon ≤24 months = 7." The actual formula uses Balloon Confidence categories (HIGH/MEDIUM/LOW), not time-to-balloon directly. The Lien/Delinquency column is currently 100% empty — no properties have lien data yet.*
 
 **TOTAL SCORE = Lease + Ownership + Owner Age + Growth + Stress (max 100)**
 
@@ -577,28 +597,35 @@ Balloon confidence levels from Debt & Stress data: HIGH (🔴), MEDIUM (🟠), L
 
 ##### Commission Calculation
 
-**Sale:** `property.rba × $250/SF × 3%` (tiered: 2% for 30-50K, 1% for 50K+)
-**Lease (new):** `property.rba × lease_rate × 60 months × 4%`
-**Lease (renewal):** `property.rba × lease_rate × 60 months × 2%`
+**Sale (tiered by value):**
+- Value ≤ $5M (≤20K SF): `value × 3%`
+- Value $5M–$10M (20-40K SF): `value × 2%`
+- Value > $10M (40K+ SF): `value × 1%`
+- Value = `SF × $250/SF`. SF uses RBA if available, else SF Leased.
 
-Commission normalized to 0-100 scale: `$250K+ = 100, linear below` (e.g. $125K commission = 50 points).
+**Lease (new):** `SF × lease_rate × 60 months × 4%`
+**Lease (renewal):** `SF × lease_rate × 60 months × 2%`
+
+Lease rate tiered: ≤30K SF → $1.15, ≤50K → $1.00, >50K → $0.90.
 
 ##### Likely Transaction Type
 
 | Condition | Type | Commission Used |
 |---|---|---|
-| Tenant-side points (Lease + Growth) > Owner-side (Ownership + Age + Stress) | LEASE | Lease commission |
-| Owner-side > Tenant-side | SALE | Sale commission |
-| Roughly equal | BLENDED | 40% sale + 60% lease commission |
+| Owner-side (Ownership + Age + Stress) > Tenant-side (Lease + Growth) by > 5 points | SALE | Sale commission |
+| Tenant-side > Owner-side by > 5 points | LEASE | Lease commission |
+| Difference ≤ 5 points | BLENDED | 40% sale + 60% lease commission |
 
-##### Time Multiplier
+*The 5-point threshold prevents small differences from swinging the transaction type.*
+
+##### Time Multiplier (used in ECV w/ Maturity Boost only, NOT in Blended Priority)
 
 | Condition | Multiplier | Logic |
 |---|---|---|
 | Lease expiring ≤ 6 months | 1.2x | Maximum urgency premium |
 | Lease expiring 6–12 months | 1.1x | High urgency |
 | Lease expiring 12–24 months | 1.0x | Standard |
-| Sale opportunity (no hard deadline) | 0.85x | No forcing function discount |
+| Sale opportunity or no lease data | 0.85x | No forcing function discount |
 
 ##### Conversion Rate Assumptions (for reference, not used in scoring)
 
@@ -612,11 +639,18 @@ Commission normalized to 0-100 scale: `$250K+ = 100, linear below` (e.g. $125K c
 
 #### MODEL 3: Blended Priority (the final ranking)
 
-**Formula: `Blended Priority = 0.70 × Total Score + 0.30 × Commission Potential`**
+**Formula: `Blended Priority = 0.70 × MIN(Total Score + Confirmed Maturity Score, 100) + 0.30 × MIN(100, Sale Commission / $2,500)`**
 
 Where:
 - Total Score = the 100-point TPE score from Model 1
-- Commission Potential = normalized 0-100 from Model 2
+- Confirmed Maturity Score = from Model 4 (added directly, capped at 100 combined)
+- Sale Commission = **always uses sale commission** for normalization, regardless of likely transaction type
+- Commission normalization: divide by $2,500 to get 0-100 scale ($250K commission = 100 points)
+
+**Key implementation details from the actual formula:**
+1. Confirmed Maturity Score is **added to Total Score** before the 70% weight, not applied separately
+2. Commission potential **always uses sale commission** (tiered: 3%/2%/1%), even for LEASE-likely properties
+3. The Time Multiplier is **calculated but NOT used** in Blended Priority — it's only used in ECV w/ Maturity Boost (Model 4)
 
 **Why 70/30:** Previous ECV-only model overweighted big buildings. A 90K SF building with no signals ranked above a 20K SF building with 5 converging signals. 70/30 ensures properties with multiple signals rank above properties with just a big footprint. Strategic rationale: deal volume builds reputation and network faster than deal size. Target: 20 deals × $75K avg = $1.5M gross.
 
@@ -737,11 +771,14 @@ All point values, thresholds, multipliers, and market assumptions are stored in 
 | lease | lease_12mo_points | 30 | Score when lease expires ≤12 months |
 | lease | lease_18mo_points | 22 | Score when lease expires 12-18 months |
 | lease | lease_24mo_points | 15 | Score when lease expires 18-24 months |
-| ownership | entity_individual_points | 10 | Individual/Family LLC entity type |
-| ownership | hold_20yr_points | 10 | Hold duration 20+ years |
-| ownership | hold_15yr_points | 7 | Hold duration 15-20 years |
-| ownership | hold_10yr_points | 4 | Hold duration 10-15 years |
-| ownership | out_of_area_points | 5 | Out-of-area owner bonus |
+| lease | lease_36mo_points | 8 | Score when lease expires 24-36 months |
+| ownership | entity_individual_points | 8 | Individual/Private/Partnership entity type |
+| ownership | entity_trust_points | 10 | Trust entity type |
+| ownership | hold_15yr_points | 10 | Hold duration ≥15 years |
+| ownership | hold_10yr_points | 7 | Hold duration ≥10 years |
+| ownership | hold_7yr_points | 4 | Hold duration ≥7 years |
+| ownership | owner_user_bonus | 7 | Owner-User (occupant) bonus |
+| ownership | ownership_cap | 25 | Maximum combined ownership score |
 | owner_age | age_70_points | 20 | Owner age 70+ |
 | owner_age | age_65_points | 15 | Owner age 65-70 |
 | owner_age | age_60_points | 10 | Owner age 60-65 |
@@ -749,19 +786,22 @@ All point values, thresholds, multipliers, and market assumptions are stored in 
 | growth | growth_30pct_points | 15 | Headcount growth ≥30% |
 | growth | growth_20pct_points | 10 | Headcount growth 20-30% |
 | growth | growth_10pct_points | 5 | Headcount growth 10-20% |
-| stress | balloon_24mo_points | 7 | Estimated balloon ≤24 months |
-| stress | lien_points | 5 | Mechanic's/tax lien |
-| stress | delinquent_points | 5 | Property tax delinquent |
+| stress | balloon_high_points | 10 | Balloon Confidence HIGH |
+| stress | balloon_medium_points | 7 | Balloon Confidence MEDIUM |
+| stress | balloon_low_points | 4 | Balloon Confidence LOW |
+| stress | lien_points | 5 | Lien/delinquency flag (currently no data) |
 | stress | stress_cap | 10 | Maximum combined stress score |
 | ecv | sale_price_psf | 250 | Sale price per SF assumption |
 | ecv | lease_rate_small | 1.15 | Lease rate 10-30K SF |
 | ecv | lease_rate_mid | 1.00 | Lease rate 30-50K SF |
 | ecv | lease_rate_large | 0.90 | Lease rate 50K+ SF |
 | ecv | lease_term_months | 60 | Average lease term |
-| ecv | sale_commission_rate | 0.03 | Sale commission rate |
+| ecv | sale_commission_5m | 0.03 | Sale commission rate (value ≤$5M) |
+| ecv | sale_commission_10m | 0.02 | Sale commission rate (value $5M-$10M) |
+| ecv | sale_commission_over10m | 0.01 | Sale commission rate (value >$10M) |
 | ecv | lease_new_commission_rate | 0.04 | New lease commission rate |
 | ecv | lease_renewal_commission_rate | 0.02 | Renewal commission rate |
-| ecv | commission_cap | 250000 | Commission at which normalized = 100 |
+| ecv | commission_divisor | 2500 | Divide commission by this for 0-100 scale ($250K=100) |
 | time | time_mult_6mo | 1.20 | Time multiplier ≤6 months |
 | time | time_mult_12mo | 1.10 | Time multiplier 6-12 months |
 | time | time_mult_24mo | 1.00 | Time multiplier 12-24 months |
@@ -789,6 +829,13 @@ All point values, thresholds, multipliers, and market assumptions are stored in 
 | distress | mature_12mo_points | 10 | Maturing 9-12 months |
 
 **TPE Settings page** in the CRM (under Settings) shows this table in an editable UI. User sees all weights grouped by category, can adjust values, and scores recalculate on next query. Ships with the initial TPE build.
+
+**Score Weights tab aspirational values (not currently used, but available to switch to via config):**
+- `entity_individual_points`: Score Weights says 10, formula uses 8
+- `hold_15yr_points`: Score Weights says "20+ years = 10", formula uses "≥15 years = 10"
+- Ownership third factor: Score Weights says "out-of-area = 5", formula uses "owner-user = 7"
+- Stress: Score Weights says "balloon ≤24mo = 7", formula uses confidence categories (HIGH=10, MEDIUM=7, LOW=4)
+- These are all adjustable via `tpe_config` — change the values to switch scoring approaches
 
 ---
 
@@ -878,8 +925,10 @@ Separate from `loan_maturities` (confirmed). This stores estimated balloon scena
 
 | Column | Schema Name | Type | Notes |
 |---|---|---|---|
-| Owner-User/Investor | `owner_user_or_investor` | TEXT | "Owner-User", "Investor" — affects entity type scoring |
-| Out of Area Owner | `out_of_area_owner` | BOOLEAN | Owner not local — +5 ownership score |
+| Owner-User/Investor | `owner_user_or_investor` | TEXT | "Owner-User", "Investor", "Large Investor", "Large Company", "Developer" — Owner-User gets +7 ownership bonus |
+| Out of Area Owner | `out_of_area_owner` | BOOLEAN | Owner not local — NOT used in current formula but column exists for future use |
+| Owner Status | `owner_call_status` | TEXT | Manual call tracking — mark after calling owner (empty by default) |
+| Tenant Status | `tenant_call_status` | TEXT | Manual call tracking — mark after calling tenant (empty by default) |
 | Owner Age (Est.) | `owner_age_est` | INT | Estimated owner age — drives Owner Age score |
 | Hold Duration | `hold_duration_years` | NUMERIC | Computed from last_sale_date or imported directly |
 | Owner Entity Type | `owner_entity_type` | TEXT | Individual, Family LLC, Large Investor, etc. |
