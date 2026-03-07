@@ -1,0 +1,638 @@
+# IE CRM — Full System Test & Fix Prompt
+
+> **Purpose:** Give this file to a new Claude Code session. It will systematically test every feature, create test data, verify all relationships, fix anything broken, and confirm the app is fully working before TPE development begins.
+>
+> **How to use:** Start a new Claude Code chat and say:
+> `Read TESTING-PROMPT.md and execute the full testing protocol.`
+
+---
+
+## Your Mission
+
+You are testing the IE CRM application — a custom commercial real estate CRM built with React (Vite) + Express + PostgreSQL (Neon). Your job is to:
+
+1. **Start the dev server** and verify the app loads
+2. **Check the database schema** — confirm all expected tables and columns exist
+3. **Create test records** in every tab so there's data to work with
+4. **Test every feature** — CRUD operations, detail panels, linked records, search, column visibility
+5. **Fix anything broken** — if something fails, diagnose the root cause, fix the code, and re-test
+6. **Repeat until everything works perfectly**
+7. **Clean up** — delete test records after all tests pass (optional, ask user)
+
+**Important:** Do NOT just report problems — FIX them. Test again after fixing. Continue this loop until every test passes.
+
+---
+
+## Key Files & Architecture
+
+| File | Purpose |
+|---|---|
+| `ie-crm/server/index.js` | Express API server — all backend routes |
+| `ie-crm/src/api/database.js` | Frontend database functions — CRUD, search, linking, batch queries |
+| `ie-crm/src/api/bridge.js` | API bridge — routes calls to Express server |
+| `ie-crm/src/pages/*.jsx` | Page components — one per tab |
+| `ie-crm/src/components/shared/CrmTable.jsx` | Shared table component used by all tabs |
+| `ie-crm/src/components/shared/SlideOver.jsx` | Detail panel (slide-out) component |
+| `ie-crm/src/hooks/*.js` | Custom hooks — column visibility, custom fields, auto-save, linked records |
+| `HANDOFF.md` | Full schema blueprint — every column mapping and table spec |
+| `ROADMAP.md` | Build phases and feature status |
+| `ARCHITECTURE.md` | Tech stack, schema structure, key decisions |
+
+**Stack:** React + Vite (frontend on Vercel) → Express (backend on Railway) → PostgreSQL 17 (Neon)
+
+**API pattern:** Frontend calls `database.js` functions → `bridge.js` routes to `POST /api/db/query` → Express runs SQL via `pg` Pool → Neon PostgreSQL
+
+**Dev server:** Run `npm run dev:web` from `ie-crm/` directory (starts both Vite dev server and Express backend)
+
+---
+
+## Phase 0: Environment & Server Check
+
+### 0.1 Start the dev server
+```bash
+cd ie-crm && npm run dev:web
+```
+Wait for both Vite and Express to report ready. If `dev:web` script doesn't exist, check `package.json` for the correct script name (might be `dev` or need two terminals).
+
+### 0.2 Verify the app loads
+- Navigate to the local URL (likely `http://localhost:5173`)
+- Confirm the sidebar renders with all nav items
+- Take a screenshot to confirm
+
+### 0.3 Check database connection
+- Navigate to Settings tab
+- Confirm "Database: Connected" shows green
+- Note the record counts for each table
+
+### 0.4 Query the live schema
+Run this SQL to get the actual database schema:
+```sql
+SELECT table_name, column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public'
+ORDER BY table_name, ordinal_position
+```
+Save the output — you'll cross-reference this against expected columns throughout testing.
+
+---
+
+## Phase 1: Schema Verification
+
+Check that all expected tables exist in the database. For each table, verify the key columns are present.
+
+### 1.1 Core Tables (must exist)
+
+| Table | Primary Key | Key Columns to Verify |
+|---|---|---|
+| `properties` | `property_id` | property_address, city, zip, rba, owner_name, property_type, last_sale_date, last_sale_price, contacted, notes, created_at |
+| `contacts` | `contact_id` | full_name, first_name, email, phone_1, type, title, notes, created_at |
+| `companies` | `company_id` | company_name, company_type, industry_type, city, lease_exp, employees, notes, created_at |
+| `deals` | `deal_id` | deal_name, deal_type, status, sf, rate, commission_rate, close_date, notes, priority_deal, created_at |
+| `interactions` | `interaction_id` | type, subject, date, notes, team_member, created_at |
+| `campaigns` | `campaign_id` | name, type, status, sent_date, notes, created_at |
+| `action_items` | `action_item_id` | name, status, due_date, responsibility, high_priority, source, notes, created_at |
+| `lease_comps` | `id` | property_id, company_id, tenant_name, sf, rate, expiration_date, term_months, source, created_at |
+| `sale_comps` | `id` | property_id, sale_date, sale_price, sf, buyer_name, seller_name, source, created_at |
+
+### 1.2 Junction Tables (must exist — these power linked records)
+
+| Junction Table | Column 1 | Column 2 | Extra Columns |
+|---|---|---|---|
+| `property_contacts` | property_id | contact_id | role |
+| `property_companies` | property_id | company_id | role |
+| `contact_companies` | contact_id | company_id | — |
+| `deal_properties` | deal_id | property_id | — |
+| `deal_contacts` | deal_id | contact_id | — |
+| `deal_companies` | deal_id | company_id | — |
+| `interaction_contacts` | interaction_id | contact_id | — |
+| `interaction_properties` | interaction_id | property_id | — |
+| `interaction_deals` | interaction_id | deal_id | — |
+| `interaction_companies` | interaction_id | company_id | — |
+| `campaign_contacts` | campaign_id | contact_id | — |
+| `action_item_contacts` | action_item_id | contact_id | — |
+| `action_item_properties` | action_item_id | property_id | — |
+| `action_item_deals` | action_item_id | deal_id | — |
+| `action_item_companies` | action_item_id | company_id | — |
+
+### 1.3 Supporting Tables (check if exist)
+
+| Table | Purpose | Status |
+|---|---|---|
+| `formula_columns` | Custom formula column definitions | Should exist |
+| `undo_log` | Action undo tracking | Should exist |
+| `custom_fields` | Ad-hoc custom field definitions | Should exist |
+
+### 1.4 TPE Tables (NOT expected to exist yet — just confirm)
+
+These tables are planned for Step 16 but should NOT exist yet:
+- `loan_maturities`
+- `debt_stress`
+- `tenant_growth`
+- `property_distress`
+- `tpe_config`
+
+If any exist already, note it but don't worry about testing them.
+
+### 1.5 Missing Columns Check (TPE prerequisites on `properties`)
+
+These columns are needed for TPE and may or may not exist yet. Check and report:
+- `owner_entity_type` (TEXT)
+- `owner_user_or_investor` (TEXT) — might already exist
+- `owner_age_est` (INT)
+- `hold_duration_years` (NUMERIC)
+- `has_lien_or_delinquency` (BOOLEAN)
+- `out_of_area_owner` (BOOLEAN) — might already exist
+- `owner_call_status` (TEXT)
+- `tenant_call_status` (TEXT)
+
+**Action:** Report which exist and which are missing. Do NOT add them yet — just document.
+
+---
+
+## Phase 2: Create Test Data
+
+Create test records in a specific order so linked records can reference each other. Use realistic commercial real estate data for the Inland Empire (Riverside/Ontario/Corona area).
+
+**IMPORTANT:** Prefix all test record names with `[TEST]` so they're easy to find and delete later.
+
+### 2.1 Create Test Companies (2 records)
+
+```
+Company 1:
+  company_name: "[TEST] Pacific Industrial LLC"
+  company_type: "Owner"
+  industry_type: "Real Estate"
+  city: "Ontario"
+  employees: 15
+  website: "https://pacificindustrial.test"
+
+Company 2:
+  company_name: "[TEST] SoCal Distribution Inc"
+  company_type: "Tenant"
+  industry_type: "Logistics"
+  city: "Riverside"
+  sf: 25000
+  lease_exp: "2027-06-30"
+  employees: 85
+```
+
+### 2.2 Create Test Contacts (2 records)
+
+```
+Contact 1:
+  full_name: "[TEST] Mike Thompson"
+  first_name: "Mike"
+  type: "Owner"
+  title: "Managing Partner"
+  email: "mthompson@test.com"
+  phone_1: "(951) 555-0101"
+  work_city: "Ontario"
+
+Contact 2:
+  full_name: "[TEST] Sarah Chen"
+  first_name: "Sarah"
+  type: "Tenant"
+  title: "VP Operations"
+  email: "schen@test.com"
+  phone_1: "(951) 555-0202"
+  work_city: "Riverside"
+```
+
+### 2.3 Create Test Properties (2 records)
+
+```
+Property 1:
+  property_address: "[TEST] 1234 Commerce Center Dr"
+  city: "Ontario"
+  state: "CA"
+  zip: "91761"
+  property_type: "Industrial"
+  rba: 45000
+  land_sf: 90000
+  year_built: 1998
+  owner_name: "Pacific Industrial LLC"
+  last_sale_date: "2010-03-15"
+  last_sale_price: 8500000
+
+Property 2:
+  property_address: "[TEST] 5678 Logistics Pkwy"
+  city: "Riverside"
+  state: "CA"
+  zip: "92507"
+  property_type: "Industrial"
+  rba: 25000
+  land_sf: 55000
+  year_built: 2005
+  owner_name: "Thompson Family Trust"
+  last_sale_date: "2015-08-20"
+  last_sale_price: 5200000
+```
+
+### 2.4 Create Test Deals (2 records)
+
+```
+Deal 1:
+  deal_name: "[TEST] Pacific Industrial - Sale"
+  deal_type: "Sale"
+  status: "Active"
+  sf: 45000
+  price: 9500000
+  commission_rate: 0.03
+  notes: "Test deal for system verification"
+
+Deal 2:
+  deal_name: "[TEST] SoCal Distribution - Lease Renewal"
+  deal_type: "Lease"
+  status: "Prospect"
+  sf: 25000
+  rate: 1.15
+  term: 60
+  commission_rate: 0.04
+  notes: "Test lease deal"
+```
+
+### 2.5 Create Test Interactions (2 records)
+
+```
+Interaction 1:
+  type: "Phone Call"
+  subject: "[TEST] Initial owner outreach"
+  date: today's date
+  notes: "Called Mike Thompson about listing 1234 Commerce Center"
+  team_member: "David Mudge Jr"
+
+Interaction 2:
+  type: "Meeting"
+  subject: "[TEST] Property tour with tenant"
+  date: today's date
+  notes: "Toured 5678 Logistics Pkwy with Sarah Chen"
+  team_member: "David Mudge Jr"
+```
+
+### 2.6 Create Test Campaign (1 record)
+
+```
+Campaign 1:
+  name: "[TEST] Spring 2026 Industrial Mailer"
+  type: "Snail Mail"
+  status: "Not sent"
+  notes: "Test campaign for system verification"
+```
+
+### 2.7 Create Test Action Items (2 records)
+
+```
+Action Item 1:
+  name: "[TEST] Follow up with Mike Thompson"
+  status: "Todo"
+  due_date: 7 days from now
+  responsibility: ["David Mudge Jr"]
+  high_priority: true
+  source: "manual"
+  notes: "Discuss listing agreement for Commerce Center"
+
+Action Item 2:
+  name: "[TEST] Send lease proposal to SoCal Distribution"
+  status: "In progress"
+  due_date: 3 days from now
+  responsibility: ["David Mudge Jr", "Missy"]
+  high_priority: false
+  source: "manual"
+```
+
+### 2.8 Create Test Comps (1 lease, 1 sale)
+
+```
+Lease Comp 1:
+  tenant_name: "[TEST] SoCal Distribution Inc"
+  property_type: "Industrial"
+  sf: 25000
+  rate: 1.05
+  rent_type: "NNN"
+  lease_type: "New"
+  term_months: 60
+  commencement_date: "2022-07-01"
+  expiration_date: "2027-06-30"
+  source: "Manual"
+  notes: "Test lease comp"
+  (Link to Property 2 via property_id if possible)
+
+Sale Comp 1:
+  sale_date: "2024-11-15"
+  sale_price: 12000000
+  sf: 50000
+  price_psf: 240
+  buyer_name: "[TEST] Inland Logistics Group"
+  seller_name: "[TEST] Vista Commerce Partners"
+  property_type: "Industrial"
+  source: "Manual"
+  notes: "Test sale comp"
+```
+
+---
+
+## Phase 3: Test Every Tab (CRUD + UI)
+
+For each tab, test the following operations. If any operation fails, note the error, fix it, and re-test.
+
+### Test Checklist Per Tab
+
+For **Properties, Contacts, Companies, Deals, Campaigns, Action Items**:
+
+- [ ] **LIST VIEW** — Tab loads and shows records (including test records)
+- [ ] **SEARCH** — Search bar finds test records by name/address
+- [ ] **SORT** — Click a column header to sort; verify sort order changes
+- [ ] **CREATE** — Open "New Record" modal, fill fields, save. Record appears in list.
+- [ ] **DETAIL PANEL** — Click a record row → slide-out panel opens with all fields
+- [ ] **INLINE EDIT** — Edit a field in the detail panel → changes save automatically
+- [ ] **COLUMN VISIBILITY** — Open column toggle menu → hide a column → it disappears from table → show it → it reappears
+- [ ] **COLUMN MENU** — Right-click or click column header menu → Rename, Hide, Delete options appear. Delete is disabled for system columns.
+
+For **Activity (Interactions)**:
+
+- [ ] **LIST VIEW** — Shows interactions sorted by date
+- [ ] **SEARCH** — Can search by notes or subject
+- [ ] **DETAIL PANEL** — Click to open detail view
+- [ ] **QUICK NOTE** — Quick Note feature works from detail panels on other tabs (creates interaction + links it)
+
+For **Comps** (Lease | Sale toggle):
+
+- [ ] **TOGGLE** — Lease / Sale toggle switches between tables
+- [ ] **LIST VIEW** — Both lease comps and sale comps display
+- [ ] **CREATE** — Can create new lease comp and sale comp via modal
+- [ ] **DETAIL PANEL** — Click comp row to open detail
+- [ ] **PROPERTY LINK** — If property_id was set, comp shows linked property
+
+For **Action Items**:
+
+- [ ] **LIST VIEW** — Shows action items with status colors
+- [ ] **STATUS FILTER** — Filter by status works (Todo, In progress, Done, etc.)
+- [ ] **PRIORITY FLAG** — High priority items display visually differently
+- [ ] **RESPONSIBILITY** — Multi-select responsibility field shows correctly
+- [ ] **DUE DATE** — Due dates display and sort works
+
+For **Settings**:
+
+- [ ] **DATABASE STATUS** — Shows "Connected" with green indicator
+- [ ] **RECORD COUNTS** — Table counts display for all tables
+- [ ] **ENVIRONMENT** — Shows which env vars are configured (without revealing values)
+
+For **Import** (if it exists as a tab):
+
+- [ ] **PAGE LOADS** — Import tab renders without errors
+- [ ] **FILE UPLOAD** — Can select a CSV file (don't need to complete import, just verify UI)
+
+---
+
+## Phase 4: Test Linked Records (Junction Tables)
+
+This is the most critical section — linked records power the cross-referencing that makes the CRM useful.
+
+### 4.1 Link Records Together
+
+Using the test data created in Phase 2, create these links:
+
+| Link | Junction Table | How to Test |
+|---|---|---|
+| Contact 1 → Company 1 | `contact_companies` | Open Contact 1 detail → link to Pacific Industrial LLC |
+| Contact 2 → Company 2 | `contact_companies` | Open Contact 2 detail → link to SoCal Distribution |
+| Contact 1 → Property 1 | `property_contacts` | Open Property 1 detail → link Contact 1 (role: owner) |
+| Contact 2 → Property 2 | `property_contacts` | Open Property 2 detail → link Contact 2 |
+| Company 1 → Property 1 | `property_companies` | Open Property 1 detail → link Company 1 (role: owner) |
+| Company 2 → Property 2 | `property_companies` | Open Property 2 detail → link Company 2 (role: tenant) |
+| Deal 1 → Property 1 | `deal_properties` | Open Deal 1 detail → link Property 1 |
+| Deal 1 → Contact 1 | `deal_contacts` | Open Deal 1 detail → link Contact 1 |
+| Deal 1 → Company 1 | `deal_companies` | Open Deal 1 detail → link Company 1 |
+| Deal 2 → Property 2 | `deal_properties` | Open Deal 2 detail → link Property 2 |
+| Deal 2 → Contact 2 | `deal_contacts` | Open Deal 2 detail → link Contact 2 |
+| Deal 2 → Company 2 | `deal_companies` | Open Deal 2 detail → link Company 2 |
+| Interaction 1 → Contact 1 | `interaction_contacts` | Open Interaction 1 detail → link Contact 1 |
+| Interaction 1 → Property 1 | `interaction_properties` | Open Interaction 1 detail → link Property 1 |
+| Interaction 2 → Contact 2 | `interaction_contacts` | Open Interaction 2 detail → link Contact 2 |
+| Interaction 2 → Property 2 | `interaction_properties` | Open Interaction 2 detail → link Property 2 |
+| Campaign 1 → Contact 1 | `campaign_contacts` | Open Campaign 1 detail → link Contact 1 |
+| Campaign 1 → Contact 2 | `campaign_contacts` | Open Campaign 1 detail → link Contact 2 |
+| Action Item 1 → Contact 1 | `action_item_contacts` | Open Action Item 1 → link Contact 1 |
+| Action Item 1 → Property 1 | `action_item_properties` | Open Action Item 1 → link Property 1 |
+| Action Item 2 → Company 2 | `action_item_companies` | Open Action Item 2 → link Company 2 |
+| Action Item 2 → Deal 2 | `action_item_deals` | Open Action Item 2 → link Deal 2 |
+
+### 4.2 Verify Links Show Bidirectionally
+
+After creating links, verify they appear from BOTH directions:
+
+- Open **Property 1** detail → should show Contact 1 in Contacts section, Company 1 in Companies section, Deal 1 in Deals section
+- Open **Contact 1** detail → should show Property 1 in Properties section, Company 1 in Companies section, Deal 1 in Deals section
+- Open **Deal 1** detail → should show Property 1, Contact 1, Company 1
+- Open **Interaction 1** detail → should show Contact 1, Property 1
+- Open **Company 1** detail → should show Contact 1, Property 1, Deal 1
+- Open **Campaign 1** detail → should show Contact 1 and Contact 2
+- Open **Action Item 1** detail → should show Contact 1, Property 1
+
+### 4.3 Test Link Picker
+
+The Link Picker Modal is the UI for searching and linking records:
+- Open any detail panel → click the "+" button on a linked record section
+- Search for a test record by name
+- Select it and confirm the link appears
+- Verify the typeahead/search results are accurate
+
+### 4.4 Test Unlinking
+
+- Open a detail panel with linked records
+- Remove a link (click the X or unlink button)
+- Verify the link disappears from both sides
+- Re-link it to restore test state
+
+---
+
+## Phase 5: Test Quick Note (Interaction Creation)
+
+Quick Note is a feature on every detail panel that creates a new interaction and auto-links it.
+
+### 5.1 Test from Property Detail
+- Open Property 1 detail
+- Find the Quick Note / Notes section
+- Add a note: "[TEST] Quick note from property detail"
+- Verify:
+  - New interaction appears in Activity tab
+  - Interaction is linked to Property 1
+  - Note text is correct
+
+### 5.2 Test from Contact Detail
+- Open Contact 1 detail
+- Add a note: "[TEST] Quick note from contact detail"
+- Verify same as above (linked to Contact 1)
+
+### 5.3 Test from Deal Detail
+- Open Deal 1 detail
+- Add a note: "[TEST] Quick note from deal detail"
+- Verify same (linked to Deal 1)
+
+### 5.4 Test from Company Detail
+- Open Company 1 detail
+- Add a note: "[TEST] Quick note from company detail"
+- Verify same (linked to Company 1)
+
+---
+
+## Phase 6: Test New Interaction Modal
+
+The New Interaction Modal creates interactions with manual linking to multiple record types.
+
+- Open the New Interaction Modal (from Activity tab or "+" button)
+- Fill in:
+  - Type: "Cold Call"
+  - Subject: "[TEST] New interaction modal test"
+  - Date: today
+  - Notes: "Testing modal interaction creation"
+  - Link to: Contact 1, Property 1 (via the link picker within the modal)
+- Save and verify:
+  - Interaction appears in Activity tab
+  - Links to Contact 1 and Property 1 are correct
+  - Opening Contact 1 detail shows this interaction
+
+---
+
+## Phase 7: Test Column Features
+
+### 7.1 Column Visibility Toggle
+On any tab (e.g., Properties):
+- Open the column toggle menu (gear icon or column selector)
+- Uncheck a column → verify it hides from the table
+- Check it again → verify it reappears
+- Verify the toggle persists after navigating away and back
+
+### 7.2 Column Sorting
+- Click a column header to sort ascending
+- Click again to sort descending
+- Verify data order changes correctly
+
+### 7.3 Custom Fields (if applicable)
+- Try adding a custom field via the Add Field panel
+- Verify it appears as a column
+- Try editing a value in the custom field
+- Try hiding/showing the custom field
+
+---
+
+## Phase 8: Browser Console Error Check
+
+After all tests, check the browser console for errors:
+- Open browser dev tools → Console tab
+- Look for any red errors (JavaScript errors, failed API calls, 404s)
+- Document each error with its source
+- Fix any errors that indicate broken functionality
+
+Also check the Express server terminal output for any backend errors.
+
+---
+
+## Phase 9: TPE Readiness Check
+
+This is the final verification before TPE development can begin.
+
+### 9.1 Properties table has all base columns TPE needs:
+- [ ] `rba` — building square footage (NUMERIC)
+- [ ] `last_sale_date` — DATE
+- [ ] `last_sale_price` — NUMERIC
+- [ ] `owner_name` — TEXT
+- [ ] `property_type` — TEXT
+- [ ] `city` — TEXT
+- [ ] `zip` — TEXT
+
+### 9.2 Lease comps relationship works:
+- [ ] `lease_comps.property_id` FK links to `properties.property_id`
+- [ ] Can create a lease comp with a property_id
+- [ ] Can query lease comps by property_id
+- [ ] `expiration_date` column exists and accepts DATE values
+
+### 9.3 Companies relationship works:
+- [ ] `lease_comps.company_id` FK links to `companies.company_id`
+- [ ] `companies.lease_exp` column exists and accepts DATE values
+
+### 9.4 Report: TPE columns missing from `properties`:
+List any of these that do NOT exist yet:
+- `owner_entity_type`
+- `owner_user_or_investor`
+- `owner_age_est`
+- `hold_duration_years`
+- `has_lien_or_delinquency`
+- `out_of_area_owner`
+- `owner_call_status`
+- `tenant_call_status`
+
+### 9.5 Report: Tables that need to be created for TPE:
+Confirm these do NOT exist and need to be created:
+- `loan_maturities`
+- `debt_stress`
+- `tenant_growth`
+- `property_distress`
+- `tpe_config`
+
+---
+
+## Phase 10: Final Report
+
+After all tests complete, produce a report in this format:
+
+```
+# IE CRM Test Report — [date]
+
+## Summary
+- Total tests: XX
+- Passed: XX
+- Fixed during testing: XX
+- Still failing: XX (with details)
+
+## Schema Status
+- Tables found: [list]
+- Tables missing: [list]
+- Columns needing migration: [list]
+
+## Tab-by-Tab Results
+
+### Properties
+- List view: PASS/FAIL
+- Create: PASS/FAIL
+- Detail panel: PASS/FAIL
+- Inline edit: PASS/FAIL
+- Linked records: PASS/FAIL
+- Quick note: PASS/FAIL
+[...repeat for each tab]
+
+## Linked Records
+- All 22 junction links tested: PASS/FAIL
+- Bidirectional verification: PASS/FAIL
+- Link picker search: PASS/FAIL
+- Unlinking: PASS/FAIL
+
+## Fixes Applied
+1. [file:line] — description of what was broken and how it was fixed
+2. ...
+
+## TPE Readiness
+- Base properties columns: READY / X columns missing
+- Lease comps FK working: YES/NO
+- Companies FK working: YES/NO
+- TPE-specific columns missing from properties: [list]
+- TPE tables to create: [list]
+
+## Recommendation
+[Ready to build TPE / Need to fix X before TPE]
+```
+
+---
+
+## Rules for This Testing Session
+
+1. **Fix, don't just report.** If something is broken, fix it in the code, then re-test.
+2. **Test through the UI** using the preview tools, not just via API calls. The user needs the UI to work.
+3. **Check both frontend and backend.** A 200 response means nothing if the UI doesn't render the data.
+4. **Prefix all test data with `[TEST]`** so it's identifiable.
+5. **Don't modify HANDOFF.md, ROADMAP.md, or ARCHITECTURE.md** — those are documentation, not code.
+6. **Don't add new features** — only fix existing broken functionality.
+7. **Don't change the schema** unless something is genuinely missing that prevents existing features from working (e.g., a column referenced in code that doesn't exist in the database).
+8. **Commit fixes** with descriptive messages like `fix: repair linked record display in contact detail panel`.
+9. **Be thorough but efficient** — if a pattern works on one tab, you can test it more quickly on other tabs that use the same shared components.
+10. **Use `database.js` function signatures** as the source of truth for what operations the app supports. If a function exists in `database.js` but doesn't work, that's a bug to fix.

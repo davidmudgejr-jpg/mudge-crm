@@ -4,9 +4,12 @@ export default function Section({ title, children, defaultOpen = true, badge, ac
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="border-b border-crm-border">
-      <button
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between px-5 py-3 text-xs font-semibold uppercase tracking-wider text-crm-muted hover:text-crm-text transition-colors"
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpen(!open); } }}
+        className="w-full flex items-center justify-between px-5 py-3 text-xs font-semibold uppercase tracking-wider text-crm-muted hover:text-crm-text transition-colors cursor-pointer"
       >
         <span className="flex items-center gap-2">
           {title}
@@ -31,7 +34,7 @@ export default function Section({ title, children, defaultOpen = true, badge, ac
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </span>
-      </button>
+      </div>
       {open && <div className="px-5 pb-4">{children}</div>}
     </div>
   );

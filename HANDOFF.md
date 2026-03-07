@@ -111,6 +111,9 @@ property_address, property_name, year_built, features, zoning, last_sale_date, l
 **Already in Schema (well covered):**
 Full Name, First Name, Type, Title, Email, 2nd Email, 3rd Email, Phone 1/2/3, Home Address, Work Address, Born, Age, Notes, LinkedIn, Follow up, Last contacted, Tags
 
+**Formula Column — Age:**
+`contacts.age` (INT) should be treated as a **read-only, auto-calculated display field** in the UI — not manually entered. Computed from `contacts.born DATE` using `DATE_PART('year', AGE(NOW(), born))`. Display as read-only in the Contacts tab whenever `born` is set. This is also the data source for the TPE Owner Age category — the VIEW joins `property_contacts` (role = 'owner') → `contacts.born` to compute owner age at query time.
+
 **Linked Records (junction tables already exist):**
 - Interactions → `interaction_contacts`
 - Companies → `contact_companies`
@@ -512,12 +515,13 @@ Three factors that **stack** (all can apply to same property), capped at 25:
 
 Max 25 = entity Trust (10) + hold 15yr (10) + owner-user (7) = 27 → capped at 25.
 
-Hold duration computed from: `EXTRACT(YEAR FROM AGE(NOW(), properties.last_sale_date))` or imported directly as `hold_duration_years`.
+Hold duration is **VIEW-computed** from `properties.last_sale_date`: `EXTRACT(YEAR FROM AGE(NOW(), properties.last_sale_date))`. Not a stored column — no ALTER TABLE needed. If `last_sale_date` is NULL, score is 0 (unknown).
 
 *Note: Score Weights tab says "Individual/Family LLC = 10, Out-of-area = 5." The actual formula uses Individual/Private/Partnership = 8, Trust = 10, Owner-User = 7 instead of out-of-area. The `out_of_area` column exists in the data but is NOT used in the scoring formula. Both values are in `tpe_config` — you can switch to the Score Weights version later if preferred.*
 
 ##### Category 3: OWNER AGE (20 pts max)
-Source: `properties.owner_age_est` (estimated owner age)
+Source: `contacts.born` (owner's birth date) — age computed in VIEW as `EXTRACT(YEAR FROM AGE(NOW(), c.born))`
+Data path: `properties` → `property_contacts` (role = 'owner') → `contacts.born`
 
 | Signal | Points | Logic |
 |---|---|---|
@@ -527,7 +531,7 @@ Source: `properties.owner_age_est` (estimated owner age)
 | Age 55–60 | 5 | On the horizon |
 | Under 55 or unknown | 0 | |
 
-Requires `owner_age_est` column on properties (INT, nullable).
+No new column needed on `properties`. The `contacts` table already has `born DATE`. The TPE VIEW joins via `property_contacts` (role = 'owner') → `contacts.born` to compute age. In the **Contacts UI**, `age` is a **read-only formula column** auto-calculated from `born` — never manually entered.
 
 ##### Category 4: TENANT GROWTH (15 pts max)
 Source: `tenant_growth.growth_rate` (via lease_comps → companies → tenant_growth)
@@ -929,10 +933,10 @@ Separate from `loan_maturities` (confirmed). This stores estimated balloon scena
 | Out of Area Owner | `out_of_area_owner` | BOOLEAN | Owner not local — NOT used in current formula but column exists for future use |
 | Owner Status | `owner_call_status` | TEXT | Manual call tracking — mark after calling owner (empty by default) |
 | Tenant Status | `tenant_call_status` | TEXT | Manual call tracking — mark after calling tenant (empty by default) |
-| Owner Age (Est.) | `owner_age_est` | INT | Estimated owner age — drives Owner Age score |
-| Hold Duration | `hold_duration_years` | NUMERIC | Computed from last_sale_date or imported directly |
 | Owner Entity Type | `owner_entity_type` | TEXT | Individual, Family LLC, Large Investor, etc. |
 | Lien/Delinquency | `has_lien_or_delinquency` | BOOLEAN | Tax lien or mechanic's lien flag |
+
+*Removed from this list: `owner_age_est` (formula on Contacts — see below) and `hold_duration_years` (VIEW-computed from `last_sale_date` — no stored column needed).*
 
 *Note: `office_courtesy` is NOT stored on properties — it's computed live in the VIEW from lease_comps rep data.*
 
