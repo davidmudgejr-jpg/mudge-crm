@@ -37,6 +37,13 @@ export const QUICK_ADD_FIELDS = {
     { key: 'notes', label: 'Notes', type: 'textarea', placeholder: 'Details...' },
   ],
 
+  action_item: [
+    { key: 'name', label: 'Task Name', type: 'text', required: true, placeholder: 'Follow up with owner' },
+    { key: 'due_date', label: 'Due Date', type: 'date' },
+    { key: 'status', label: 'Status', type: 'select', options: ['Todo', 'Reminders', 'In progress', 'Done', 'Dead', 'Email', 'Needs and Wants'] },
+    { key: 'high_priority', label: 'High Priority', type: 'checkbox' },
+  ],
+
   campaign: [
     { key: 'name', label: 'Campaign Name', type: 'text', required: true, placeholder: 'Q1 Outreach' },
     { key: 'type', label: 'Type', type: 'select', options: ['Email', 'Direct Mail', 'Cold Call', 'Door Knock', 'SMS', 'Social Media', 'Event'] },

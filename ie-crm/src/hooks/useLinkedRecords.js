@@ -4,6 +4,7 @@ import {
   batchGetContactProperties, batchGetContactCompanies, batchGetContactDeals, batchGetContactCampaigns,
   batchGetCompanyContacts, batchGetCompanyProperties, batchGetCompanyDeals,
   batchGetDealProperties, batchGetDealContacts, batchGetDealCompanies,
+  batchGetActionItemContacts, batchGetActionItemProperties, batchGetActionItemDeals, batchGetActionItemCompanies,
 } from '../api/database';
 
 const ENTITY_FETCHERS = {
@@ -38,6 +39,15 @@ const ENTITY_FETCHERS = {
       linked_properties: batchGetDealProperties,
       linked_contacts: batchGetDealContacts,
       linked_companies: batchGetDealCompanies,
+    },
+  },
+  action_items: {
+    idField: 'action_item_id',
+    linked: {
+      linked_contacts: batchGetActionItemContacts,
+      linked_properties: batchGetActionItemProperties,
+      linked_deals: batchGetActionItemDeals,
+      linked_companies: batchGetActionItemCompanies,
     },
   },
 };

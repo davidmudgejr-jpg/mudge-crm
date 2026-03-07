@@ -62,6 +62,16 @@ const ENTITY_TYPES = {
     chipColor: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
     route: '/campaigns',
   },
+  action_item: {
+    label: 'Action Item',
+    labelPlural: 'Action Items',
+    table: 'action_items',
+    idCol: 'action_item_id',
+    displayCol: 'name',
+    secondaryCol: 'status',
+    chipColor: 'bg-red-500/15 text-red-400 border-red-500/30',
+    route: '/action-items',
+  },
 };
 
 // Junction table definitions: maps "entityA-entityB" to junction config
@@ -77,6 +87,10 @@ export const JUNCTIONS = {
   'interaction-deal': { table: 'interaction_deals', col1: 'interaction_id', col2: 'deal_id' },
   'interaction-company': { table: 'interaction_companies', col1: 'interaction_id', col2: 'company_id' },
   'campaign-contact': { table: 'campaign_contacts', col1: 'campaign_id', col2: 'contact_id' },
+  'action_item-contact': { table: 'action_item_contacts', col1: 'action_item_id', col2: 'contact_id' },
+  'action_item-property': { table: 'action_item_properties', col1: 'action_item_id', col2: 'property_id' },
+  'action_item-deal': { table: 'action_item_deals', col1: 'action_item_id', col2: 'deal_id' },
+  'action_item-company': { table: 'action_item_companies', col1: 'action_item_id', col2: 'company_id' },
 };
 
 // Helper: get junction config for two entity types (order-independent)

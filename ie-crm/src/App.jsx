@@ -14,6 +14,7 @@ import Companies from './pages/Companies';
 import Deals from './pages/Deals';
 import Interactions from './pages/Interactions';
 import Campaigns from './pages/Campaigns';
+import ActionItems from './pages/ActionItems';
 import Settings from './pages/Settings';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
@@ -24,6 +25,7 @@ import ContactDetail from './pages/ContactDetail';
 import CompanyDetail from './pages/CompanyDetail';
 import DealDetail from './pages/DealDetail';
 import InteractionDetail from './pages/InteractionDetail';
+import ActionItemDetail from './pages/ActionItemDetail';
 
 const DETAIL_COMPONENTS = {
   property: PropertyDetail,
@@ -31,6 +33,7 @@ const DETAIL_COMPONENTS = {
   company: CompanyDetail,
   deal: DealDetail,
   interaction: InteractionDetail,
+  action_item: ActionItemDetail,
 };
 
 function SlideOverRenderer() {
@@ -72,6 +75,7 @@ function AppShell() {
           <Route path="/deals" element={<Deals onCountChange={setRowCount} />} />
           <Route path="/interactions" element={<Interactions onCountChange={setRowCount} />} />
           <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
+          <Route path="/action-items" element={<ActionItems onCountChange={setRowCount} />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

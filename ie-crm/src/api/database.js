@@ -954,6 +954,47 @@ export async function batchGetDealCompanies(dealIds) {
   return groupBy(r.rows, 'deal_id');
 }
 
+// -- Action Item linked records (batch) --
+export async function batchGetActionItemContacts(actionItemIds) {
+  if (!actionItemIds.length) return {};
+  const r = await query(`
+    SELECT c.contact_id, c.full_name, c.type, ac.action_item_id
+    FROM contacts c JOIN action_item_contacts ac ON c.contact_id = ac.contact_id
+    WHERE ac.action_item_id = ANY($1) ORDER BY c.full_name
+  `, [actionItemIds]);
+  return groupBy(r.rows, 'action_item_id');
+}
+
+export async function batchGetActionItemProperties(actionItemIds) {
+  if (!actionItemIds.length) return {};
+  const r = await query(`
+    SELECT p.property_id, p.property_address, p.property_type, ap.action_item_id
+    FROM properties p JOIN action_item_properties ap ON p.property_id = ap.property_id
+    WHERE ap.action_item_id = ANY($1) ORDER BY p.property_address
+  `, [actionItemIds]);
+  return groupBy(r.rows, 'action_item_id');
+}
+
+export async function batchGetActionItemDeals(actionItemIds) {
+  if (!actionItemIds.length) return {};
+  const r = await query(`
+    SELECT d.deal_id, d.deal_name, d.status, ad.action_item_id
+    FROM deals d JOIN action_item_deals ad ON d.deal_id = ad.deal_id
+    WHERE ad.action_item_id = ANY($1) ORDER BY d.deal_name
+  `, [actionItemIds]);
+  return groupBy(r.rows, 'action_item_id');
+}
+
+export async function batchGetActionItemCompanies(actionItemIds) {
+  if (!actionItemIds.length) return {};
+  const r = await query(`
+    SELECT co.company_id, co.company_name, co.company_type, ac.action_item_id
+    FROM companies co JOIN action_item_companies ac ON co.company_id = ac.company_id
+    WHERE ac.action_item_id = ANY($1) ORDER BY co.company_name
+  `, [actionItemIds]);
+  return groupBy(r.rows, 'action_item_id');
+}
+
 // ============================================================
 // TABLE COUNTS
 // ============================================================
