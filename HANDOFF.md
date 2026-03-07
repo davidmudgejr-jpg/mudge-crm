@@ -469,31 +469,332 @@ WHERE p.property_type = 'Industrial'
 
 ---
 
-### Transaction Probability Engine (TPE) — FULLY MAPPED (SQL VIEW + 3 NEW TABLES)
+### Transaction Probability Engine (TPE) — COMPLETE MODEL (from Score Weights tab)
 
-**Source:** TPE Excel file (`TPE_Master_List_v2_20_11.xlsx`) — 9 sheets, 3,700 properties scored.
+**Source:** TPE Excel file (`docs/TPE_Master_List_v2_20_11.xlsx`) — 9 sheets, 3,700 properties scored.
+**Reference:** The Excel is in `docs/` for reference. This section IS the implementation spec — every formula, tier, and weight from the Score Weights tab is documented here.
 **Decision:** DISCARD the Airtable lead scoring fields. Use the TPE Excel model instead — it's far more sophisticated.
 
-**Architecture:** TPE scores are **not stored** — they're a **SQL VIEW** on top of `properties`, joining against three supporting data tables. Scores recompute live on every query (3,700 rows = milliseconds). No stale data.
+**Architecture:** TPE scores are **not stored** — they're a **SQL VIEW** on top of `properties`, joining against supporting data tables. All scoring weights live in a `tpe_config` table so they're adjustable without changing SQL. Scores recompute live on every query (3,700 rows = milliseconds). No stale data.
 
-**Scoring Model (100 points max):**
+---
 
-| Category | Max Points | Source Table | Logic |
+#### MODEL 1: Transaction Probability Score (100 points max)
+
+##### Category 1: LEASE EXPIRATION (30 pts max)
+Source: `lease_comps.expiration_date` → nearest expiration per property
+
+| Signal | Points | Logic |
+|---|---|---|
+| Expiring ≤ 12 months | 30 | Hard deadline — highest urgency |
+| Expiring 12–18 months | 22 | Inside decision window |
+| Expiring 18–24 months | 15 | Approaching window |
+| No expiration data or > 24 months | 0 | |
+
+Data path: `properties` → `lease_comps` (via property_id) → `expiration_date`. Also check `companies.lease_exp` (via lease_comps.company_id) as fallback.
+
+##### Category 2: OWNERSHIP PROFILE (25 pts max)
+Source: `properties` (owner entity type, hold duration, location)
+
+Three factors that **stack** (all can apply to same property):
+
+| Factor | Signal | Points | Logic |
 |---|---|---|---|
-| Lease Score | 30 | `lease_comps` → nearest expiration | ≤12mo=30, ≤18mo=22, ≤24mo=15, ≤36mo=8, else 0 |
-| Ownership Score | 25 | `properties` (owner age, type) | Age≥70=20, ≥65=15, ≥60=10, ≥55=5 + out-of-area/user bonuses |
-| Age Score | 20 | `properties.year_built` | Same tiers as ownership age |
-| Growth Score | 15 | `tenant_growth` | Headcount growth ≥30%=15, ≥20%=10, ≥10%=5 |
-| Stress Score | 10 | `property_distress` + `loan_maturities` | NOD/Auction/REO flags, distressed debt signals |
+| Entity type | Individual / Family LLC | 10 | Non-institutional = higher sell probability |
+| Hold duration | 20+ years | 10 | Maximum equity, maximum motivation |
+| Hold duration | 15–20 years | 7 | Strong equity position |
+| Hold duration | 10–15 years | 4 | Building equity |
+| Location | Out-of-area owner | 5 | Absentee = lower emotional attachment |
 
-**Blended Priority = 70% × Total Score + 30% × Commission Potential**
-- Commission Potential: estimated from property RBA × $250/SF × tiered commission rate (3%/2%/1%), normalized to 0-100 scale
-- Confirmed Maturity Boost: extra points when loan maturity data confirms near-term debt events (LTV, duration, purpose bonuses)
-- Office Courtesy flag: properties where Lee & Associates was involved (avoid poaching colleagues)
+Max 25 = entity (10) + hold 20yr (10) + out-of-area (5).
 
-**Likely Transaction Type:** Based on score composition — if ownership-side scores dominate → SALE, if tenant-side → LEASE, balanced → BLENDED
+Hold duration computed from: `EXTRACT(YEAR FROM AGE(NOW(), properties.last_sale_date))`. Requires `last_sale_date` on properties.
 
-#### `loan_maturities` table (NEW)
+##### Category 3: OWNER AGE (20 pts max)
+Source: `properties.owner_age_est` (estimated owner age)
+
+| Signal | Points | Logic |
+|---|---|---|
+| Age 70+ | 20 | Estate/succession pressure highest |
+| Age 65–70 | 15 | Retirement planning window |
+| Age 60–65 | 10 | Beginning to think about exit |
+| Age 55–60 | 5 | On the horizon |
+| Under 55 or unknown | 0 | |
+
+Requires `owner_age_est` column on properties (INT, nullable).
+
+##### Category 4: TENANT GROWTH (15 pts max)
+Source: `tenant_growth.growth_rate` (via lease_comps → companies → tenant_growth)
+
+| Signal | Points | Logic |
+|---|---|---|
+| Headcount growth ≥ 30% | 15 | Space pressure near-certain |
+| Headcount growth 20–30% | 10 | Strong growth signal |
+| Headcount growth 10–20% | 5 | Moderate growth signal |
+| Below 10% or no data | 0 | |
+
+Data path: `properties` → `lease_comps` (property_id) → `companies` (company_id) → `tenant_growth` (company_id).
+
+##### Category 5: DEBT / STRESS (10 pts max — capped)
+Source: `loan_maturities` (balloon data) + `property_distress` (liens/delinquency)
+
+| Signal | Points | Logic |
+|---|---|---|
+| SBA/estimated balloon ≤ 24 months | 7 | Financing forcing function |
+| Mechanic's/tax lien | 5 | Financial stress indicator |
+| Property tax delinquent | 5 | Direct stress signal |
+| **Cap at 10 combined** | | Multiple signals don't exceed 10 |
+
+Balloon confidence levels from Debt & Stress data: HIGH (🔴), MEDIUM (🟠), LOW (🟡). Three balloon scenarios: 5yr, 7yr, 10yr — use the one matching the confidence level.
+
+**TOTAL SCORE = Lease + Ownership + Owner Age + Growth + Stress (max 100)**
+
+##### TPE Score Tiers (coaching guidance)
+
+| Score Range | Tier | Action | Coaching Note |
+|---|---|---|---|
+| 85–100 | 🔴 CALL THIS WEEK | Immediate outreach | Two-fee scenario probable. Bring your father in early. |
+| 70–84 | 🟠 CALL THIS MONTH | Schedule this month | Strong signal. Prepare financial model before calling. |
+| 50–69 | 🟡 CALL THIS QUARTER | Begin relationship | Begin relationship, not a pitch. |
+| Below 50 | 🟢 NURTURE ONLY | Market updates only | Market updates, no direct pitch. |
+
+---
+
+#### MODEL 2: Expected Commission Value (ECV)
+
+##### Market Assumptions (all stored in `tpe_config`, adjustable)
+
+| Parameter | Default Value | Notes |
+|---|---|---|
+| Sale price per SF | $250 | IE industrial avg ($200–$300 range) |
+| Lease rate / SF / month (10-30K SF) | $1.15 | IE industrial NNN |
+| Lease rate / SF / month (30-50K SF) | $1.00 | IE industrial NNN |
+| Lease rate / SF / month (50K+ SF) | $0.90 | IE industrial NNN |
+| Average lease term | 60 months (5 years) | Standard IE industrial |
+| Sale commission rate | 3% of sale price | Standard |
+| New lease commission rate | 4% of total consideration | SF × rate × term |
+| Lease renewal commission rate | 2% of total consideration | SF × rate × term |
+
+##### Commission Calculation
+
+**Sale:** `property.rba × $250/SF × 3%` (tiered: 2% for 30-50K, 1% for 50K+)
+**Lease (new):** `property.rba × lease_rate × 60 months × 4%`
+**Lease (renewal):** `property.rba × lease_rate × 60 months × 2%`
+
+Commission normalized to 0-100 scale: `$250K+ = 100, linear below` (e.g. $125K commission = 50 points).
+
+##### Likely Transaction Type
+
+| Condition | Type | Commission Used |
+|---|---|---|
+| Tenant-side points (Lease + Growth) > Owner-side (Ownership + Age + Stress) | LEASE | Lease commission |
+| Owner-side > Tenant-side | SALE | Sale commission |
+| Roughly equal | BLENDED | 40% sale + 60% lease commission |
+
+##### Time Multiplier
+
+| Condition | Multiplier | Logic |
+|---|---|---|
+| Lease expiring ≤ 6 months | 1.2x | Maximum urgency premium |
+| Lease expiring 6–12 months | 1.1x | High urgency |
+| Lease expiring 12–24 months | 1.0x | Standard |
+| Sale opportunity (no hard deadline) | 0.85x | No forcing function discount |
+
+##### Conversion Rate Assumptions (for reference, not used in scoring)
+
+| Scenario | Estimated Rate |
+|---|---|
+| Expiring lease → deal | ~17% (1 in 6) |
+| Growing tenant → deal | ~10% (1 in 10) |
+| Owner cold outreach → sale | ~4% (1 in 25) |
+
+---
+
+#### MODEL 3: Blended Priority (the final ranking)
+
+**Formula: `Blended Priority = 0.70 × Total Score + 0.30 × Commission Potential`**
+
+Where:
+- Total Score = the 100-point TPE score from Model 1
+- Commission Potential = normalized 0-100 from Model 2
+
+**Why 70/30:** Previous ECV-only model overweighted big buildings. A 90K SF building with no signals ranked above a 20K SF building with 5 converging signals. 70/30 ensures properties with multiple signals rank above properties with just a big footprint. Strategic rationale: deal volume builds reputation and network faster than deal size. Target: 20 deals × $75K avg = $1.5M gross.
+
+##### Blended Priority Tiers (v2.20)
+
+| Score | Tier | Count (approx) | Action |
+|---|---|---|---|
+| ≥ 50 | 🔴 HIGH PRIORITY — Call this week | Top ~50 | Strongest signal convergence |
+| 40–49 | 🟠 SOLID — Call this month | Next ~100 | Multiple signals present |
+| 30–39 | 🟡 MODERATE — Call this quarter | Next ~350 | Some signals, worth monitoring |
+| < 30 | 🟢 LOW — Nurture only | Remaining ~3,200 | Market updates, no active pitch |
+
+---
+
+#### MODEL 4: Confirmed Loan Maturity (boost model)
+
+Source: RCA Loan Export via Title Rep. Only applies to properties with **confirmed** maturity data (not estimated balloon).
+
+##### Confirmed Maturity Score
+
+| Timing | Points | Logic |
+|---|---|---|
+| Loan already matured (past due) | 25 | Owner is in the pressure cooker NOW |
+| Matures within 30 days | 20 | Imminent — refinance or sell decision happening now |
+| Matures within 90 days | 15 | Planning window — owner should be making moves |
+| Matures > 90 days out | 10 | Early signal — still valuable but less urgent |
+
+##### Enhanced Maturity Bonuses (v2.16 — three additional factors)
+
+**LTV Bonus (0–5 points):** Higher LTV = more refinancing pressure
+
+| LTV | Bonus |
+|---|---|
+| ≥ 85% | +5 pts — Underwater risk, hard to refinance |
+| 75–84% | +3 pts — Tight equity, expensive refi |
+| 65–74% | +1 pt — Moderate pressure |
+| < 65% | +0 pts — Comfortable equity position |
+
+**Loan Duration Bonus (0–3 points):** Short-term loans = business plan failure
+
+| Duration | Bonus |
+|---|---|
+| ≤ 2.5 year loan | +3 pts — Bridge loan maturing = plan didn't execute |
+| 2.5–4 year loan | +1 pt — Transitional financing stress |
+| > 4 year loan | +0 pts — Routine maturity |
+
+**Loan Purpose Bonus (0–2 points):** Acquisition/construction loans carry more risk
+
+| Purpose | Bonus |
+|---|---|
+| Property Acquisition | +2 pts — Bought at peak, may be underwater |
+| Construction | +2 pts — Needs takeout financing or forced sale |
+| Refinance | +0 pts — Standard maturity event |
+
+**Maximum Enhanced Maturity Score: 35 points** (25 base + 5 LTV + 3 duration + 2 purpose)
+
+##### ECV with Maturity Boost
+
+Formula: `((Total Score + Confirmed Maturity Score) / 100) × Sale Commission × 1.2x`
+
+Key rules:
+- Adds confirmed maturity points to probability (capped at 100)
+- Forces SALE commission calculation (maturity = likely sale, not lease)
+- Uses 1.2x time multiplier (maximum urgency premium)
+- **Properties only get UPGRADED, never downgraded** — final priority = MAX(regular blended, boosted blended)
+- Estimated balloon (Debt & Stress) and confirmed maturity are **additive** — a property can have both
+
+---
+
+#### MODEL 5: Distress Scoring (expanded tiers)
+
+Source: Title Rep Maturing Debt Report. 59 properties across 3 distress types.
+
+##### Distress Type Scores
+
+| Distress Type | Base Points | Notes |
+|---|---|---|
+| AUCTION | 25 | Foreclosure sale — pre-foreclosure or buyer rep opportunity |
+| MATURED (past due) | 25 | Loan already matured, no refi completed |
+| NOD (Notice of Default) | 20 | Owner 90+ days behind on payments |
+
+##### Maturity Timing Scores (when no distress type, just maturity date)
+
+| Timing | Points |
+|---|---|
+| Maturing ≤ 1 month | 22 |
+| Maturing 1–3 months | 18 |
+| Maturing 3–6 months | 15 |
+| Maturing 6–9 months | 12 |
+| Maturing 9–12 months | 10 |
+
+---
+
+#### Office Courtesy (computed from lease_comps, not stored)
+
+**Not a boolean on properties.** Computed live in the VIEW by checking `lease_comps.landlord_rep_company` and `lease_comps.tenant_rep_company` for "Lee & Associates" + "Riverside".
+
+| Condition | Flag | Meaning |
+|---|---|---|
+| Lee Riv is landlord rep in any comp for this property | `owner_courtesy` | Don't cold-call the owner — Lee broker has that relationship |
+| Lee Riv is tenant rep in any comp for this property | `tenant_courtesy` | Don't cold-call the tenant — Lee broker has that relationship |
+| Only LL flagged | | CAN still call the tenant |
+| Only TR flagged | | CAN still call the owner |
+| Both flagged (double-ended) | | Neither — but advisory, not removed from list |
+
+136 properties currently flagged. Flags are **advisory** — circumstances change, and the property stays in the ranked list.
+
+VIEW output columns: `owner_courtesy` (BOOLEAN), `tenant_courtesy` (BOOLEAN), `courtesy_note` (TEXT — e.g. "⚠️ OWNER: Lee Riv LL rep" or "⚠️ TENANT: Lee Riv TR rep").
+
+---
+
+#### `tpe_config` Table (scoring weights — adjustable)
+
+All point values, thresholds, multipliers, and market assumptions are stored in a config table. The SQL VIEW reads from this table, not hardcoded values. Change a number → every TPE score recalculates instantly.
+
+| config_category | config_key | config_value | description |
+|---|---|---|---|
+| lease | lease_12mo_points | 30 | Score when lease expires ≤12 months |
+| lease | lease_18mo_points | 22 | Score when lease expires 12-18 months |
+| lease | lease_24mo_points | 15 | Score when lease expires 18-24 months |
+| ownership | entity_individual_points | 10 | Individual/Family LLC entity type |
+| ownership | hold_20yr_points | 10 | Hold duration 20+ years |
+| ownership | hold_15yr_points | 7 | Hold duration 15-20 years |
+| ownership | hold_10yr_points | 4 | Hold duration 10-15 years |
+| ownership | out_of_area_points | 5 | Out-of-area owner bonus |
+| owner_age | age_70_points | 20 | Owner age 70+ |
+| owner_age | age_65_points | 15 | Owner age 65-70 |
+| owner_age | age_60_points | 10 | Owner age 60-65 |
+| owner_age | age_55_points | 5 | Owner age 55-60 |
+| growth | growth_30pct_points | 15 | Headcount growth ≥30% |
+| growth | growth_20pct_points | 10 | Headcount growth 20-30% |
+| growth | growth_10pct_points | 5 | Headcount growth 10-20% |
+| stress | balloon_24mo_points | 7 | Estimated balloon ≤24 months |
+| stress | lien_points | 5 | Mechanic's/tax lien |
+| stress | delinquent_points | 5 | Property tax delinquent |
+| stress | stress_cap | 10 | Maximum combined stress score |
+| ecv | sale_price_psf | 250 | Sale price per SF assumption |
+| ecv | lease_rate_small | 1.15 | Lease rate 10-30K SF |
+| ecv | lease_rate_mid | 1.00 | Lease rate 30-50K SF |
+| ecv | lease_rate_large | 0.90 | Lease rate 50K+ SF |
+| ecv | lease_term_months | 60 | Average lease term |
+| ecv | sale_commission_rate | 0.03 | Sale commission rate |
+| ecv | lease_new_commission_rate | 0.04 | New lease commission rate |
+| ecv | lease_renewal_commission_rate | 0.02 | Renewal commission rate |
+| ecv | commission_cap | 250000 | Commission at which normalized = 100 |
+| time | time_mult_6mo | 1.20 | Time multiplier ≤6 months |
+| time | time_mult_12mo | 1.10 | Time multiplier 6-12 months |
+| time | time_mult_24mo | 1.00 | Time multiplier 12-24 months |
+| time | time_mult_sale | 0.85 | Time multiplier for sales |
+| blended | tpe_weight | 0.70 | TPE score weight in blended priority |
+| blended | ecv_weight | 0.30 | Commission weight in blended priority |
+| maturity | matured_points | 25 | Confirmed loan already matured |
+| maturity | mature_30d_points | 20 | Confirmed maturing ≤30 days |
+| maturity | mature_90d_points | 15 | Confirmed maturing ≤90 days |
+| maturity | mature_over90d_points | 10 | Confirmed maturing >90 days |
+| maturity_bonus | ltv_85_bonus | 5 | LTV ≥85% bonus |
+| maturity_bonus | ltv_75_bonus | 3 | LTV 75-84% bonus |
+| maturity_bonus | ltv_65_bonus | 1 | LTV 65-74% bonus |
+| maturity_bonus | duration_25yr_bonus | 3 | Loan ≤2.5 year bonus |
+| maturity_bonus | duration_4yr_bonus | 1 | Loan 2.5-4 year bonus |
+| maturity_bonus | purpose_acquisition_bonus | 2 | Acquisition loan bonus |
+| maturity_bonus | purpose_construction_bonus | 2 | Construction loan bonus |
+| distress | auction_points | 25 | Auction distress score |
+| distress | matured_distress_points | 25 | Past-due matured loan |
+| distress | nod_points | 20 | Notice of Default |
+| distress | mature_1mo_points | 22 | Maturing ≤1 month |
+| distress | mature_3mo_points | 18 | Maturing 1-3 months |
+| distress | mature_6mo_points | 15 | Maturing 3-6 months |
+| distress | mature_9mo_points | 12 | Maturing 6-9 months |
+| distress | mature_12mo_points | 10 | Maturing 9-12 months |
+
+**TPE Settings page** in the CRM (under Settings) shows this table in an editable UI. User sees all weights grouped by category, can adjust values, and scores recalculate on next query. Ships with the initial TPE build.
+
+---
+
+#### Supporting Tables
+
+##### `loan_maturities` table (NEW)
 
 | Column | Schema Name | Type | Notes |
 |---|---|---|---|
@@ -504,14 +805,17 @@ WHERE p.property_type = 'Industrial'
 | Maturity Date | `maturity_date` | DATE | |
 | LTV | `ltv` | NUMERIC | Loan-to-value ratio |
 | Loan Purpose | `loan_purpose` | TEXT | Purchase, Refinance, Construction |
-| Loan Duration | `loan_duration_years` | INT | |
+| Loan Duration | `loan_duration_years` | NUMERIC | |
 | Interest Rate | `interest_rate` | NUMERIC | |
+| Rate Type | `rate_type` | TEXT | Fixed, Variable |
+| Loan Type | `loan_type` | TEXT | 1st Mortgage, SBA, etc. |
+| Months Past Due | `months_past_due` | NUMERIC | From RCA data — 0 = current |
 | Notes | `notes` | TEXT | |
-| Source | `source` | TEXT | "Title Rep", "Manual" |
+| Source | `source` | TEXT | "Title Rep", "RCA", "Manual" |
 | — | `created_at` | TIMESTAMP | |
 | — | `updated_at` | TIMESTAMP | |
 
-#### `property_distress` table (NEW)
+##### `property_distress` table (NEW)
 
 | Column | Schema Name | Type | Notes |
 |---|---|---|---|
@@ -519,14 +823,18 @@ WHERE p.property_type = 'Industrial'
 | — | `property_id` | FK → properties | |
 | Distress Type | `distress_type` | TEXT | NOD, Auction, REO, Lis Pendens |
 | Filing Date | `filing_date` | DATE | |
-| Amount | `amount` | NUMERIC | |
+| Amount | `amount` | NUMERIC | Default amount or opening bid |
+| Auction Date | `auction_date` | DATE | For auction type |
+| Opening Bid | `opening_bid` | NUMERIC | For auction type |
+| Delinquent Tax Year | `delinquent_tax_year` | INT | |
+| Delinquent Tax Amount | `delinquent_tax_amount` | NUMERIC | |
 | Trustee | `trustee` | TEXT | |
 | Notes | `notes` | TEXT | |
 | Source | `source` | TEXT | "Title Rep", "Manual" |
 | — | `created_at` | TIMESTAMP | |
 | — | `updated_at` | TIMESTAMP | |
 
-#### `tenant_growth` table (NEW)
+##### `tenant_growth` table (NEW)
 
 | Column | Schema Name | Type | Notes |
 |---|---|---|---|
@@ -537,61 +845,61 @@ WHERE p.property_type = 'Industrial'
 | Growth Rate | `growth_rate` | NUMERIC | e.g. 0.30 = 30% |
 | Revenue Current | `revenue_current` | NUMERIC | |
 | Revenue Previous | `revenue_previous` | NUMERIC | |
+| Growth Prospect Score | `growth_prospect_score` | INT | 1-10 from CoStar data |
 | Data Date | `data_date` | DATE | When this data was captured |
 | Source | `source` | TEXT | "CoStar", "Vibe", "Manual" |
 | — | `created_at` | TIMESTAMP | |
 | — | `updated_at` | TIMESTAMP | |
 
-#### Properties Table Additions (for TPE)
+##### `debt_stress` table (NEW — estimated balloon data)
+
+Separate from `loan_maturities` (confirmed). This stores estimated balloon scenarios from Title Rep deed of trust / UCC data.
 
 | Column | Schema Name | Type | Notes |
 |---|---|---|---|
-| Owner Type | `owner_user_or_investor` | TEXT | "Owner User", "Investor" — affects ownership score |
-| Out of Area Owner | `out_of_area_owner` | BOOLEAN | Owner not local — adds ownership score bonus |
-| Office Courtesy | `office_courtesy` | BOOLEAN | Lee & Associates previously involved — flag to avoid |
+| — | `id` | UUID PK | |
+| — | `property_id` | FK → properties | |
+| Lender | `lender` | TEXT | Originator |
+| Loan Type | `loan_type` | TEXT | Conventional, SBA, etc. |
+| Interest Rate | `interest_rate` | NUMERIC | |
+| Rate Type | `rate_type` | TEXT | Fixed, Variable |
+| Origination Date | `origination_date` | DATE | |
+| Origination Amount | `origination_amount` | NUMERIC | |
+| Balloon 5yr | `balloon_5yr` | DATE | Estimated 5-year balloon date |
+| Balloon 7yr | `balloon_7yr` | DATE | Estimated 7-year balloon date |
+| Balloon 10yr | `balloon_10yr` | DATE | Estimated 10-year balloon date |
+| Balloon Confidence | `balloon_confidence` | TEXT | HIGH, MEDIUM, LOW |
+| Notes | `notes` | TEXT | |
+| Source | `source` | TEXT | "Title Rep", "Manual" |
+| — | `created_at` | TIMESTAMP | |
+| — | `updated_at` | TIMESTAMP | |
 
-*Note: `owner_type` field already planned in Properties mapping above — `owner_user_or_investor` is a more specific field for TPE scoring distinct from the general `owner_type`.*
+##### Properties Table Additions (for TPE)
 
-#### TPE SQL VIEW (conceptual)
+| Column | Schema Name | Type | Notes |
+|---|---|---|---|
+| Owner-User/Investor | `owner_user_or_investor` | TEXT | "Owner-User", "Investor" — affects entity type scoring |
+| Out of Area Owner | `out_of_area_owner` | BOOLEAN | Owner not local — +5 ownership score |
+| Owner Age (Est.) | `owner_age_est` | INT | Estimated owner age — drives Owner Age score |
+| Hold Duration | `hold_duration_years` | NUMERIC | Computed from last_sale_date or imported directly |
+| Owner Entity Type | `owner_entity_type` | TEXT | Individual, Family LLC, Large Investor, etc. |
+| Lien/Delinquency | `has_lien_or_delinquency` | BOOLEAN | Tax lien or mechanic's lien flag |
 
-```sql
-CREATE VIEW property_tpe_scores AS
-SELECT
-  p.id,
-  p.property_address,
-  -- Lease Score (30 pts max)
-  CASE
-    WHEN nearest_lease_exp <= 12 THEN 30
-    WHEN nearest_lease_exp <= 18 THEN 22
-    WHEN nearest_lease_exp <= 24 THEN 15
-    WHEN nearest_lease_exp <= 36 THEN 8
-    ELSE 0
-  END AS lease_score,
-  -- Ownership Score (25 pts max) - based on owner age + type + location
-  -- Age Score (20 pts max) - based on year_built
-  -- Growth Score (15 pts max) - from tenant_growth table
-  -- Stress Score (10 pts max) - from property_distress + loan_maturities
-  -- Total Score = sum of all five
-  -- Blended Priority = 0.7 * total_score + 0.3 * commission_potential
-  -- Likely Transaction = SALE / LEASE / BLENDED based on score composition
-FROM properties p
-LEFT JOIN LATERAL (
-  SELECT MIN(months_to_exp) AS nearest_lease_exp
-  FROM lease_comps lc WHERE lc.property_id = p.id AND lc.expiration_date > NOW()
-) lease ON true
-LEFT JOIN LATERAL (...) distress ON true
-LEFT JOIN LATERAL (...) growth ON true;
-```
+*Note: `office_courtesy` is NOT stored on properties — it's computed live in the VIEW from lease_comps rep data.*
+
+---
 
 #### TPE in the UI
 
-- **Not a separate tab** — TPE scores appear as columns in the Properties table (Total Score, Blended Priority, Likely Transaction)
+- **Not a separate tab** — TPE scores appear as columns in the Properties table (Total Score, Blended Priority, Tier, Likely Transaction)
 - Property detail view shows a **Score Breakdown Card** with all 5 categories + Action Intelligence (see below)
-- Properties can be sorted/filtered by TPE score
+- Properties can be sorted/filtered by TPE score or Blended Priority
+- Tier labels (🔴🟠🟡🟢) and coaching notes visible in the detail panel
+- **TPE Settings page** (under Settings) shows all weights from `tpe_config` in an editable grouped table
 
 #### Action Intelligence (computed "Who To Call & Why")
 
-The TPE VIEW doesn't just output scores — it generates **plain-English call reasons** from the underlying data. This replaces the manually-typed "who to call and why" column from the TPE Excel. All reasons are auto-computed and always current.
+The TPE VIEW generates **plain-English call reasons** from the underlying data. Replaces the manually-typed "who to call and why" column from the TPE Excel. All reasons are auto-computed and always current.
 
 **Additional VIEW output columns:**
 
@@ -605,10 +913,16 @@ The TPE VIEW doesn't just output scores — it generates **plain-English call re
 | `tenant_lease_exp` | DATE | From nearest `lease_comps.expiration_date` |
 | `lender_name` | TEXT | From `loan_maturities.lender` (nearest maturity) |
 | `loan_maturity_date` | DATE | From `loan_maturities.maturity_date` (nearest) |
+| `owner_courtesy` | BOOLEAN | Computed from lease_comps — Lee Riv as LL rep |
+| `tenant_courtesy` | BOOLEAN | Computed from lease_comps — Lee Riv as TR rep |
+| `courtesy_note` | TEXT | e.g. "⚠️ OWNER: Lee Riv LL rep" |
+| `tpe_tier` | TEXT | 🔴/🟠/🟡/🟢 label |
+| `blended_tier` | TEXT | 🔴/🟠/🟡/🟢 label |
+| `coaching_note` | TEXT | Tier-specific coaching guidance |
 
 **`call_target` logic:**
-- If Lease Score + Growth Score > Ownership Score + Stress Score → 'tenant'
-- If Ownership Score + Stress Score > Lease Score + Growth Score → 'owner'
+- If Lease Score + Growth Score > Ownership Score + Age Score + Stress Score → 'tenant'
+- If Ownership Score + Age Score + Stress Score > Lease Score + Growth Score → 'owner'
 - If both sides contribute meaningfully → 'both'
 
 **`call_reasons` generation — each reason is a CASE statement:**
@@ -617,18 +931,23 @@ The TPE VIEW doesn't just output scores — it generates **plain-English call re
 |---|---|
 | Lease expires ≤12 months | "Lease expires in {N} months ({date}) — tenant {company_name}" |
 | Lease expires ≤24 months | "Lease expires {date} — early outreach to {company_name}" |
-| Loan maturity ≤12 months | "Loan with {lender} matures {date} — owner may need to sell/refinance" |
-| Loan maturity ≤24 months | "Loan with {lender} matures {date} — upcoming debt event" |
+| Confirmed loan maturity ≤12 months | "Confirmed loan with {lender} matures {date} — sell/refinance pressure" |
+| Estimated balloon ≤24 months | "Estimated balloon with {lender} around {date} — financing forcing function" |
 | property_distress = NOD | "NOD filed {date} — owner under foreclosure pressure" |
-| property_distress = Auction | "Auction scheduled {date} — distressed sale opportunity" |
+| property_distress = Auction | "Auction scheduled {date} ({opening_bid}) — distressed sale opportunity" |
 | property_distress = REO | "Bank-owned (REO) — lender motivated to sell" |
 | property_distress = Lis Pendens | "Lis Pendens filed {date} — legal action pending" |
-| growth_rate ≥ 30% | "Revenue up {N}% YoY — tenant may need more space" |
-| growth_rate ≥ 20% | "Growing tenant ({N}% YoY) — expansion candidate" |
-| out_of_area_owner = true | "Out-of-area owner ({owner location}) — may consider selling IE asset" |
-| owner_user_or_investor = 'Investor' | "Investor-owned — more likely to transact than owner-occupant" |
-| year_built ≤ 1980 | "Building built {year} ({age} years old) — redevelopment candidate" |
-| office_courtesy = true | "⚠️ Office courtesy — Lee & Associates previously involved" |
+| Tax delinquent | "Property tax delinquent ({year}, ${amount}) — financial stress signal" |
+| growth_rate ≥ 30% | "Headcount up {N}% — tenant likely needs more space" |
+| growth_rate ≥ 20% | "Growing tenant ({N}% headcount growth) — expansion candidate" |
+| out_of_area_owner = true | "Out-of-area owner — may consider selling IE asset" |
+| owner_entity_type = Individual/Family | "Individual/family owner — non-institutional, higher sell probability" |
+| hold_duration ≥ 20 years | "Owned {N} years — maximum equity, potential motivation to exit" |
+| owner_age ≥ 70 | "Owner est. age {N} — estate/succession pressure" |
+| owner_age ≥ 65 | "Owner est. age {N} — retirement planning window" |
+| LTV ≥ 85% (enhanced maturity) | "LTV {N}% — underwater risk, hard to refinance" |
+| owner_courtesy | "⚠️ Lee Riv represented landlord — don't cold-call owner" |
+| tenant_courtesy | "⚠️ Lee Riv represented tenant — don't cold-call tenant" |
 
 **Score Breakdown Card layout (property detail panel):**
 
@@ -637,28 +956,34 @@ The TPE VIEW doesn't just output scores — it generates **plain-English call re
 │                                                    │
 │  Lease        ████████████████████░░  30/30        │
 │  Ownership    █████████████████░░░░░  20/25        │
-│  Age          ██████████████████░░░░  18/20        │
+│  Owner Age    ██████████████████░░░░  18/20        │
 │  Growth       █████░░░░░░░░░░░░░░░░░   5/15       │
 │  Stress       █████░░░░░░░░░░░░░░░░░   5/10       │
 │                                                    │
+│  Blended Priority: 62  🟠 SOLID                   │
 │  Likely Transaction: LEASE                         │
+│  Est. Commission: $82,800                          │
 │                                                    │
 │  ── Who To Call & Why ──────────────────────────── │
 │                                                    │
 │  CALL OWNER: John Smith (212-555-0100)             │
-│  • Loan with Wells Fargo matures Oct 2026          │
-│  • Out-of-area owner (New York, NY)                │
-│  • Building built 1978 — 48 years old              │
+│  • Confirmed loan with Wells Fargo matures Oct 2026│
+│  • Out-of-area owner — may consider selling IE asset│
+│  • Owned 22 years — maximum equity                 │
+│  • Owner est. age 72 — estate/succession pressure  │
 │                                                    │
 │  CALL TENANT: ABC Manufacturing                    │
 │  • Lease expires in 8 months (Nov 2026)            │
-│  • Revenue up 35% YoY — may need more space        │
+│  • Headcount up 35% — likely needs more space      │
+│                                                    │
+│  ⚠️ Lee Riv represented landlord — courtesy flag   │
 │                                                    │
 └────────────────────────────────────────────────────┘
 ```
 
-**Why this replaces the Excel "who to call" column:** In the TPE Excel, call reasons were manually typed once and went stale. In the CRM, every reason is generated from live data — when you import new loan maturity data, update a lease expiration, or add a distress record, the reasons update instantly across all affected properties. This is also the foundation for Houston: Houston reads these computed reasons to auto-create action items.
-- Future: dedicated TPE Dashboard view with heatmap, top 50 targets, score change alerts
+**Why this replaces the Excel:** In the TPE Excel, call reasons were manually typed once and went stale. In the CRM, every reason is generated from live data — import new loan maturity data, update a lease expiration, or add a distress record and the reasons update instantly across all affected properties. This is also the foundation for Houston: Houston reads these computed reasons to auto-create action items.
+
+---
 
 #### Houston's Auto-Generated Action Items
 
@@ -675,14 +1000,15 @@ UI shows two sections:
 - **My Tasks** — `source = 'manual'` (Apple Reminders style)
 - **Houston's Suggestions** — `source LIKE 'houston_%'` (separate, dismissible)
 
-#### Six Data Sources (refresh pipeline)
+#### Seven Data Sources (refresh pipeline)
 
-1. **Airtable CRM** → properties, contacts, companies (batch migration)
-2. **Company DB lease comps** → `lease_comps` (CSV import)
-3. **Title Rep loan maturity** → `loan_maturities` (CSV or manual)
-4. **Title Rep distressed properties** → `property_distress` (CSV or manual)
-5. **CoStar/Vibe tenant growth** → `tenant_growth` (CSV or manual)
-6. **Title Rep debt & stress** → feeds into `loan_maturities` + `property_distress`
+1. **Airtable CRM** → properties, contacts, companies (batch migration via Import tab)
+2. **Company DB lease comps** → `lease_comps` (CSV via Import tab)
+3. **Title Rep confirmed loan maturity** → `loan_maturities` (CSV via Import tab — RCA export)
+4. **Title Rep distressed properties** → `property_distress` (CSV via Import tab)
+5. **Title Rep debt & stress** → `debt_stress` (CSV via Import tab — balloon estimates)
+6. **CoStar/Vibe tenant growth** → `tenant_growth` (CSV via Import tab)
+7. **Ownership data** → `properties` updates (owner age, entity type, hold duration — from Airtable export)
 
 ---
 

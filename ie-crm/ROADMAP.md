@@ -117,21 +117,32 @@ Last updated: March 2026
 - [ ] Sale comp auto-updates property last_sale_date/last_sale_price when more recent
 
 ### 1E — Transaction Probability Engine (TPE)
-*AI-powered property scoring — the competitive edge*
+*AI-powered property scoring — the competitive edge. Full spec (5 models, all weights) in HANDOFF.md.*
 
-- [ ] `loan_maturities` table — lender, loan_amount, maturity_date, LTV, purpose, duration, rate
-- [ ] `property_distress` table — distress_type (NOD/Auction/REO), filing_date, amount, trustee
-- [ ] `tenant_growth` table — headcount/revenue current vs previous, growth_rate, data_date
-- [ ] Properties additions: owner_user_or_investor, out_of_area_owner, office_courtesy
-- [ ] SQL VIEW `property_tpe_scores` — live scoring: Lease (30pts), Ownership (25pts), Age (20pts), Growth (15pts), Stress (10pts)
-- [ ] Blended Priority formula: 70% transaction probability + 30% commission potential
-- [ ] Likely Transaction Type: SALE / LEASE / BLENDED based on score composition
-- [ ] Office Courtesy flag for Lee & Associates properties
-- [ ] TPE score columns visible in Properties table (sortable/filterable)
-- [ ] Score Breakdown Card in Property detail view with visual bar chart for 5 categories
-- [ ] Action Intelligence — computed `call_target` (owner/tenant/both) and `call_reasons` (TEXT[] of plain-English strings)
-- [ ] "Who To Call & Why" section in Score Breakdown Card — auto-generated from live data (replaces manual Excel column)
-- [ ] CSV import for loan maturity, distressed property, and tenant growth data (via Import tab)
+**Tables:**
+- [ ] `loan_maturities` — confirmed RCA data: lender, amount, maturity_date, LTV, purpose, duration, rate, months_past_due
+- [ ] `property_distress` — NOD/Auction/REO: distress_type, filing_date, amount, auction_date, opening_bid, delinquent tax
+- [ ] `tenant_growth` — CoStar/Vibe: headcount current/previous, growth_rate, growth_prospect_score
+- [ ] `debt_stress` — estimated balloon data: 3 balloon scenarios (5yr/7yr/10yr), confidence level (HIGH/MEDIUM/LOW)
+- [ ] `tpe_config` — all scoring weights, thresholds, market assumptions (editable, not hardcoded)
+- [ ] Properties additions: owner_age_est, owner_entity_type, hold_duration_years, has_lien_or_delinquency, owner_user_or_investor, out_of_area_owner
+
+**SQL VIEW `property_tpe_scores`:**
+- [ ] Model 1: Transaction Probability (100pts) — Lease (30) + Ownership (25) + Owner Age (20) + Growth (15) + Stress (10)
+- [ ] Model 2: Expected Commission Value — tiered lease rates by SF, sale commission, time multiplier
+- [ ] Model 3: Blended Priority — 70% TPE + 30% ECV, normalized commission scale ($250K=100)
+- [ ] Model 4: Confirmed Loan Maturity boost — timing tiers (25/20/15/10) + LTV/duration/purpose bonuses (max 35pts)
+- [ ] Model 5: Distress scoring — expanded tiers (Auction 25, NOD 20, maturity timing 10-22)
+- [ ] Office Courtesy — computed from lease_comps rep data (owner_courtesy + tenant_courtesy), NOT stored
+- [ ] All point values read from `tpe_config` table, not hardcoded in VIEW
+
+**UI:**
+- [ ] TPE score columns visible in Properties table (Total Score, Blended Priority, Tier, Likely Transaction)
+- [ ] Score Breakdown Card in Property detail view — 5 category bar chart + Blended Priority + Est. Commission
+- [ ] Action Intelligence — computed `call_target`, `call_reasons` (TEXT[]), courtesy warnings
+- [ ] "Who To Call & Why" section with plain-English reasons auto-generated from live data
+- [ ] TPE tier labels (🔴🟠🟡🟢) with coaching notes
+- [ ] TPE Settings page (under Settings) — editable table of all weights from `tpe_config`
 
 ### 1F — Interaction Type Expansion
 - [ ] Expand interaction types from 7 to 17 in NewInteractionModal + detail view
