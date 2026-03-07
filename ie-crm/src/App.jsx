@@ -16,6 +16,7 @@ import Interactions from './pages/Interactions';
 import Campaigns from './pages/Campaigns';
 import ActionItems from './pages/ActionItems';
 import Comps from './pages/Comps';
+import Import from './pages/Import';
 import Settings from './pages/Settings';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
@@ -81,6 +82,7 @@ function AppShell() {
           <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
           <Route path="/action-items" element={<ActionItems onCountChange={setRowCount} />} />
           <Route path="/comps" element={<Comps onCountChange={setRowCount} />} />
+          <Route path="/import" element={<Import />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

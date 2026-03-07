@@ -87,6 +87,13 @@ export const airtable = {
   },
 };
 
+// ── Import bridge ────────────────────────────────────────────
+export const importApi = {
+  detect: (headers) => httpPost('/api/import/detect', { headers }),
+  preview: (target, rows, opts = {}) => httpPost('/api/import/preview', { target, rows, ...opts }),
+  batch: (target, rows, opts = {}) => httpPost('/api/import/batch', { target, rows, ...opts }),
+};
+
 // ── Settings bridge ──────────────────────────────────────────────
 export const settings = {
   getEnv: (key) => {
