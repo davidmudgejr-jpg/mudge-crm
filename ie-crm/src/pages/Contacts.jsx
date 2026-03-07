@@ -83,7 +83,7 @@ export default function Contacts({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
   const { formulas } = useFormulaColumns('contacts');
-  const { customColumns, addField, updateField, removeField, setValue, values } = useCustomFields('contacts');
+  const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('contacts');
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('contacts', ALL_COLUMNS);
   const linked = useLinkedRecords('contacts', rows);
 
@@ -202,6 +202,9 @@ export default function Contacts({ onCountChange }) {
             showAll={showAll}
             hideAll={hideAll}
             resetDefaults={resetDefaults}
+            customColumns={allCustomColumns}
+            hiddenFieldIds={hiddenFieldIds}
+            onToggleCustomColumn={toggleCustomFieldVisibility}
           />
           <button onClick={fetchData} className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors">Refresh</button>
         </div>
@@ -231,6 +234,7 @@ export default function Contacts({ onCountChange }) {
           onAddField={addField}
           onRenameField={(id, name) => updateField(id, { name })}
           onDeleteField={removeField}
+          onHideCustomField={hideField}
         />
       </div>
 

@@ -73,7 +73,7 @@ export default function Properties({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
   const { formulas, evaluateFormulas } = useFormulaColumns('properties');
-  const { customColumns, addField, updateField, removeField, setValue, values } = useCustomFields('properties');
+  const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('properties');
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('properties', ALL_COLUMNS);
   const linked = useLinkedRecords('properties', rows);
 
@@ -201,6 +201,9 @@ export default function Properties({ onCountChange }) {
             showAll={showAll}
             hideAll={hideAll}
             resetDefaults={resetDefaults}
+            customColumns={allCustomColumns}
+            hiddenFieldIds={hiddenFieldIds}
+            onToggleCustomColumn={toggleCustomFieldVisibility}
           />
           <button
             onClick={fetchData}
@@ -237,6 +240,7 @@ export default function Properties({ onCountChange }) {
           onAddField={addField}
           onRenameField={(id, name) => updateField(id, { name })}
           onDeleteField={removeField}
+          onHideCustomField={hideField}
         />
       </div>
 

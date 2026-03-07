@@ -14,6 +14,7 @@ import { FIELD_TYPE_MAP } from '../config/fieldTypes';
 export function useCustomFields(tableKey) {
   const fieldsKey = `crm-custom-fields-${tableKey}`;
   const valuesKey = `crm-custom-field-values-${tableKey}`;
+  const hiddenKey = `crm-custom-fields-hidden-${tableKey}`;
 
   // --- field definitions ---------------------------------------------------
 
@@ -100,9 +101,54 @@ export function useCustomFields(tableKey) {
     [valuesKey],
   );
 
+  // --- hidden field visibility ---------------------------------------------
+
+  const [hiddenFieldIds, setHiddenFieldIds] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem(hiddenKey)) || [];
+    } catch {
+      return [];
+    }
+  });
+
+  const hideField = useCallback(
+    (fieldId) => {
+      setHiddenFieldIds((prev) => {
+        const next = prev.includes(fieldId) ? prev : [...prev, fieldId];
+        localStorage.setItem(hiddenKey, JSON.stringify(next));
+        return next;
+      });
+    },
+    [hiddenKey],
+  );
+
+  const showField = useCallback(
+    (fieldId) => {
+      setHiddenFieldIds((prev) => {
+        const next = prev.filter((id) => id !== fieldId);
+        localStorage.setItem(hiddenKey, JSON.stringify(next));
+        return next;
+      });
+    },
+    [hiddenKey],
+  );
+
+  const toggleCustomFieldVisibility = useCallback(
+    (fieldId) => {
+      setHiddenFieldIds((prev) => {
+        const next = prev.includes(fieldId)
+          ? prev.filter((id) => id !== fieldId)
+          : [...prev, fieldId];
+        localStorage.setItem(hiddenKey, JSON.stringify(next));
+        return next;
+      });
+    },
+    [hiddenKey],
+  );
+
   // --- build CrmTable-compatible columns -----------------------------------
 
-  const customColumns = fields.map((field) => {
+  const allCustomColumns = fields.map((field) => {
     const typeDef = FIELD_TYPE_MAP[field.type] || {};
     return {
       key: field.id,
@@ -115,12 +161,21 @@ export function useCustomFields(tableKey) {
     };
   });
 
+  const customColumns = allCustomColumns.filter(
+    (col) => !hiddenFieldIds.includes(col.key)
+  );
+
   return {
     fields,
     customColumns,
+    allCustomColumns,
+    hiddenFieldIds,
     addField,
     updateField,
     removeField,
+    hideField,
+    showField,
+    toggleCustomFieldVisibility,
     getValue,
     setValue,
     values,

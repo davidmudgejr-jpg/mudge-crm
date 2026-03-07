@@ -5,7 +5,7 @@ import React, { useState, useRef, useEffect } from 'react';
  *
  * @param {{ allColumns: Array<{key:string, label:string}>, visibleKeys: string[], toggleColumn: (key:string)=>void, showAll: ()=>void, hideAll: ()=>void, resetDefaults: ()=>void }} props
  */
-export default function ColumnToggleMenu({ allColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults }) {
+export default function ColumnToggleMenu({ allColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, customColumns = [], hiddenFieldIds = [], onToggleCustomColumn }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -27,8 +27,9 @@ export default function ColumnToggleMenu({ allColumns, visibleKeys, toggleColumn
     return () => document.removeEventListener('keydown', handler);
   }, [open]);
 
-  const count = visibleKeys.length;
-  const total = allColumns.length;
+  const visibleCustomCount = customColumns.filter((c) => !hiddenFieldIds.includes(c.key)).length;
+  const count = visibleKeys.length + visibleCustomCount;
+  const total = allColumns.length + customColumns.length;
 
   return (
     <div className="relative" ref={ref}>
@@ -83,6 +84,38 @@ export default function ColumnToggleMenu({ allColumns, visibleKeys, toggleColumn
               );
             })}
           </div>
+
+          {/* Custom field columns */}
+          {customColumns.length > 0 && (
+            <>
+              <div className="px-3 py-1.5 border-t border-crm-border">
+                <span className="text-[10px] font-medium text-crm-muted uppercase tracking-wider">Custom Fields</span>
+              </div>
+              <div className="py-1">
+                {customColumns.map((col) => {
+                  const checked = !hiddenFieldIds.includes(col.key);
+                  return (
+                    <button
+                      key={col.key}
+                      onClick={() => onToggleCustomColumn?.(col.key)}
+                      className="w-full flex items-center gap-2.5 px-3 py-1.5 text-left hover:bg-crm-hover transition-colors"
+                    >
+                      <div className={`w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+                        checked ? 'bg-crm-accent border-crm-accent' : 'border-crm-border'
+                      }`}>
+                        {checked && (
+                          <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        )}
+                      </div>
+                      <span className="text-xs text-crm-text truncate">{col.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       )}
     </div>

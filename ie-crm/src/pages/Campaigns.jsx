@@ -241,7 +241,7 @@ export default function Campaigns({ onCountChange }) {
   const [selected, setSelected] = useState(new Set());
   const [detailId, setDetailId] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
-  const { customColumns, addField, updateField, removeField, setValue, values } = useCustomFields('campaigns');
+  const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('campaigns');
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('campaigns', ALL_COLUMNS);
 
   const fetchData = useCallback(async () => {
@@ -374,6 +374,9 @@ export default function Campaigns({ onCountChange }) {
             showAll={showAll}
             hideAll={hideAll}
             resetDefaults={resetDefaults}
+            customColumns={allCustomColumns}
+            hiddenFieldIds={hiddenFieldIds}
+            onToggleCustomColumn={toggleCustomFieldVisibility}
           />
           <button
             onClick={fetchData}
@@ -409,6 +412,7 @@ export default function Campaigns({ onCountChange }) {
           onAddField={addField}
           onRenameField={(id, name) => updateField(id, { name })}
           onDeleteField={removeField}
+          onHideCustomField={hideField}
         />
       </div>
 

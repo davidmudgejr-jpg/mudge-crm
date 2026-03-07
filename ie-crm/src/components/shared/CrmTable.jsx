@@ -105,7 +105,7 @@ function InlineCellEditor({ value, fieldDef, typeDef, onSave, onCancel }) {
 
 /* ── Column header with rename / delete or hide ──────────────────────── */
 
-function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide, onResizeStart }) {
+function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide, onResizeStart, deleteDisabled }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameVal, setNameVal] = useState(col.label);
@@ -170,25 +170,28 @@ function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide,
 
       {menuOpen && (
         <div ref={menuRef} className="absolute top-full left-0 mt-1 w-36 bg-crm-sidebar border border-crm-border rounded-lg shadow-xl z-50 overflow-hidden animate-fade-in">
-          {onRename && (
-            <button
-              onClick={() => setRenaming(true)}
-              className="w-full text-left px-3 py-1.5 text-xs text-crm-text hover:bg-crm-hover transition-colors"
+          <button
+            onClick={() => setRenaming(true)}
+            className="w-full text-left px-3 py-1.5 text-xs text-crm-text hover:bg-crm-hover transition-colors"
+          >
+            Rename field
+          </button>
+          <button
+            onClick={() => { onHide?.(col.key); setMenuOpen(false); }}
+            className="w-full text-left px-3 py-1.5 text-xs text-crm-text hover:bg-crm-hover transition-colors"
+          >
+            Hide field
+          </button>
+          {deleteDisabled ? (
+            <div
+              className="w-full text-left px-3 py-1.5 text-xs text-crm-muted/40 cursor-not-allowed"
+              title="System fields cannot be deleted"
             >
-              Rename field
-            </button>
-          )}
-          {onHide && (
+              Delete field
+            </div>
+          ) : (
             <button
-              onClick={() => { onHide(col.key); setMenuOpen(false); }}
-              className="w-full text-left px-3 py-1.5 text-xs text-crm-muted hover:bg-crm-hover transition-colors"
-            >
-              Hide field
-            </button>
-          )}
-          {onDelete && (
-            <button
-              onClick={() => { onDelete(col.key); setMenuOpen(false); }}
+              onClick={() => { onDelete?.(col.key); setMenuOpen(false); }}
               className="w-full text-left px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 transition-colors"
             >
               Delete field
@@ -282,6 +285,7 @@ export default function CrmTable({
   onAddField,
   onRenameField,
   onDeleteField,
+  onHideCustomField,
 }) {
   /* ── Column order: drag-to-reorder with localStorage persistence ─── */
   const colOrderKey = `crm_column_order_${tableKey}`;
@@ -414,6 +418,7 @@ export default function CrmTable({
                   order={order}
                   onRename={onRenameColumn}
                   onHide={onHideColumn}
+                  deleteDisabled
                   onResizeStart={onResizeStart}
                 />
               </th>
@@ -432,6 +437,7 @@ export default function CrmTable({
                   orderBy={orderBy}
                   order={order}
                   onRename={onRenameField}
+                  onHide={onHideCustomField}
                   onDelete={onDeleteField}
                   onResizeStart={onResizeStart}
                 />
