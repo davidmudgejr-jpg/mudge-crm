@@ -696,7 +696,7 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 
 | Path | Use case | Tool |
 |---|---|---|
-| **CRM CSV Import** (in-browser) | Ongoing imports — monthly comps, quarterly Title Rep data | Settings > Import page in the CRM UI |
+| **CRM CSV Import** (in-browser) | Ongoing imports — monthly comps, quarterly Title Rep data | Dedicated Import tab in sidebar |
 | **Claude Code migration scripts** | One-time initial data load — Airtable exports, TPE Excel | Node scripts run directly against DB |
 
 Both paths share the same address normalizer and fuzzy matcher utilities.
@@ -725,27 +725,45 @@ Output: { normalized: "1234 main st", unit: null, city: null, state: null, zip: 
 
 Both match → same property.
 
-#### 2. Fuzzy Matcher (`ie-crm/server/utils/fuzzyMatcher.js`)
+#### 2. Composite Matcher (`ie-crm/server/utils/compositeMatcher.js`)
 
-**Property matching (by address):**
-1. Normalize incoming address
-2. Exact match against `properties.property_address` (also normalized) → auto-link
-3. If no exact match, Levenshtein distance against all properties in same city/zip → return candidates with confidence score
-4. Above 95% confidence → auto-link with log entry
-5. Below 95% → flag for user review (show in import results)
-6. No match at all → optionally create new property record (user chooses)
+Matching uses **multiple data points** — not just address. Same address can exist in different cities (e.g. "1234 Main St" in Riverside AND Ontario). The matcher layers fields together for a confidence score.
 
-**Company matching (by name):**
-- Same approach but for company names
-- Normalize: lowercase, strip "Inc", "LLC", "Corp", "Co", "Ltd", trailing periods
-- Exact match → auto-link
-- Fuzzy match with candidates → flag for review
-- Used when importing lease comps (tenant name → companies.company_name)
+**Property matching — tiered confidence:**
 
-**Contact matching (by name + email):**
-- Match by email first (most unique)
-- Fallback: match by normalized full_name
-- Used when importing contacts from Airtable or other sources
+| Match Level | Fields Checked | Confidence | Action |
+|---|---|---|---|
+| Exact | normalized_address + city + zip | 100% | Auto-link |
+| Strong | normalized_address + city (no zip) | 95% | Auto-link with log |
+| Strong | normalized_address + zip (no city) | 90% | Auto-link with log |
+| Moderate | normalized_address only, unique in DB | 85% | Auto-link with warning |
+| Ambiguous | normalized_address matches 2+ properties | — | Flag for review, show all candidates with city/zip |
+| Fuzzy | Levenshtein close + city or zip match | 70-89% | Flag for review |
+| No match | Nothing close | — | Option to create new record |
+
+When the CSV includes city, zip, county, or property_name columns, use ALL of them for matching. Most source exports (CoStar, Airtable, Landvision) include these fields.
+
+**Company matching — tiered confidence:**
+
+| Match Level | Fields Checked | Confidence | Action |
+|---|---|---|---|
+| Exact | company_name (normalized) + city | 100% | Auto-link |
+| Strong | company_name only, unique in DB | 90% | Auto-link with log |
+| Ambiguous | company_name matches 2+ companies | — | Flag for review |
+
+Normalize: lowercase, strip "Inc", "LLC", "Corp", "Co", "Ltd", trailing periods.
+
+**Contact matching — tiered confidence:**
+
+| Match Level | Fields Checked | Confidence | Action |
+|---|---|---|---|
+| Exact | email address | 100% | Auto-link |
+| Strong | full_name + company match | 85% | Auto-link with log |
+| Fuzzy | name only, unique in DB | 70% | Flag for review |
+
+Always match by email first (most unique), fall back to name + company.
+
+**Flagged row UI:** Rows flagged for review show a yellow warning in the import preview — the incoming row alongside all candidate matches with city/zip/name visible. User picks the correct match or creates a new record. Nothing gets silently linked to the wrong property.
 
 #### 3. Batch INSERT Endpoint (`POST /api/import/batch`)
 
@@ -794,14 +812,34 @@ Each target table has a config defining its column mapping, required fields, and
 | `tenant_growth` | company name + data_date | company_id | CoStar/Vibe CSV |
 | `action_items` | name (dedup) | contact_id, property_id, deal_id | Airtable export |
 
-#### 5. CRM Import UI (Settings > Import)
+#### 5. Import Page (dedicated sidebar tab)
 
-- **Step 1:** User picks target table from dropdown
-- **Step 2:** User uploads CSV file
-- **Step 3:** Column mapping screen (auto-mapped with fuzzy header matching, user can override)
-- **Step 4:** Preview — show first 20 rows, highlight unmapped columns, show match results (auto-linked, flagged, new)
-- **Step 5:** User reviews flagged rows — pick correct match or "create new"
-- **Step 6:** Execute import → show results summary
+One import tool for the entire CRM — not buried in Settings, not per-tab. Accessible from the sidebar between Campaigns and Settings.
+
+**Auto-detection:** When a CSV is uploaded, the system scans column headers against signature fields for each table and scores the best match. Whichever table scores highest is pre-selected.
+
+| CSV has these headers | → Auto-detects as |
+|---|---|
+| tenant_name, commencement_date, rate, term_months | lease_comps |
+| sale_price, buyer_name, seller_name, cap_rate | sale_comps |
+| full_name, email, phone, title, linkedin | contacts |
+| address, rba, year_built, owner_name, zoning | properties |
+| company_name, industry, employees, revenue | companies |
+| maturity_date, lender, loan_amount, ltv | loan_maturities |
+| distress_type, filing_date, trustee | property_distress |
+| headcount_current, growth_rate, revenue_current | tenant_growth |
+| deal name, commission_rate, close_date, repping | deals |
+| responsibility, due_date, high_priority, status | action_items |
+
+User can always override the auto-detection manually.
+
+**Import flow:**
+- **Step 1:** User uploads CSV file (drag & drop or file picker)
+- **Step 2:** Auto-detection banner: "Detected: **Lease Comps** (24 of 28 columns matched). 847 rows." User confirms or overrides.
+- **Step 3:** Column mapping screen (auto-mapped from header matching, user can adjust any column)
+- **Step 4:** Preview — first 20 rows with match results: green (auto-linked), yellow (flagged for review), blue (new record)
+- **Step 5:** User reviews flagged rows — pick correct match from candidates or "create new"
+- **Step 6:** Execute import → results summary (inserted, skipped, updated, flagged, errors)
 
 #### 6. Upgrade Existing Comps Import
 

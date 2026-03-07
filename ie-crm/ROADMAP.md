@@ -48,7 +48,8 @@ Last updated: March 2026
 6. Comps (Lease | Sale toggle)
 7. Action Items (Apple Reminders UI)
 8. Campaigns
-9. Settings
+9. Import (auto-detects target table from CSV headers)
+10. Settings
 
 ---
 
@@ -135,17 +136,21 @@ Last updated: March 2026
 - [ ] Types: Phone Call, Cold Call, Voicemail, Outbound Email, Inbound Email, Cold Email, Check in Email, Email Campaign, Text, Meeting, Tour, Door Knock, Drive By, Snail Mail, Offer Sent, Survey Sent, BOV Sent
 
 ### 1G — CSV Import Engine
-*General-purpose import with address normalization, fuzzy matching, batch INSERT. Handles 10K+ row imports. Full spec in HANDOFF.md.*
+*One smart Import page for the entire CRM. Auto-detects target table from CSV headers, composite matching with city/zip/name for accuracy. Handles 10K+ row imports. Full spec in HANDOFF.md.*
 
 - [ ] Address normalizer utility — standardize Street>St, Avenue>Ave, strip city/state/zip, lowercase, etc.
 - [ ] `normalized_address` column on properties table (auto-computed trigger)
-- [ ] Fuzzy matcher — Levenshtein distance for properties (by address) and companies (by name), confidence scoring
+- [ ] Composite matcher — tiered confidence scoring using address + city + zip (not just address alone)
+- [ ] Company matcher — normalized name + city, handles Inc/LLC/Corp variants
+- [ ] Contact matcher — email first, then name + company fallback
 - [ ] Batch INSERT endpoint (`POST /api/import/batch`) — single SQL transaction for 10K+ rows
-- [ ] Import target configs for all tables: properties, contacts, companies, deals, lease_comps, sale_comps, loan_maturities, property_distress, tenant_growth, action_items
-- [ ] CRM Import UI (Settings > Import) — target picker, file upload, column mapping, preview, flagged row review, execute
+- [ ] Auto-detection — scan CSV headers against signature fields per table, pre-select best match
+- [ ] Import target configs for all 10 tables with signature header lists
+- [ ] Dedicated Import page (sidebar tab between Campaigns and Settings)
+- [ ] Import flow: upload → auto-detect → column mapping → preview with match results → review flagged → execute
+- [ ] Flagged row review UI — yellow warnings with candidate matches showing city/zip for disambiguation
 - [ ] Refactor existing Comps CSV import to use the new engine
 - [ ] Dedup detection with `ON CONFLICT` handling (skip, update, or flag)
-- [ ] Contact matching by email (primary) and name (fallback)
 - [ ] Source tracking on every imported record
 
 ### 1H — SQL VIEWs & Formula Computation
