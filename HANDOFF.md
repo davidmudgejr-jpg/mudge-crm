@@ -586,8 +586,78 @@ LEFT JOIN LATERAL (...) growth ON true;
 #### TPE in the UI
 
 - **Not a separate tab** — TPE scores appear as columns in the Properties table (Total Score, Blended Priority, Likely Transaction)
-- Property detail view shows a **Score Breakdown Card** with all 5 categories
+- Property detail view shows a **Score Breakdown Card** with all 5 categories + Action Intelligence (see below)
 - Properties can be sorted/filtered by TPE score
+
+#### Action Intelligence (computed "Who To Call & Why")
+
+The TPE VIEW doesn't just output scores — it generates **plain-English call reasons** from the underlying data. This replaces the manually-typed "who to call and why" column from the TPE Excel. All reasons are auto-computed and always current.
+
+**Additional VIEW output columns:**
+
+| Column | Type | Logic |
+|---|---|---|
+| `call_target` | TEXT | 'owner', 'tenant', or 'both' — based on which score categories drive the total |
+| `call_reasons` | TEXT[] | Array of plain-English reason strings built from real data |
+| `owner_name` | TEXT | From `properties.owner_name` |
+| `owner_contact` | TEXT | From `properties.owner_contact` |
+| `tenant_name` | TEXT | From nearest `lease_comps` → `companies.company_name` |
+| `tenant_lease_exp` | DATE | From nearest `lease_comps.expiration_date` |
+| `lender_name` | TEXT | From `loan_maturities.lender` (nearest maturity) |
+| `loan_maturity_date` | DATE | From `loan_maturities.maturity_date` (nearest) |
+
+**`call_target` logic:**
+- If Lease Score + Growth Score > Ownership Score + Stress Score → 'tenant'
+- If Ownership Score + Stress Score > Lease Score + Growth Score → 'owner'
+- If both sides contribute meaningfully → 'both'
+
+**`call_reasons` generation — each reason is a CASE statement:**
+
+| Condition | Generated reason string |
+|---|---|
+| Lease expires ≤12 months | "Lease expires in {N} months ({date}) — tenant {company_name}" |
+| Lease expires ≤24 months | "Lease expires {date} — early outreach to {company_name}" |
+| Loan maturity ≤12 months | "Loan with {lender} matures {date} — owner may need to sell/refinance" |
+| Loan maturity ≤24 months | "Loan with {lender} matures {date} — upcoming debt event" |
+| property_distress = NOD | "NOD filed {date} — owner under foreclosure pressure" |
+| property_distress = Auction | "Auction scheduled {date} — distressed sale opportunity" |
+| property_distress = REO | "Bank-owned (REO) — lender motivated to sell" |
+| property_distress = Lis Pendens | "Lis Pendens filed {date} — legal action pending" |
+| growth_rate ≥ 30% | "Revenue up {N}% YoY — tenant may need more space" |
+| growth_rate ≥ 20% | "Growing tenant ({N}% YoY) — expansion candidate" |
+| out_of_area_owner = true | "Out-of-area owner ({owner location}) — may consider selling IE asset" |
+| owner_user_or_investor = 'Investor' | "Investor-owned — more likely to transact than owner-occupant" |
+| year_built ≤ 1980 | "Building built {year} ({age} years old) — redevelopment candidate" |
+| office_courtesy = true | "⚠️ Office courtesy — Lee & Associates previously involved" |
+
+**Score Breakdown Card layout (property detail panel):**
+
+```
+┌─ TPE Score: 78/100 ──────────────────────────────┐
+│                                                    │
+│  Lease        ████████████████████░░  30/30        │
+│  Ownership    █████████████████░░░░░  20/25        │
+│  Age          ██████████████████░░░░  18/20        │
+│  Growth       █████░░░░░░░░░░░░░░░░░   5/15       │
+│  Stress       █████░░░░░░░░░░░░░░░░░   5/10       │
+│                                                    │
+│  Likely Transaction: LEASE                         │
+│                                                    │
+│  ── Who To Call & Why ──────────────────────────── │
+│                                                    │
+│  CALL OWNER: John Smith (212-555-0100)             │
+│  • Loan with Wells Fargo matures Oct 2026          │
+│  • Out-of-area owner (New York, NY)                │
+│  • Building built 1978 — 48 years old              │
+│                                                    │
+│  CALL TENANT: ABC Manufacturing                    │
+│  • Lease expires in 8 months (Nov 2026)            │
+│  • Revenue up 35% YoY — may need more space        │
+│                                                    │
+└────────────────────────────────────────────────────┘
+```
+
+**Why this replaces the Excel "who to call" column:** In the TPE Excel, call reasons were manually typed once and went stale. In the CRM, every reason is generated from live data — when you import new loan maturity data, update a lease expiration, or add a distress record, the reasons update instantly across all affected properties. This is also the foundation for Houston: Houston reads these computed reasons to auto-create action items.
 - Future: dedicated TPE Dashboard view with heatmap, top 50 targets, score change alerts
 
 #### Houston's Auto-Generated Action Items

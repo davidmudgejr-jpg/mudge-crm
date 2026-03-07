@@ -128,8 +128,10 @@ Last updated: March 2026
 - [ ] Likely Transaction Type: SALE / LEASE / BLENDED based on score composition
 - [ ] Office Courtesy flag for Lee & Associates properties
 - [ ] TPE score columns visible in Properties table (sortable/filterable)
-- [ ] Score Breakdown Card in Property detail view
-- [ ] CSV import for loan maturity, distressed property, and tenant growth data
+- [ ] Score Breakdown Card in Property detail view with visual bar chart for 5 categories
+- [ ] Action Intelligence — computed `call_target` (owner/tenant/both) and `call_reasons` (TEXT[] of plain-English strings)
+- [ ] "Who To Call & Why" section in Score Breakdown Card — auto-generated from live data (replaces manual Excel column)
+- [ ] CSV import for loan maturity, distressed property, and tenant growth data (via Import tab)
 
 ### 1F — Interaction Type Expansion
 - [ ] Expand interaction types from 7 to 17 in NewInteractionModal + detail view
