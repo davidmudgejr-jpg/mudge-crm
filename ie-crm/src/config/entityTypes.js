@@ -72,6 +72,26 @@ const ENTITY_TYPES = {
     chipColor: 'bg-red-500/15 text-red-400 border-red-500/30',
     route: '/action-items',
   },
+  lease_comp: {
+    label: 'Lease Comp',
+    labelPlural: 'Lease Comps',
+    table: 'lease_comps',
+    idCol: 'id',
+    displayCol: 'tenant_name',
+    secondaryCol: 'property_type',
+    chipColor: 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30',
+    route: '/comps',
+  },
+  sale_comp: {
+    label: 'Sale Comp',
+    labelPlural: 'Sale Comps',
+    table: 'sale_comps',
+    idCol: 'id',
+    displayCol: 'buyer_name',
+    secondaryCol: 'sale_date',
+    chipColor: 'bg-teal-500/15 text-teal-400 border-teal-500/30',
+    route: '/comps',
+  },
 };
 
 // Junction table definitions: maps "entityA-entityB" to junction config

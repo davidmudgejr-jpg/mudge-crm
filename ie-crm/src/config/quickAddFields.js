@@ -44,6 +44,25 @@ export const QUICK_ADD_FIELDS = {
     { key: 'high_priority', label: 'High Priority', type: 'checkbox' },
   ],
 
+  lease_comp: [
+    { key: 'tenant_name', label: 'Tenant Name', type: 'text', required: true, placeholder: 'Acme Corp' },
+    { key: 'property_type', label: 'Property Type', type: 'select', options: ['Industrial', 'Office', 'Retail', 'Multifamily', 'Land', 'Mixed-Use'] },
+    { key: 'sf', label: 'Square Feet', type: 'number', placeholder: '50000' },
+    { key: 'rate', label: 'Rate ($/SF/mo)', type: 'number', placeholder: '1.25' },
+    { key: 'term_months', label: 'Term (months)', type: 'number', placeholder: '60' },
+    { key: 'commencement_date', label: 'Commencement Date', type: 'date' },
+    { key: 'expiration_date', label: 'Expiration Date', type: 'date' },
+  ],
+
+  sale_comp: [
+    { key: 'sale_date', label: 'Sale Date', type: 'date' },
+    { key: 'property_type', label: 'Property Type', type: 'select', options: ['Industrial', 'Office', 'Retail', 'Multifamily', 'Land', 'Mixed-Use'] },
+    { key: 'sale_price', label: 'Sale Price', type: 'number', placeholder: '5000000' },
+    { key: 'sf', label: 'Square Feet', type: 'number', placeholder: '100000' },
+    { key: 'buyer_name', label: 'Buyer', type: 'text', placeholder: 'ABC Investments' },
+    { key: 'seller_name', label: 'Seller', type: 'text', placeholder: 'XYZ Properties' },
+  ],
+
   campaign: [
     { key: 'name', label: 'Campaign Name', type: 'text', required: true, placeholder: 'Q1 Outreach' },
     { key: 'type', label: 'Type', type: 'select', options: ['Email', 'Direct Mail', 'Cold Call', 'Door Knock', 'SMS', 'Social Media', 'Event'] },

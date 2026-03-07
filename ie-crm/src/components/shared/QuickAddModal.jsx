@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { createProperty, createContact, createCompany, createDeal, createInteraction, createCampaign } from '../../api/database';
+import { createProperty, createContact, createCompany, createDeal, createInteraction, createCampaign, createActionItem, createLeaseComp, createSaleComp } from '../../api/database';
 import ENTITY_TYPES from '../../config/entityTypes';
 import { QUICK_ADD_FIELDS } from '../../config/quickAddFields';
 import { todayPacific } from '../../utils/timezone';
@@ -11,6 +11,9 @@ const CREATE_FNS = {
   deal: createDeal,
   interaction: createInteraction,
   campaign: createCampaign,
+  action_item: createActionItem,
+  lease_comp: createLeaseComp,
+  sale_comp: createSaleComp,
 };
 
 export default function QuickAddModal({ entityType, onCreated, onClose }) {

@@ -770,6 +770,118 @@ export async function getActionItemCompanies(actionItemId) {
 }
 
 // ============================================================
+// LEASE COMPS
+// ============================================================
+export async function getLeaseComps({ limit = 200, offset = 0, orderBy = 'created_at', order = 'DESC', filters = {} } = {}) {
+  let where = [];
+  let params = [];
+  let i = 1;
+
+  if (filters.property_type) { where.push(`property_type = $${i++}`); params.push(filters.property_type); }
+  if (filters.rent_type) { where.push(`rent_type = $${i++}`); params.push(filters.rent_type); }
+  if (filters.source) { where.push(`source = $${i++}`); params.push(filters.source); }
+  if (filters.search) {
+    where.push(`(tenant_name ILIKE $${i} OR floor_suite ILIKE $${i} OR property_type ILIKE $${i} OR tenant_rep_company ILIKE $${i} OR landlord_rep_company ILIKE $${i})`);
+    params.push(`%${filters.search}%`);
+    i++;
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const safeOrder = sanitizeCol(orderBy, 'lease_comps', 'created_at');
+  const safeDir = sanitizeDir(order);
+  const sql = `SELECT * FROM lease_comps ${whereClause} ORDER BY ${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
+  params.push(limit, offset);
+
+  return query(sql, params);
+}
+
+export async function getLeaseComp(id) {
+  return query('SELECT * FROM lease_comps WHERE id = $1', [id]);
+}
+
+export async function createLeaseComp(fields) {
+  const keys = Object.keys(fields);
+  validateFieldKeys(keys, 'lease_comps');
+  const cols = ['id', ...keys];
+  const placeholders = cols.map((_, i) => `$${i + 1}`);
+  const id = crypto.randomUUID();
+  const sql = `INSERT INTO lease_comps (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
+  return query(sql, [id, ...Object.values(fields)]);
+}
+
+export async function updateLeaseComp(id, fields) {
+  const keys = Object.keys(fields);
+  validateFieldKeys(keys, 'lease_comps');
+  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
+  const sql = `UPDATE lease_comps SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1 RETURNING *`;
+  return query(sql, [id, ...Object.values(fields)]);
+}
+
+export async function deleteLeaseComp(id) {
+  return query('DELETE FROM lease_comps WHERE id = $1 RETURNING *', [id]);
+}
+
+// ============================================================
+// SALE COMPS
+// ============================================================
+export async function getSaleComps({ limit = 200, offset = 0, orderBy = 'created_at', order = 'DESC', filters = {} } = {}) {
+  let where = [];
+  let params = [];
+  let i = 1;
+
+  if (filters.property_type) { where.push(`property_type = $${i++}`); params.push(filters.property_type); }
+  if (filters.source) { where.push(`source = $${i++}`); params.push(filters.source); }
+  if (filters.search) {
+    where.push(`(buyer_name ILIKE $${i} OR seller_name ILIKE $${i} OR property_type ILIKE $${i})`);
+    params.push(`%${filters.search}%`);
+    i++;
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const safeOrder = sanitizeCol(orderBy, 'sale_comps', 'created_at');
+  const safeDir = sanitizeDir(order);
+  const sql = `SELECT * FROM sale_comps ${whereClause} ORDER BY ${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
+  params.push(limit, offset);
+
+  return query(sql, params);
+}
+
+export async function getSaleComp(id) {
+  return query('SELECT * FROM sale_comps WHERE id = $1', [id]);
+}
+
+export async function createSaleComp(fields) {
+  const keys = Object.keys(fields);
+  validateFieldKeys(keys, 'sale_comps');
+  const cols = ['id', ...keys];
+  const placeholders = cols.map((_, i) => `$${i + 1}`);
+  const id = crypto.randomUUID();
+  const sql = `INSERT INTO sale_comps (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
+  return query(sql, [id, ...Object.values(fields)]);
+}
+
+export async function updateSaleComp(id, fields) {
+  const keys = Object.keys(fields);
+  validateFieldKeys(keys, 'sale_comps');
+  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
+  const sql = `UPDATE sale_comps SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1 RETURNING *`;
+  return query(sql, [id, ...Object.values(fields)]);
+}
+
+export async function deleteSaleComp(id) {
+  return query('DELETE FROM sale_comps WHERE id = $1 RETURNING *', [id]);
+}
+
+// Property ↔ Comps lookups (for property detail view)
+export async function getPropertyLeaseComps(propertyId) {
+  return query('SELECT * FROM lease_comps WHERE property_id = $1 ORDER BY commencement_date DESC', [propertyId]);
+}
+
+export async function getPropertySaleComps(propertyId) {
+  return query('SELECT * FROM sale_comps WHERE property_id = $1 ORDER BY sale_date DESC', [propertyId]);
+}
+
+// ============================================================
 // FORMULA COLUMNS
 // ============================================================
 export async function getFormulaColumns(tableName) {
@@ -998,10 +1110,10 @@ export async function batchGetActionItemCompanies(actionItemIds) {
 // ============================================================
 // TABLE COUNTS
 // ============================================================
-const ALLOWED_COUNT_TABLES = new Set(['properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns', 'action_items']);
+const ALLOWED_COUNT_TABLES = new Set(['properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns', 'action_items', 'lease_comps', 'sale_comps']);
 
 export async function getTableCounts() {
-  const tables = ['properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns', 'action_items'];
+  const tables = ['properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns', 'action_items', 'lease_comps', 'sale_comps'];
   const results = {};
   for (const t of tables) {
     if (!ALLOWED_COUNT_TABLES.has(t)) throw new Error(`Disallowed table: ${t}`);
