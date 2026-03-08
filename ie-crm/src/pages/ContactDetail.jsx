@@ -11,6 +11,7 @@ import InteractionDetail from './InteractionDetail';
 import { formatDatePacific } from '../utils/timezone';
 import TYPE_ICONS from '../config/typeIcons';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
+import ActivitySection from '../components/shared/ActivitySection';
 
 export const CONTACT_TYPES = ['Tenant', 'Landlord', 'Buyer', 'Seller', 'Investor', 'Developer', 'Broker', 'Lender', 'Attorney', 'Other'];
 export const CLIENT_LEVEL_OPTIONS = ['A', 'B', 'C', 'D'];
@@ -153,43 +154,7 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
         </div>
       </Section>
 
-      <Section title="Activity" badge={interactions.length} defaultOpen={interactions.length > 0}
-        actions={
-          <button onClick={() => setShowNewInteraction(true)} className="text-crm-accent hover:text-crm-accent/70 text-xs font-medium">+ Activity</button>
-        }
-      >
-        {interactions.length === 0 ? (
-          <p className="text-xs text-crm-muted">No interactions</p>
-        ) : (
-          <div className="space-y-1">
-            {interactions.slice(0, 10).map((int) => {
-              const typeInfo = TYPE_ICONS[int.type] || TYPE_ICONS.Other;
-              return (
-              <button
-                key={int.interaction_id}
-                onClick={() => setSelectedInteraction(int.interaction_id)}
-                className="w-full flex gap-3 px-2 py-1.5 -mx-2 rounded-lg hover:bg-crm-card/60 transition-colors cursor-pointer text-left"
-              >
-                <div className={`w-[18px] h-[18px] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${typeInfo.color}`}>
-                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={typeInfo.icon} />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium">
-                    {int.type === 'Note' && int.notes
-                      ? (() => { const clean = int.notes.split(/\n\n---\s/)[0].trim(); return clean.length > 60 ? clean.slice(0, 60) + '...' : clean; })()
-                      : <>{int.type}{int.email_heading ? ` — ${int.email_heading}` : ''}</>}
-                  </div>
-                  {int.type !== 'Note' && int.notes && <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes.split(/\n\n---\s/)[0].trim()}</div>}
-                  <div className="text-[10px] text-crm-muted mt-0.5">{formatDatePacific(int.date) || ''}</div>
-                </div>
-              </button>
-              );
-            })}
-          </div>
-        )}
-      </Section>
+      <ActivitySection interactions={interactions} onNewInteraction={() => setShowNewInteraction(true)} onSelectInteraction={(id) => setSelectedInteraction(id)} />
 
       {selectedInteraction && (
         <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setSelectedInteraction(null)}>

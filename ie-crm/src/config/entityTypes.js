@@ -29,7 +29,7 @@ const ENTITY_TYPES = {
     idCol: 'company_id',
     displayCol: 'company_name',
     secondaryCol: 'city',
-    chipColor: 'bg-amber-500/15 text-amber-400 border-amber-500/30',
+    chipColor: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
     route: '/companies',
   },
   deal: {
@@ -39,7 +39,7 @@ const ENTITY_TYPES = {
     idCol: 'deal_id',
     displayCol: 'deal_name',
     secondaryCol: 'status',
-    chipColor: 'bg-green-500/15 text-green-400 border-green-500/30',
+    chipColor: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
     route: '/deals',
   },
   interaction: {
@@ -59,7 +59,7 @@ const ENTITY_TYPES = {
     idCol: 'campaign_id',
     displayCol: 'name',
     secondaryCol: 'type',
-    chipColor: 'bg-rose-500/15 text-rose-400 border-rose-500/30',
+    chipColor: 'bg-teal-500/15 text-teal-400 border-teal-500/30',
     route: '/campaigns',
   },
   action_item: {

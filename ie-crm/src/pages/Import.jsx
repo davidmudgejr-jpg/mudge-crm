@@ -62,6 +62,10 @@ const COLUMN_MAPS = {
     'landlord rep company': 'landlord_rep_company', 'landlord rep': 'landlord_rep_company',
     'landlord rep agents': 'landlord_rep_agents', 'landlord agents': 'landlord_rep_agents',
     notes: 'notes', source: 'source',
+    'actual rate': 'rate', 'asking rate': 'rate',
+    'cam expenses': 'cam_expenses', cam: 'cam_expenses', 'cam/nnn': 'cam_expenses',
+    zoning: 'zoning',
+    '#gl/did': 'doors_with_lease', 'gl did': 'doors_with_lease', 'doors with lease': 'doors_with_lease', 'gl/did': 'doors_with_lease',
     // Address fields for matching (not stored in lease_comps but used for property linking)
     address: '_address', 'property address': '_address', 'building address': '_address', 'street address': '_address',
     city: '_city', state: '_state', zip: '_zip', 'zip code': '_zip',
@@ -235,7 +239,7 @@ const NEEDS_PROPERTY_MATCH = new Set(['lease_comps', 'sale_comps', 'loan_maturit
 const NEEDS_COMPANY_MATCH = new Set(['lease_comps', 'tenant_growth']);
 
 const NUMERIC_FIELDS = new Set([
-  'sf', 'building_rba', 'rate', 'escalations', 'free_rent_months', 'ti_psf', 'term_months',
+  'sf', 'building_rba', 'rate', 'escalations', 'free_rent_months', 'ti_psf', 'term_months', 'cam_expenses', 'doors_with_lease',
   'sale_price', 'price_psf', 'price_plsf', 'cap_rate', 'land_sf', 'rba', 'land_area_ac',
   'far', 'last_sale_price', 'plsf', 'loan_amount', 'vacancy_pct', 'percent_leased',
   'parking_ratio', 'for_sale_price', 'ops_expense_psf', 'total_available_sf',

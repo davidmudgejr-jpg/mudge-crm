@@ -30,6 +30,7 @@ const ALL_COLUMNS = [
   { key: 'employees', label: 'Employees', defaultWidth: 80, format: 'number' },
   { key: 'revenue', label: 'Revenue', defaultWidth: 90, renderCell: (val) => formatRevenue(val) },
   { key: 'lease_exp', label: 'Lease Exp', defaultWidth: 90, format: 'date' },
+  { key: 'last_contacted', label: 'Last Contact', defaultWidth: 100, format: 'date' },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags' },
   // Hidden by default
   { key: 'website', label: 'Website', defaultWidth: 160, defaultVisible: false },

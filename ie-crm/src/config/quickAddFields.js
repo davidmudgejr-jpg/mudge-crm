@@ -6,7 +6,7 @@ export const QUICK_ADD_FIELDS = {
     { key: 'property_address', label: 'Address', type: 'text', required: true, placeholder: '123 Main St' },
     { key: 'city', label: 'City', type: 'text', placeholder: 'Dallas' },
     { key: 'property_type', label: 'Type', type: 'select', options: ['Office', 'Retail', 'Industrial', 'Multifamily', 'Land', 'Mixed-Use', 'Special Purpose'] },
-    { key: 'building_sqft', label: 'Building SF', type: 'number', placeholder: '50000' },
+    { key: 'rba', label: 'Building SF', type: 'number', placeholder: '50000' },
   ],
 
   contact: [

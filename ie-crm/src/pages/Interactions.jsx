@@ -184,8 +184,15 @@ export default function Interactions({ onCountChange }) {
                               })()}
                             </p>
                           ) : (
-                            <p className="text-sm text-crm-muted/40">&mdash;</p>
+                            <p className="text-sm text-crm-muted/60 italic">(no subject)</p>
                           )}
+                          {/* Linked entity names */}
+                          {(() => {
+                            const parts = [row.linked_contact_names, row.linked_property_names, row.linked_deal_names, row.linked_company_names].filter(Boolean);
+                            return parts.length > 0 && (
+                              <p className="text-[10px] text-crm-muted/70 mt-0.5 truncate">{parts.join(' · ')}</p>
+                            );
+                          })()}
                         </div>
 
                         <div className="flex-shrink-0 text-right">

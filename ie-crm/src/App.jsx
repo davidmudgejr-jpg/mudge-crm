@@ -29,6 +29,7 @@ import DealDetail from './pages/DealDetail';
 import InteractionDetail from './pages/InteractionDetail';
 import ActionItemDetail from './pages/ActionItemDetail';
 import CompDetail from './pages/CompDetail';
+import CampaignDetail from './pages/CampaignDetail';
 
 const DETAIL_COMPONENTS = {
   property: PropertyDetail,
@@ -37,6 +38,7 @@ const DETAIL_COMPONENTS = {
   deal: DealDetail,
   interaction: InteractionDetail,
   action_item: ActionItemDetail,
+  campaign: CampaignDetail,
   lease_comp: CompDetail,
   sale_comp: CompDetail,
 };
@@ -61,6 +63,8 @@ function AppShell() {
   const [currentTable, setCurrentTable] = useState('properties');
   const [rowCount, setRowCount] = useState(0);
   const { devMode } = useDevMode();
+  const { stack: slideOverStack } = useSlideOver();
+  const hasSlideOver = slideOverStack.length > 0;
 
   return (
     <div className={`flex h-screen bg-crm-bg text-crm-text overflow-hidden ${devMode ? 'dev-mode' : ''}`}>
@@ -99,7 +103,7 @@ function AppShell() {
       {!claudeOpen && (
         <button
           onClick={() => setClaudeOpen(true)}
-          className="fixed right-4 bottom-4 z-40 bg-crm-accent hover:bg-crm-accent-hover text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-colors"
+          className={`fixed bottom-4 z-40 bg-crm-accent hover:bg-crm-accent-hover text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-all duration-200 ${hasSlideOver ? 'right-[540px]' : 'right-4'}`}
           title="Open Claude"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -14,9 +14,12 @@ import { SlideOverHeader } from '../components/shared/SlideOver';
 import DetailSkeleton from '../components/shared/DetailSkeleton';
 import TYPE_ICONS from '../config/typeIcons';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
+import InteractionDetail from './InteractionDetail';
+import ActivitySection from '../components/shared/ActivitySection';
 
 const PRIORITY_OPTIONS = ['Hot', 'Warm', 'Cold', 'Dead'];
 const PROPERTY_TYPES = ['Office', 'Retail', 'Industrial', 'Multifamily', 'Mixed-Use', 'Land', 'Other'];
+const CONTACTED_OPTIONS = ['Contacted Owner', 'Not Contacted', 'Broker/Not worth it', 'Emailed Owner/Tenant', 'Cold called', 'Left VM', 'Contacted Tenant', 'Contacted Owner & Tenant', 'Listing', 'Doorknocked', 'BOV Sent', 'Offer Sent', 'Letter Sent', 'Met with Owner'];
 
 export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefresh, isSlideOver }) {
   const resolvedId = id || propertyId;
@@ -28,6 +31,7 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showNewInteraction, setShowNewInteraction] = useState(false);
+  const [selectedInteraction, setSelectedInteraction] = useState(null);
 
   const saveField = useAutoSave(updateProperty, resolvedId, setProp, onRefresh);
 
@@ -145,8 +149,8 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
           <InlineField label="APN" value={prop.apn} field="apn" onSave={saveField} />
           <InlineField label="Type" value={prop.property_type} field="property_type" type="select" options={PROPERTY_TYPES} onSave={saveField} />
           <InlineField label="Zoning" value={prop.zoning} field="zoning" onSave={saveField} />
-          <InlineField label="Building SF" value={prop.building_sqft} field="building_sqft" type="number" onSave={saveField} parse={parseInt0} format={(v) => v?.toLocaleString()} />
-          <InlineField label="Lot SF" value={prop.lot_sqft} field="lot_sqft" type="number" onSave={saveField} parse={parseInt0} format={(v) => v?.toLocaleString()} />
+          <InlineField label="Building SF" value={prop.rba} field="rba" type="number" onSave={saveField} parse={parseInt0} format={(v) => v?.toLocaleString()} />
+          <InlineField label="Lot SF" value={prop.land_sf} field="land_sf" type="number" onSave={saveField} parse={parseInt0} format={(v) => v?.toLocaleString()} />
           <InlineField label="Year Built" value={prop.year_built} field="year_built" type="number" onSave={saveField} parse={parseInt0} />
           <InlineField label="Units" value={prop.units} field="units" type="number" onSave={saveField} parse={parseInt0} />
           <InlineField label="Stories" value={prop.stories} field="stories" type="number" onSave={saveField} parse={parseInt0} />
@@ -165,52 +169,29 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
         </div>
       </Section>
 
-      <Section title="Owner Info">
+      <Section title="Entity Info">
         <div className="grid grid-cols-2 gap-x-4">
-          <InlineField label="Owner Name" value={prop.owner_name} field="owner_name" onSave={saveField} />
+          <InlineField label="Entity Name" value={prop.owner_name} field="owner_name" onSave={saveField} />
           <InlineField label="Owner Phone" value={prop.owner_phone} field="owner_phone" type="phone" onSave={saveField} />
           <InlineField label="Owner Email" value={prop.owner_email} field="owner_email" type="email" onSave={saveField} />
           <InlineField label="Mailing Address" value={prop.owner_mailing_address} field="owner_mailing_address" onSave={saveField} />
         </div>
       </Section>
 
-      <LinkedRecordSection title="Contacts" entityType="contact" records={contactRecords} defaultOpen={contacts.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
+      <LinkedRecordSection title="Owner Contact" entityType="contact" records={contactRecords} defaultOpen={contacts.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
       <LinkedRecordSection title="Companies" entityType="company" records={companyRecords} defaultOpen={companies.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
       <LinkedRecordSection title="Deals" entityType="deal" records={dealRecords} defaultOpen={deals.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
 
-      <Section title="Activity" badge={interactions.length} defaultOpen={interactions.length > 0}
-        actions={
-          <button onClick={() => setShowNewInteraction(true)} className="text-crm-accent hover:text-crm-accent/70 text-xs font-medium">+ Activity</button>
-        }
-      >
-        {interactions.length === 0 ? (
-          <p className="text-xs text-crm-muted">No interactions</p>
-        ) : (
-          <div className="space-y-2">
-            {interactions.slice(0, 10).map((int) => {
-              const typeInfo = TYPE_ICONS[int.type] || TYPE_ICONS.Other;
-              return (
-              <div key={int.interaction_id} className="flex gap-3">
-                <div className={`w-[18px] h-[18px] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${typeInfo.color}`}>
-                  <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={typeInfo.icon} />
-                  </svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs font-medium">
-                    {int.type === 'Note' && int.notes
-                      ? (() => { const clean = int.notes.split(/\n\n---\s/)[0].trim(); return clean.length > 60 ? clean.slice(0, 60) + '...' : clean; })()
-                      : <>{int.type}{int.email_heading ? ` — ${int.email_heading}` : ''}</>}
-                  </div>
-                  {int.type !== 'Note' && int.notes && <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes.split(/\n\n---\s/)[0].trim()}</div>}
-                  <div className="text-[10px] text-crm-muted mt-0.5">{formatDatePacific(int.date) || ''}</div>
-                </div>
-              </div>
-              );
-            })}
+      <ActivitySection interactions={interactions} onNewInteraction={() => setShowNewInteraction(true)} onSelectInteraction={(id) => setSelectedInteraction(id)} />
+
+      {selectedInteraction && (
+        <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setSelectedInteraction(null)}>
+          <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
+          <div className="relative w-[480px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+            <InteractionDetail id={selectedInteraction} onClose={() => setSelectedInteraction(null)} onRefresh={loadData} isSlideOver />
           </div>
-        )}
-      </Section>
+        </div>
+      )}
 
       {showNewInteraction && (
         <NewInteractionModal
@@ -229,7 +210,7 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
             options={PRIORITY_OPTIONS} onSave={saveField}
             format={(v) => v ? <span className={priorityColors[v]}>{v}</span> : null}
           />
-          <InlineField label="Contacted" value={prop.contacted} field="contacted" type="boolean" onSave={saveField} />
+          <InlineField label="Contacted" value={prop.contacted} field="contacted" type="multi-select" options={CONTACTED_OPTIONS} onSave={saveField} />
         </div>
       </Section>
     </>

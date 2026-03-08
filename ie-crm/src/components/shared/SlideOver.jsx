@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { useSlideOver } from './SlideOverContext';
 
 const Z_LEVELS = ['z-40', 'z-50'];
 
@@ -30,13 +31,25 @@ export default function SlideOver({ children, onClose, level = 0, width = 'w-[52
 }
 
 export function SlideOverHeader({ title, subtitle, onClose, children }) {
+  const slideOver = useSlideOver();
+  const isNested = slideOver?.stack?.length > 1;
+
   return (
     <div className="sticky top-0 bg-crm-sidebar border-b border-crm-border px-5 py-4 z-10">
       <div className="flex items-center justify-between mb-1">
-        <h2 className="text-base font-semibold truncate flex-1 mr-3">{title}</h2>
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          {isNested && (
+            <button onClick={slideOver.close} className="text-crm-muted hover:text-crm-text w-8 h-8 flex items-center justify-center rounded-md hover:bg-crm-hover transition-colors flex-shrink-0" title="Back">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+          )}
+          <h2 className="text-base font-semibold truncate flex-1 mr-3">{title}</h2>
+        </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {children}
-          <button onClick={onClose} className="text-crm-muted hover:text-crm-text p-1 transition-colors">
+          <button onClick={isNested ? slideOver.closeAll : onClose} className="text-crm-muted hover:text-crm-text w-8 h-8 flex items-center justify-center rounded-md hover:bg-crm-hover transition-colors" title="Close">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>

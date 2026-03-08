@@ -8,13 +8,58 @@ import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import CompDetail from './CompDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
+import { useSlideOver } from '../components/shared/SlideOverContext';
 
 const PROPERTY_TYPES = ['Industrial', 'Office', 'Retail', 'Multifamily', 'Land', 'Mixed-Use'];
 const RENT_TYPES = ['NNN', 'GRS', 'MGR'];
 const SOURCE_OPTIONS = ['Company DB', 'CoStar', 'IAR Hot Sheet', 'Manual'];
 
+// Chip renderer for linked property — needs access to SlideOver context so rendered at row level
+const PropertyChip = ({ row }) => {
+  const { open } = useSlideOver();
+  if (!row.property_id || !row.linked_property_address) return <span className="text-crm-muted">--</span>;
+  return (
+    <span
+      className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full font-medium truncate max-w-[140px] bg-blue-500/15 text-blue-400 cursor-pointer hover:brightness-125"
+      title={row.linked_property_address}
+      onClick={(e) => { e.stopPropagation(); open('property', row.property_id); }}
+    >
+      {row.linked_property_address}
+    </span>
+  );
+};
+
+const CompanyChip = ({ row }) => {
+  const { open } = useSlideOver();
+  if (!row.company_id || !row.linked_company_name) return null;
+  return (
+    <span
+      className="text-[10px] leading-tight px-1.5 py-0.5 rounded-full font-medium truncate max-w-[120px] bg-yellow-500/15 text-yellow-400 cursor-pointer hover:brightness-125 ml-1"
+      title={row.linked_company_name}
+      onClick={(e) => { e.stopPropagation(); open('company', row.company_id); }}
+    >
+      {row.linked_company_name}
+    </span>
+  );
+};
+
 const LEASE_COLUMNS = [
-  { key: 'tenant_name', label: 'Tenant', defaultWidth: 150 },
+  {
+    key: 'linked_property_address', label: 'Property', defaultWidth: 160,
+    renderCell: (val, row) => <PropertyChip row={row} />,
+  },
+  {
+    key: 'tenant_name', label: 'Tenant', defaultWidth: 150,
+    renderCell: (val, row) => {
+      if (!val) return <span className="text-crm-muted">--</span>;
+      return (
+        <span className="flex items-center">
+          <span className="truncate">{val}</span>
+          <CompanyChip row={row} />
+        </span>
+      );
+    },
+  },
   { key: 'property_type', label: 'Property Type', defaultWidth: 110 },
   { key: 'sf', label: 'SF', defaultWidth: 90, format: 'number' },
   { key: 'rate', label: 'Rate $/SF/mo', defaultWidth: 100, format: 'currency' },
@@ -30,6 +75,9 @@ const LEASE_COLUMNS = [
       return <span className={colors[val] || 'text-crm-muted'}>{val}</span>;
     },
   },
+  { key: 'cam_expenses', label: 'CAM $/SF/mo', defaultWidth: 100, format: 'currency' },
+  { key: 'zoning', label: 'Zoning', defaultWidth: 80 },
+  { key: 'doors_with_lease', label: 'Doors', defaultWidth: 70, format: 'number' },
   { key: 'space_use', label: 'Space Use', defaultWidth: 100, defaultVisible: false },
   { key: 'space_type', label: 'Space Type', defaultWidth: 100, defaultVisible: false },
   { key: 'building_rba', label: 'Building RBA', defaultWidth: 100, format: 'number', defaultVisible: false },
@@ -50,6 +98,10 @@ const LEASE_COLUMNS = [
 ];
 
 const SALE_COLUMNS = [
+  {
+    key: 'linked_property_address', label: 'Property', defaultWidth: 160,
+    renderCell: (val, row) => <PropertyChip row={row} />,
+  },
   { key: 'sale_date', label: 'Sale Date', defaultWidth: 100, format: 'date' },
   { key: 'property_type', label: 'Property Type', defaultWidth: 110 },
   { key: 'sale_price', label: 'Sale Price', defaultWidth: 120, format: 'currency' },
@@ -66,6 +118,10 @@ const SALE_COLUMNS = [
       return <span className={colors[val] || 'text-crm-muted'}>{val}</span>;
     },
   },
+  { key: 'bldg_clear_height', label: 'Clear Height', defaultWidth: 90, format: 'number' },
+  { key: 'bldg_power', label: 'Power', defaultWidth: 80 },
+  { key: 'bldg_gl_doors', label: 'GL Doors', defaultWidth: 80, format: 'number' },
+  { key: 'bldg_dock_doors', label: 'Dock Doors', defaultWidth: 90, format: 'number' },
   { key: 'land_sf', label: 'Land SF', defaultWidth: 90, format: 'number', defaultVisible: false },
   { key: 'price_plsf', label: 'Price/Land SF', defaultWidth: 100, format: 'currency', defaultVisible: false },
   { key: 'notes', label: 'Notes', defaultWidth: 200, defaultVisible: false },

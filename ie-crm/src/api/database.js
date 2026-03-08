@@ -92,6 +92,7 @@ const ALLOWED_COLS = {
     'rate', 'escalations', 'rent_type', 'lease_type', 'concessions',
     'free_rent_months', 'ti_psf',
     'tenant_rep_company', 'tenant_rep_agents', 'landlord_rep_company', 'landlord_rep_agents',
+    'cam_expenses', 'zoning', 'doors_with_lease',
     'notes', 'source', 'created_at', 'updated_at',
   ]),
   sale_comps: new Set([
@@ -245,7 +246,9 @@ export async function getContacts({ limit = 200, offset = 0, orderBy = 'created_
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'contacts', 'created_at');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT * FROM contacts ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+  const sql = `SELECT c.*,
+    (SELECT MAX(intr.date) FROM interaction_contacts ic JOIN interactions intr ON intr.interaction_id = ic.interaction_id WHERE ic.contact_id = c.contact_id) AS last_contacted
+  FROM contacts c ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -280,7 +283,9 @@ export async function getCompanies({ limit = 200, offset = 0, orderBy = 'created
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'companies', 'created_at');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT * FROM companies ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+  const sql = `SELECT co.*,
+    (SELECT MAX(intr.date) FROM interaction_companies ico JOIN interactions intr ON intr.interaction_id = ico.interaction_id WHERE ico.company_id = co.company_id) AS last_contacted
+  FROM companies co ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -352,7 +357,12 @@ export async function getInteractions({ limit = 200, offset = 0, orderBy = 'date
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'interactions', 'date');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT * FROM interactions ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+  const sql = `SELECT i.*,
+    (SELECT string_agg(c.full_name, ', ') FROM interaction_contacts ic JOIN contacts c ON c.contact_id = ic.contact_id WHERE ic.interaction_id = i.interaction_id) AS linked_contact_names,
+    (SELECT string_agg(p.property_address, ', ') FROM interaction_properties ip JOIN properties p ON p.property_id = ip.property_id WHERE ip.interaction_id = i.interaction_id) AS linked_property_names,
+    (SELECT string_agg(d.deal_name, ', ') FROM interaction_deals id2 JOIN deals d ON d.deal_id = id2.deal_id WHERE id2.interaction_id = i.interaction_id) AS linked_deal_names,
+    (SELECT string_agg(co.company_name, ', ') FROM interaction_companies ico JOIN companies co ON co.company_id = ico.company_id WHERE ico.interaction_id = i.interaction_id) AS linked_company_names
+  FROM interactions i ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -679,6 +689,18 @@ export async function getCampaigns({ limit = 200, offset = 0 } = {}) {
   return query('SELECT * FROM campaigns ORDER BY modified DESC LIMIT $1 OFFSET $2', [limit, offset]);
 }
 
+export async function getCampaign(id) {
+  return query('SELECT * FROM campaigns WHERE campaign_id = $1', [id]);
+}
+
+export async function updateCampaign(id, fields) {
+  const keys = Object.keys(fields);
+  validateFieldKeys(keys, 'campaigns');
+  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
+  const sql = `UPDATE campaigns SET ${sets.join(', ')}, modified = NOW() WHERE campaign_id = $1 RETURNING *`;
+  return query(sql, [id, ...Object.values(fields)]);
+}
+
 // ============================================================
 // ACTION ITEMS
 // ============================================================
@@ -789,14 +811,22 @@ export async function getLeaseComps({ limit = 200, offset = 0, orderBy = 'create
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'lease_comps', 'created_at');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT * FROM lease_comps ${whereClause} ORDER BY ${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
+  const sql = `SELECT lc.*, p.property_address AS linked_property_address, co.company_name AS linked_company_name
+    FROM lease_comps lc
+    LEFT JOIN properties p ON lc.property_id = p.property_id
+    LEFT JOIN companies co ON lc.company_id = co.company_id
+    ${whereClause} ORDER BY lc.${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
 }
 
 export async function getLeaseComp(id) {
-  return query('SELECT * FROM lease_comps WHERE id = $1', [id]);
+  return query(`SELECT lc.*, p.property_address AS linked_property_address, co.company_name AS linked_company_name
+    FROM lease_comps lc
+    LEFT JOIN properties p ON lc.property_id = p.property_id
+    LEFT JOIN companies co ON lc.company_id = co.company_id
+    WHERE lc.id = $1`, [id]);
 }
 
 export async function createLeaseComp(fields) {
@@ -840,14 +870,24 @@ export async function getSaleComps({ limit = 200, offset = 0, orderBy = 'created
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'sale_comps', 'created_at');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT * FROM sale_comps ${whereClause} ORDER BY ${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
+  const sql = `SELECT sc.*, p.property_address AS linked_property_address,
+      p.ceiling_ht AS bldg_clear_height, p.power AS bldg_power,
+      p.drive_ins AS bldg_gl_doors, p.number_of_loading_docks AS bldg_dock_doors
+    FROM sale_comps sc
+    LEFT JOIN properties p ON sc.property_id = p.property_id
+    ${whereClause} ORDER BY sc.${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
 }
 
 export async function getSaleComp(id) {
-  return query('SELECT * FROM sale_comps WHERE id = $1', [id]);
+  return query(`SELECT sc.*, p.property_address AS linked_property_address,
+      p.ceiling_ht AS bldg_clear_height, p.power AS bldg_power,
+      p.drive_ins AS bldg_gl_doors, p.number_of_loading_docks AS bldg_dock_doors
+    FROM sale_comps sc
+    LEFT JOIN properties p ON sc.property_id = p.property_id
+    WHERE sc.id = $1`, [id]);
 }
 
 export async function createSaleComp(fields) {

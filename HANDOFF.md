@@ -1,8 +1,8 @@
 # Session Handoff — Column Mapping & Schema Alignment
 
-> Written: 2026-03-06
-> Previous session: "Set up development environment for React and server"
-> Next task: **Deals tab column mapping**, then batch ALTER TABLE for all tabs
+> Written: 2026-03-07
+> Previous session: "UI tab review — compiled full fix list + comps schema additions"
+> Next task: **Execute Fix List (Step 16)** — work through items below top-to-bottom
 
 ---
 
@@ -1117,7 +1117,7 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 
 ## Next Steps (in order)
 
-1. **Commit the current uncommitted work** (column menu fix — 8 files)
+1. ~~**Commit the current uncommitted work**~~ ✅ DONE
 2. ~~**Map Deals tab**~~ ✅ DONE
 3. ~~**Map Campaigns tab**~~ ✅ DONE
 4. ~~**Review Interactions**~~ ✅ DONE
@@ -1131,9 +1131,89 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 12. ~~**Update Interaction type options**~~ ✅ DONE
 13. ~~**Build action_items page + 4 junction tables**~~ ✅ DONE
 14. ~~**Build comps page**~~ ✅ DONE — Lease/Sale toggle, CSV import (comps-only), property/company linking
-15. **Build CSV Import Engine** — general-purpose import with address normalization, fuzzy matching, batch INSERT, dedup detection. See full spec below.
-16. **Build formula computation** — SQL VIEWs for Deals formulas + TPE scoring + commission splits
-17. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
+15. ~~**Build CSV Import Engine**~~ ✅ DONE — address normalizer, composite matcher, batch INSERT, dedicated Import tab
+16. **UI Polish & Fix List** — tab review ✅ DONE, now fix the issues below before TPE build
+17. **Build formula computation** — SQL VIEWs for Deals formulas + TPE scoring + commission splits
+18. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
+
+---
+
+### UI Polish & Fix List (Step 16)
+
+Tab-by-tab review completed 2026-03-07. Issues documented below.
+
+#### Properties Tab (table view)
+- [x] ~~Linked record columns (Contacts, Companies, Deals, Tags) show `--`~~ — FIXED: `useLinkedRecords` hook batch-fetches junction data; columns populate when junction records exist
+- [x] ~~"New Property" modal errored with "Disallowed column 'building_sqft'"~~ — FIXED (renamed to `rba`/`land_sf`)
+
+#### Properties Detail Panel
+- [x] Building SF and Lot SF fields showing correctly after column rename fix
+- [x] Linked chips (Contacts, Companies, Deals) visible and clickable — clicking opens nested slide-over ✓
+- [x] Activity section present with `+ Activity` button ✓
+- [x] ~~"Contacts" linked section label → rename to **"Owner Contact"**~~ — FIXED
+- [x] ~~**"Contacted" field broken**~~ — FIXED: changed to `type="multi-select"` with full options list
+
+#### Properties Tab — Label Renames
+- [x] ~~"OWNER" column header in table → rename to **"ENTITY NAME"**~~ — FIXED
+- [x] ~~"Owner Name" field in detail panel → rename to **"Entity Name"**~~ — FIXED
+
+#### Contacts Tab (table view)
+- [x] ~~LAST CONTACT should auto-populate from most recent interaction date~~ — FIXED: subquery computes MAX(interaction.date) via junction table
+- [x] TYPE badge renders correctly as colored chip — not a linked record (Owner/Broker/Tenant are text categories, not FK references)
+
+#### Contacts Detail Panel
+- [x] Activity, Properties, Companies, Campaigns linked sections all working ✓
+
+#### Companies Tab (table view)
+- [x] Columns displaying correctly ✓
+- [x] LAST CONTACT column added — auto-computes from interaction_companies junction
+
+#### Deals Tab (table view)
+- [x] Status badges (Prospect, Active) displaying correctly ✓
+
+#### Deals Detail Panel
+- [x] Activity section IS present with `+ Activity` button (not missing — was just collapsed/empty)
+
+#### All Detail Panels — Activity Section UX
+- [x] ~~**Truncate to 5 recent**~~ — FIXED: ActivitySection shows 5 most recent with "Show all (N)" expand button
+- [x] ~~**Clickable activity rows**~~ — FIXED: all detail panels (Properties, Deals, Companies, Contacts) now wire `onSelectInteraction` → InteractionDetail overlay
+
+#### Activity Tab
+- [x] ~~Each interaction should show linked entity names~~ — FIXED: Interactions.jsx shows property/contact/deal names in grey text
+- [x] ~~Cold Call shows `—` as subject~~ — FIXED: displays "(no subject)" fallback
+
+#### Campaigns Tab
+- [x] Table, status badges, dates all working ✓
+- [x] ~~Linked Campaign chips in Contact detail panel don't open Campaign detail view~~ — FIXED: navigation wired through SlideOverContext
+
+#### Tasks Tab
+- [x] Status, priority star, assignee chips all working ✓
+- [x] ~~**Redesign to Apple Reminders style**~~ — FIXED: circular checkboxes, clean list rows, overdue in red
+- [x] ~~**Date formatting**~~ — FIXED: all dates use formatDatePacific
+- [x] ~~**Assigned To separator bug**~~ — FIXED: comma-separated display
+
+#### Comps Tab (Lease & Sale)
+- [x] Columns, data, Import CSV button all working ✓
+
+#### Comps Tab — Lease Comps Additions
+- [x] ~~**Property column missing**~~ — FIXED: added as linked chip column with clickable navigation
+- [x] ~~**Tenant as linked chip**~~ — FIXED: renders as clickable company chip
+- [x] ~~**New columns added**~~ — FIXED: `cam_expenses`, `zoning`, `doors_with_lease` added via migration + ALL_COLUMNS
+- [x] ~~**Import engine COLUMN_MAPS update**~~ — FIXED: all mappings added for lease_comps
+
+#### Comps Tab — Sale Comps Additions
+- [x] ~~**Building detail lookup columns**~~ — FIXED: getSaleComps() JOINs to properties for ceiling_ht, power, drive_ins, number_of_loading_docks
+
+#### All Tables — Global Issues
+- [x] ~~Linked record columns show `--`~~ — FIXED: `useLinkedRecords` hook provides batch junction data; columns populate when records exist
+- [x] ~~`LAST CONTACT` auto-compute~~ — FIXED: subquery on getContacts/getCompanies computes MAX(interaction.date)
+- [x] ~~**Linked chip colors inconsistent**~~ — FIXED: unified color map (Contacts=purple, Companies=yellow, Deals=orange, Properties=blue, Campaigns=teal)
+- [x] ~~**Date formatting global fix**~~ — FIXED: all tables use `format: 'date'` → formatCell → formatDatePacific; detail panels use formatDatePacific directly
+
+#### Modal & Navigation UX
+- [x] ~~**Modal close button (X)**~~ — FIXED: increased to 32×32px touch target
+- [x] ~~**Detail panel back navigation**~~ — FIXED: SlideOverContext with push/pop navigation stack + back arrow button
+- [x] ~~**Claude chat button repositioning**~~ — FIXED: slides left when detail panel opens, anchors next to panel edge
 
 ---
 
