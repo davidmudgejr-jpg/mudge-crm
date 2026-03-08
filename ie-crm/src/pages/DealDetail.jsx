@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getDeal, updateDeal, getDealProperties, getDealContacts, getDealCompanies, getDealInteractions } from '../api/database';
+import { getDeal, updateDeal, getDealProperties, getDealContacts, getDealCompanies, getDealInteractions, getDealActionItems } from '../api/database';
 import Section from '../components/shared/Section';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import InlineField from '../components/shared/InlineField';
@@ -12,6 +12,7 @@ import { formatDatePacific } from '../utils/timezone';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
 import InteractionDetail from './InteractionDetail';
 import ActivitySection from '../components/shared/ActivitySection';
+import TasksSection from '../components/shared/TasksSection';
 
 export const STATUSES = ['Prospecting', 'Active', 'Under Contract', 'Closed', 'Dead'];
 export const DEAL_TYPES = ['Lease', 'Sale', 'Acquisition', 'Disposition', 'Investment', 'Development'];
@@ -23,6 +24,7 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
   const [linkedContacts, setLinkedContacts] = useState([]);
   const [linkedCompanies, setLinkedCompanies] = useState([]);
   const [interactions, setInteractions] = useState([]);
+  const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showNewInteraction, setShowNewInteraction] = useState(false);
@@ -47,16 +49,18 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
       }
       setDeal(dealData);
 
-      const [props, contacts, companies, iRes] = await Promise.allSettled([
+      const [props, contacts, companies, iRes, tRes] = await Promise.allSettled([
         getDealProperties(resolvedId),
         getDealContacts(resolvedId),
         getDealCompanies(resolvedId),
         getDealInteractions(resolvedId),
+        getDealActionItems(resolvedId),
       ]);
       setLinkedProperties(props.status === 'fulfilled' ? props.value.rows || [] : []);
       setLinkedContacts(contacts.status === 'fulfilled' ? contacts.value.rows || [] : []);
       setLinkedCompanies(companies.status === 'fulfilled' ? companies.value.rows || [] : []);
       setInteractions(iRes.status === 'fulfilled' ? iRes.value.rows || [] : []);
+      setTasks(tRes.status === 'fulfilled' ? tRes.value.rows || [] : []);
     } catch (err) {
       console.error('Failed to load deal:', err);
       setError(err.message || 'Failed to load deal');
@@ -147,6 +151,8 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
       </Section>
 
       <ActivitySection interactions={interactions} onNewInteraction={() => setShowNewInteraction(true)} onSelectInteraction={(id) => setSelectedInteraction(id)} />
+
+      <TasksSection tasks={tasks} />
 
       {selectedInteraction && (
         <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setSelectedInteraction(null)}>

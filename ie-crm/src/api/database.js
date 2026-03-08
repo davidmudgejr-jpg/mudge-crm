@@ -782,6 +782,15 @@ export async function getActionItemDeals(actionItemId) {
   `, [actionItemId]);
 }
 
+export async function getDealActionItems(dealId) {
+  return query(`
+    SELECT a.* FROM action_items a
+    JOIN action_item_deals ad ON a.action_item_id = ad.action_item_id
+    WHERE ad.deal_id = $1
+    ORDER BY a.due_date ASC NULLS LAST
+  `, [dealId]);
+}
+
 export async function getActionItemCompanies(actionItemId) {
   return query(`
     SELECT co.* FROM companies co
