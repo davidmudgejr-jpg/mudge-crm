@@ -75,9 +75,8 @@ export default function useLinkedRecords(entityType, rows) {
     const ids = rows.map((r) => r[config.idField]).filter(Boolean);
     const idsKey = ids.join(',');
 
-    // Skip if same set of IDs
+    // Skip if same set of IDs (and data was already loaded)
     if (idsKey === prevIdsRef.current) return;
-    prevIdsRef.current = idsKey;
 
     let cancelled = false;
 
@@ -96,6 +95,8 @@ export default function useLinkedRecords(entityType, rows) {
         results[key] = fetched[i];
       });
 
+      // Only mark as loaded after successful fetch
+      prevIdsRef.current = idsKey;
       setData(results);
     })();
 
