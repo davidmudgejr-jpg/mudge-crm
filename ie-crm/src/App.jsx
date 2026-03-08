@@ -99,11 +99,14 @@ function AppShell() {
         rowCount={rowCount}
       />
 
-      {/* Toggle button when panel is closed */}
+      {/* Nested SlideOver panels */}
+      <SlideOverRenderer />
+
+      {/* Toggle button when panel is closed — rendered AFTER SlideOver so it sits on top */}
       {!claudeOpen && (
         <button
-          onClick={() => setClaudeOpen(true)}
-          className={`fixed bottom-4 z-40 bg-crm-accent hover:bg-crm-accent-hover text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-all duration-200 ${hasSlideOver ? 'right-[540px]' : 'right-4'}`}
+          onClick={(e) => { e.stopPropagation(); setClaudeOpen(true); }}
+          className={`fixed bottom-4 z-[45] bg-crm-accent hover:bg-crm-accent-hover text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-all duration-200 ${hasSlideOver ? 'right-[540px]' : 'right-4'}`}
           title="Open Claude"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -111,9 +114,6 @@ function AppShell() {
           </svg>
         </button>
       )}
-
-      {/* Nested SlideOver panels */}
-      <SlideOverRenderer />
     </div>
   );
 }
