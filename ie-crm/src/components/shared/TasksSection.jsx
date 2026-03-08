@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Section from './Section';
 import { useSlideOver } from './SlideOverContext';
-import { formatDatePacific } from '../../utils/timezone';
+import { formatDateCompact } from '../../utils/timezone';
 
 const CIRCLE_COLORS = {
   Todo: 'border-red-500/60',
@@ -57,7 +57,7 @@ export default function TasksSection({ tasks }) {
                     <span className="text-[10px] text-crm-muted">{task.status}</span>
                     {task.due_date && (
                       <span className={`text-[10px] ${overdue ? 'text-red-400' : 'text-crm-muted'}`}>
-                        {overdue ? '⚠ ' : ''}{formatDatePacific(task.due_date)}
+                        {overdue ? '⚠ ' : ''}{formatDateCompact(task.due_date)}
                       </span>
                     )}
                   </div>

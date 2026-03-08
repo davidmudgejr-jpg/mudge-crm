@@ -41,9 +41,24 @@ export function todayPacific() {
 }
 
 /**
- * Format a date value for display: "Mar 4, 2026"
+ * Format a date value for display: "March 4, 2026"
  */
 export function formatDatePacific(val) {
+  if (!val) return null;
+  try {
+    const d = new Date(val);
+    if (isNaN(d)) return String(val);
+    return d.toLocaleDateString('en-US', {
+      timeZone: TZ,
+      month: 'long', day: 'numeric', year: 'numeric',
+    });
+  } catch { return String(val); }
+}
+
+/**
+ * Compact date format for space-constrained UIs (Activity, Tasks): "Mar 4, 2026"
+ */
+export function formatDateCompact(val) {
   if (!val) return null;
   try {
     const d = new Date(val);
@@ -71,7 +86,7 @@ export function formatTimePacific(val) {
 }
 
 /**
- * Format a datetime value for display: "Mar 4, 2026, 7:57 AM"
+ * Format a datetime value for display: "March 4, 2026, 7:57 AM"
  */
 export function formatDateTimePacific(val) {
   if (!val) return null;
@@ -80,7 +95,7 @@ export function formatDateTimePacific(val) {
     if (isNaN(d)) return String(val);
     return d.toLocaleString('en-US', {
       timeZone: TZ,
-      month: 'short', day: 'numeric', year: 'numeric',
+      month: 'long', day: 'numeric', year: 'numeric',
       hour: 'numeric', minute: '2-digit',
     });
   } catch { return String(val); }

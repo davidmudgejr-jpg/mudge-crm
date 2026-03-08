@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { formatDatePacific } from '../../utils/timezone';
 
 /**
  * Click-to-edit field component.
@@ -227,7 +228,7 @@ export default function InlineField({
 
   // -- Read mode --
   if (!editing) {
-    const displayValue = format ? format(value) : value;
+    const displayValue = format ? format(value) : type === 'date' ? formatDatePacific(value) : value;
     const isEmpty = displayValue === null || displayValue === undefined || displayValue === '';
     return (
       <div

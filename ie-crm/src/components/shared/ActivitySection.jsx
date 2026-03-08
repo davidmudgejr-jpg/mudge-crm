@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Section from './Section';
 import TYPE_ICONS from '../../config/typeIcons';
-import { formatDatePacific } from '../../utils/timezone';
+import { formatDateCompact } from '../../utils/timezone';
 
 const INITIAL_SHOW = 5;
 
@@ -48,7 +48,7 @@ export default function ActivitySection({ interactions, onNewInteraction, onSele
                   {int.type !== 'Note' && int.notes && (
                     <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes.split(/\n\n---\s/)[0].trim()}</div>
                   )}
-                  <div className="text-[10px] text-crm-muted mt-0.5">{formatDatePacific(int.date) || ''}</div>
+                  <div className="text-[10px] text-crm-muted mt-0.5">{formatDateCompact(int.date) || ''}</div>
                 </div>
               </button>
             );
