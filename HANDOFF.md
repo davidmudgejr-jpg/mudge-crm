@@ -1,14 +1,14 @@
-# Session Handoff — Column Mapping & Schema Alignment
+# Session Handoff — IE CRM Build Status
 
-> Written: 2026-03-07
-> Previous session: "UI tab review — compiled full fix list + comps schema additions"
-> Next task: **Execute Fix List (Step 16)** — work through items below top-to-bottom
+> Updated: 2026-03-08
+> Previous session: "Audited actual build state vs stale handoff — handoff was 10+ commits behind"
+> Next task: **Wire up role-specific linked fields** → then continue remaining Phase 1A gaps
 
 ---
 
 ## What We're Doing
 
-Walking through every Airtable tab, screenshotting columns, cross-referencing against `schema.sql` and each page's `ALL_COLUMNS` array, identifying gaps, then doing one clean batch `ALTER TABLE` session to add all missing columns at once. After schema changes, update `ALL_COLUMNS` arrays and UI wiring in each page component.
+Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable parity with proper Postgres schema, then adding Action Items, Comps, TPE, and data migration. The column mapping and schema blueprint below is the reference spec. Most of Phase 1A is now complete.
 
 ### Architecture Decision (locked in)
 
@@ -22,21 +22,77 @@ Walking through every Airtable tab, screenshotting columns, cross-referencing ag
 
 ---
 
-## Completed Work (uncommitted — 8 files changed)
+## Completed Work (all committed & pushed to GitHub)
 
-### Column Menu Fix (ready to commit)
+### Infrastructure ✅
+- [x] Column menu fix — Rename/Hide/Delete with system field protection (commit `f0e4f7d`)
+- [x] Neon DB migration from Railway PostgreSQL
+- [x] ANTHROPIC_API_KEY on Railway
+- [x] ROADMAP.md + ARCHITECTURE.md committed
+- [x] Multi-machine workflow: laptop, home machine, work machine all on same GitHub + Neon DB
 
-Files modified:
-- `ie-crm/src/components/shared/CrmTable.jsx` — ColumnHeader always renders Rename/Hide/Delete. `deleteDisabled` prop greys out Delete with tooltip "System fields cannot be deleted". System columns get `deleteDisabled`, custom columns get `onHide` + `onDelete`.
-- `ie-crm/src/hooks/useCustomFields.js` — Added `hideField`, `showField`, `toggleCustomFieldVisibility` with localStorage persistence. `customColumns` now filters out hidden fields; `allCustomColumns` returns all for the toggle menu.
-- `ie-crm/src/components/shared/ColumnToggleMenu.jsx` — Added "Custom Fields" section showing custom columns with checkbox toggles. Counter includes both regular + custom columns.
-- `ie-crm/src/pages/Properties.jsx` — Wired up new exports
-- `ie-crm/src/pages/Contacts.jsx` — Wired up new exports
-- `ie-crm/src/pages/Companies.jsx` — Wired up new exports
-- `ie-crm/src/pages/Deals.jsx` — Wired up new exports
-- `ie-crm/src/pages/Campaigns.jsx` — Wired up new exports
+### Phase 1A — Batch Schema Migration ✅ (mostly complete)
+- [x] Migration 001: All column type changes (contacted→TEXT[], deal_source→TEXT[], etc.) — commit `e34ce30`
+- [x] Migration 001: ~58 new columns across all tables (Properties 28, Contacts 15, Companies 3, Deals 8, Campaigns 2, Interactions 2)
+- [x] Migration 001: 6 new tables (action_items, lease_comps, sale_comps, loan_maturities, property_distress, tenant_growth)
+- [x] Migration 001: 4 new junction tables (action_item_contacts/properties/deals/companies)
+- [x] Migration 002: normalized_address column + auto-compute trigger on properties
+- [x] Migration 003: cam_expenses, zoning, doors_with_lease on lease_comps
+- [x] ALL_COLUMNS arrays updated in Properties.jsx (76 columns), other pages updated
+- [x] API routes updated — SELECT/INSERT/UPDATE include new columns
+- [x] Interaction types expanded from 7 to 17
 
-**Verified:** No build errors, all 5 tabs tested, consistent 3-option menu, delete disabled for system fields, hide/restore roundtrip works.
+### Phase 1A — Remaining Gaps ⬜
+- [ ] **Role-specific linked columns on Properties** — Currently 3 generic columns (Contacts, Companies, Deals) with `defaultVisible: false`. Need 5 role-filtered columns: Company Tenants (role='tenant'), Company Owner (role='owner'), Leasing Company (role='leasing'), Owner Contact (role='owner'), Broker Contact (role='broker')
+- [ ] **Add `role` to batch queries** — `batchGetPropertyContacts` and `batchGetPropertyCompanies` don't SELECT `pc.role`
+- [ ] **9 phantom columns in Properties ALL_COLUMNS** — `apn`, `units`, `stories`, `parking_spaces`, `asking_price`, `price_per_sqft`, `noi`, `owner_email`, `owner_mailing_address` have no backing DB column (need ALTER TABLE or remove from UI)
+- [ ] **schema.sql is stale** — doesn't include migration 001/002/003 tables/columns. Fresh install from schema.sql alone would be incomplete.
+- [ ] Add indexes on all filtered/searched columns
+- [ ] Confirm Vercel frontend works end-to-end
+
+### Phase 1B — Deals Consolidation ⬜
+- [ ] Not started (commission split VIEWs, expanded status options, 3→1 deal table merge)
+
+### Phase 1C — Action Items ✅
+- [x] action_items table + 4 junction tables created (migration 001)
+- [x] Action Items page built — Apple Reminders-style UI (commit `816df0d`)
+- [x] Tasks section wired into DealDetail (commit `1142874`)
+- [x] Batch linked record functions for action items in useLinkedRecords hook
+
+### Phase 1D — Comps ✅ (partially)
+- [x] lease_comps + sale_comps tables created (migration 001)
+- [x] Comps page built with Lease/Sale toggle + CSV import (commit `fb4645c`)
+- [x] Additional comp columns via migration 003
+- [ ] Manual entry form
+- [ ] Lease expiration auto-sync to companies.lease_exp
+- [ ] Sale comp auto-update of property last_sale_date/last_sale_price
+
+### Phase 1E — TPE ⬜
+- [x] Full spec documented (5 models, all weights, tpe_config table)
+- [x] Supporting tables created (loan_maturities, property_distress, tenant_growth)
+- [ ] SQL VIEW `property_tpe_scores` not built
+- [ ] TPE UI not built
+
+### Phase 1F — Interaction Types ✅
+- [x] Expanded from 7 to 17 types (commit `e34ce30`)
+
+### Phase 1G — CSV Import Engine ✅
+- [x] Address normalizer, composite matcher, batch INSERT (commit `fc6afe3`)
+- [x] Dedicated Import tab in sidebar
+
+### Step 16 UI Polish ✅
+- [x] Contacted → multi-select with full CRE status options
+- [x] Label renames (Owner → Entity Name, Contacts → Owner Contact)
+- [x] Unified chip colors (Contacts=purple, Companies=yellow, Deals=orange, Properties=blue)
+- [x] Tasks tab Apple Reminders style (circular checkboxes, red overdue)
+- [x] Detail panel back navigation with push/pop stack
+- [x] Claude panel side-by-side with detail panels
+- [x] LinkedChips clickable — opens correct entity detail via SlideOver
+- [x] ActivitySection truncates to 5 items with Show All
+- [x] LAST CONTACT auto-compute via subquery
+- [x] Date formatting via formatDatePacific globally
+- [x] Delete buttons on all detail panels
+- [x] Deal creation sound effect
 
 ---
 

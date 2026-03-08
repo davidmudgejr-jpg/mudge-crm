@@ -1004,7 +1004,7 @@ function groupBy(rows, key) {
 export async function batchGetPropertyContacts(propertyIds) {
   if (!propertyIds.length) return {};
   const r = await query(`
-    SELECT c.contact_id, c.full_name, c.type, pc.property_id
+    SELECT c.contact_id, c.full_name, c.type, pc.property_id, pc.role
     FROM contacts c JOIN property_contacts pc ON c.contact_id = pc.contact_id
     WHERE pc.property_id = ANY($1) ORDER BY c.full_name
   `, [propertyIds]);
@@ -1014,7 +1014,7 @@ export async function batchGetPropertyContacts(propertyIds) {
 export async function batchGetPropertyCompanies(propertyIds) {
   if (!propertyIds.length) return {};
   const r = await query(`
-    SELECT co.company_id, co.company_name, co.company_type, pc.property_id
+    SELECT co.company_id, co.company_name, co.company_type, pc.property_id, pc.role
     FROM companies co JOIN property_companies pc ON co.company_id = pc.company_id
     WHERE pc.property_id = ANY($1) ORDER BY co.company_name
   `, [propertyIds]);

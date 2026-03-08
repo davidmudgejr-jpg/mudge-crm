@@ -96,13 +96,24 @@ const ALL_COLUMNS = [
   { key: 'google_maps_url', label: 'Google Maps', defaultWidth: 80, defaultVisible: false },
   { key: 'zoning_map_url', label: 'Zoning Map', defaultWidth: 80, defaultVisible: false },
   { key: 'listing_url', label: 'Listing', defaultWidth: 80, defaultVisible: false },
-  // Linked record columns
-  { key: 'linked_contacts', label: 'Contacts', defaultWidth: 150, defaultVisible: false,
+  // Linked record columns — role-specific
+  { key: 'linked_owner_contacts', label: 'Owner Contact', defaultWidth: 160, defaultVisible: true,
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
-  { key: 'linked_companies', label: 'Companies', defaultWidth: 150, defaultVisible: false,
+  { key: 'linked_broker_contacts', label: 'Broker Contact', defaultWidth: 160, defaultVisible: false,
+    renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
+  { key: 'linked_tenant_companies', label: 'Company Tenants', defaultWidth: 160, defaultVisible: true,
+    renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
+  { key: 'linked_owner_companies', label: 'Company Owner', defaultWidth: 160, defaultVisible: false,
+    renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
+  { key: 'linked_leasing_companies', label: 'Leasing Company', defaultWidth: 160, defaultVisible: false,
     renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
   { key: 'linked_deals', label: 'Deals', defaultWidth: 150, defaultVisible: false,
     renderCell: (val) => <LinkedChips items={val} type="deal" labelKey="deal_name" /> },
+  // Generic (all roles) — for power users who want unfiltered view
+  { key: 'linked_contacts', label: 'All Contacts', defaultWidth: 150, defaultVisible: false,
+    renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
+  { key: 'linked_companies', label: 'All Companies', defaultWidth: 150, defaultVisible: false,
+    renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
 ];
 
 const PRIORITIES = ['Hot', 'Warm', 'Cold', 'Dead'];
@@ -135,12 +146,23 @@ export default function Properties({ onCountChange }) {
 
   const augmentedRows = useMemo(() => {
     if (!rows.length) return rows;
-    return rows.map((row) => ({
-      ...row,
-      linked_contacts: linked.linked_contacts?.[row.property_id] || [],
-      linked_companies: linked.linked_companies?.[row.property_id] || [],
-      linked_deals: linked.linked_deals?.[row.property_id] || [],
-    }));
+    return rows.map((row) => {
+      const allContacts = linked.linked_contacts?.[row.property_id] || [];
+      const allCompanies = linked.linked_companies?.[row.property_id] || [];
+      return {
+        ...row,
+        // Role-specific
+        linked_owner_contacts: allContacts.filter(c => c.role === 'owner'),
+        linked_broker_contacts: allContacts.filter(c => c.role === 'broker'),
+        linked_tenant_companies: allCompanies.filter(c => c.role === 'tenant'),
+        linked_owner_companies: allCompanies.filter(c => c.role === 'owner'),
+        linked_leasing_companies: allCompanies.filter(c => c.role === 'leasing'),
+        // Generic (all roles)
+        linked_contacts: allContacts,
+        linked_companies: allCompanies,
+        linked_deals: linked.linked_deals?.[row.property_id] || [],
+      };
+    });
   }, [rows, linked]);
 
   const fetchData = useCallback(async () => {
