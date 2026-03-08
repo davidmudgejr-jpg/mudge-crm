@@ -484,7 +484,7 @@ export default function CrmTable({
                 } ${extraClass}`}
               >
                 <td
-                  className="px-3 py-2 sticky left-0 bg-crm-bg z-[5]"
+                  className="px-3 py-3.5 sticky left-0 bg-crm-bg z-[5]"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <input
@@ -499,7 +499,7 @@ export default function CrmTable({
                 {orderedColumns.map((col) => (
                   <td
                     key={col.key}
-                    className="px-3 py-2"
+                    className="px-3 py-3.5"
                     style={{ width: widths[col.key] || col.defaultWidth || 150 }}
                   >
                     {col.renderCell
@@ -518,7 +518,7 @@ export default function CrmTable({
                   return (
                     <td
                       key={col.key}
-                      className="px-3 py-2"
+                      className="px-3 py-3.5"
                       style={{ width: widths[col.key] || col.defaultWidth || 150 }}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -572,7 +572,7 @@ export default function CrmTable({
                 })}
 
                 {/* Empty cell for add-field column */}
-                {onAddField && <td className="px-2 py-2 w-10" />}
+                {onAddField && <td className="px-2 py-3.5 w-10" />}
               </tr>
             );
           })}
