@@ -55,7 +55,7 @@ export default function QuickAddModal({ entityType, onCreated, onClose }) {
       for (const f of fields) {
         const v = values[f.key];
         if (v !== '' && v != null) {
-          cleaned[f.key] = f.type === 'number' ? Number(v) : v;
+          cleaned[f.key] = f.type === 'number' ? Number(v) : f.isArray ? [v] : v;
         }
       }
       const result = await createFn(cleaned);

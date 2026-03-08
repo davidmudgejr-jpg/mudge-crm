@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getDeal, updateDeal, getDealProperties, getDealContacts, getDealCompanies, getDealInteractions, getDealActionItems } from '../api/database';
+import { getDeal, updateDeal, deleteDeal, getDealProperties, getDealContacts, getDealCompanies, getDealInteractions, getDealActionItems } from '../api/database';
 import Section from '../components/shared/Section';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import InlineField from '../components/shared/InlineField';
@@ -19,6 +19,11 @@ export const DEAL_TYPES = ['Lease', 'Sale', 'Acquisition', 'Disposition', 'Inves
 
 export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isSlideOver }) {
   const resolvedId = id || dealId;
+  const handleDelete = async () => {
+    if (!window.confirm('Delete this deal? This cannot be undone.')) return;
+    await deleteDeal(resolvedId);
+    onSave?.();
+  };
   const [deal, setDeal] = useState(null);
   const [linkedProperties, setLinkedProperties] = useState([]);
   const [linkedContacts, setLinkedContacts] = useState([]);
@@ -122,7 +127,11 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
         title={deal.deal_name || 'Untitled Deal'}
         subtitle={<span className="flex items-center gap-2"><span>{deal.deal_type}</span><span>{deal.status}</span></span>}
         onClose={onClose}
-      />
+      >
+        <button onClick={handleDelete} className="text-crm-muted hover:text-red-400 w-8 h-8 flex items-center justify-center rounded-md hover:bg-crm-hover transition-colors" title="Delete deal">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+        </button>
+      </SlideOverHeader>
 
       <Section title="Deal Info">
         <div className="grid grid-cols-2 gap-x-4">

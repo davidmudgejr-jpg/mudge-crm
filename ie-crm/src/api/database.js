@@ -754,6 +754,25 @@ export async function deleteActionItem(id) {
   return query('DELETE FROM action_items WHERE action_item_id = $1 RETURNING *', [id]);
 }
 
+export async function deleteProperty(id) {
+  return query('DELETE FROM properties WHERE property_id = $1 RETURNING *', [id]);
+}
+export async function deleteContact(id) {
+  return query('DELETE FROM contacts WHERE contact_id = $1 RETURNING *', [id]);
+}
+export async function deleteCompany(id) {
+  return query('DELETE FROM companies WHERE company_id = $1 RETURNING *', [id]);
+}
+export async function deleteDeal(id) {
+  return query('DELETE FROM deals WHERE deal_id = $1 RETURNING *', [id]);
+}
+export async function deleteCampaign(id) {
+  return query('DELETE FROM campaigns WHERE campaign_id = $1 RETURNING *', [id]);
+}
+export async function deleteInteraction(id) {
+  return query('DELETE FROM interactions WHERE interaction_id = $1 RETURNING *', [id]);
+}
+
 // Action item linked record queries
 export async function getActionItemContacts(actionItemId) {
   return query(`

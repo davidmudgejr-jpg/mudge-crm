@@ -27,7 +27,7 @@ export const QUICK_ADD_FIELDS = {
     { key: 'deal_name', label: 'Deal Name', type: 'text', required: true, placeholder: '123 Main St - Lease' },
     { key: 'deal_type', label: 'Type', type: 'select', options: ['Lease', 'Sale', 'Sublease', 'Renewal', 'Expansion', 'Other'] },
     { key: 'status', label: 'Status', type: 'select', options: ['Prospecting', 'Active', 'Under Contract', 'Closed', 'Dead'] },
-    { key: 'repping', label: 'Repping', type: 'select', options: ['Landlord', 'Tenant', 'Buyer', 'Seller'] },
+    { key: 'repping', label: 'Repping', type: 'select', isArray: true, options: ['Landlord', 'Tenant', 'Buyer', 'Seller'] },
   ],
 
   interaction: [

@@ -11,6 +11,7 @@ import LinkedChips from '../components/shared/LinkedChips';
 import DealDetail, { STATUSES } from './DealDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
+import { playDealSound } from '../utils/dealSound';
 
 const STATUS_COLORS = {
   Active: 'bg-blue-500/20 text-blue-400',
@@ -216,7 +217,7 @@ export default function Deals({ onCountChange }) {
         <QuickAddModal
           entityType="deal"
           onClose={() => setShowQuickAdd(false)}
-          onCreated={() => { setShowQuickAdd(false); addToast('Deal created'); fetchData(); }}
+          onCreated={() => { setShowQuickAdd(false); addToast('Deal created'); fetchData(); playDealSound(); }}
         />
       )}
     </div>
