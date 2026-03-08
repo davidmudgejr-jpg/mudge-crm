@@ -16,6 +16,20 @@ import ActivitySection from '../components/shared/ActivitySection';
 export const CONTACT_TYPES = ['Tenant', 'Landlord', 'Buyer', 'Seller', 'Investor', 'Developer', 'Broker', 'Lender', 'Attorney', 'Other'];
 export const CLIENT_LEVEL_OPTIONS = ['A', 'B', 'C', 'D'];
 
+const TYPE_COLORS = {
+  Owner: 'bg-green-500/20 text-green-400',
+  Tenant: 'bg-yellow-500/20 text-yellow-400',
+  Landlord: 'bg-teal-500/20 text-teal-400',
+  Buyer: 'bg-blue-500/20 text-blue-400',
+  Seller: 'bg-orange-500/20 text-orange-400',
+  Investor: 'bg-purple-500/20 text-purple-400',
+  Developer: 'bg-indigo-500/20 text-indigo-400',
+  Broker: 'bg-cyan-500/20 text-cyan-400',
+  Lender: 'bg-rose-500/20 text-rose-400',
+  Attorney: 'bg-slate-500/20 text-slate-400',
+  Other: 'bg-gray-500/20 text-gray-400',
+};
+
 export default function ContactDetail({ contactId, id, onClose, onSave, onRefresh, isSlideOver }) {
   const resolvedId = id || contactId;
   const handleDelete = async () => {
@@ -117,7 +131,12 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
     );
   }
 
-  const subtitle = [contact.title, contact.type].filter(Boolean).join(' · ');
+  const subtitle = (
+    <span className="flex items-center gap-2">
+      {contact.title && <span>{contact.title}</span>}
+      {contact.type && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${TYPE_COLORS[contact.type] || 'bg-crm-border text-crm-muted'}`}>{contact.type}</span>}
+    </span>
+  );
 
   const content = (
     <>

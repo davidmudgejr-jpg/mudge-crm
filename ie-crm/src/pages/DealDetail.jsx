@@ -17,6 +17,19 @@ import TasksSection from '../components/shared/TasksSection';
 export const STATUSES = ['Prospecting', 'Active', 'Under Contract', 'Closed', 'Dead'];
 export const DEAL_TYPES = ['Lease', 'Sale', 'Acquisition', 'Disposition', 'Investment', 'Development'];
 
+const STATUS_COLORS = {
+  Active: 'bg-green-500/20 text-green-400',
+  Lead: 'bg-cyan-500/20 text-cyan-400',
+  Prospect: 'bg-yellow-500/20 text-yellow-400',
+  Prospecting: 'bg-yellow-500/20 text-yellow-400',
+  'Long Leads': 'bg-orange-500/20 text-orange-400',
+  'Under Contract': 'bg-blue-500/20 text-blue-400',
+  Closed: 'bg-purple-500/20 text-purple-400',
+  'Deal fell through': 'bg-red-500/20 text-red-400',
+  Dead: 'bg-gray-500/20 text-gray-400',
+  'Dead Lead': 'bg-gray-500/20 text-gray-400',
+};
+
 export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isSlideOver }) {
   const resolvedId = id || dealId;
   const handleDelete = async () => {
@@ -125,7 +138,7 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
     <>
       <SlideOverHeader
         title={deal.deal_name || 'Untitled Deal'}
-        subtitle={<span className="flex items-center gap-2"><span>{deal.deal_type}</span><span>{deal.status}</span></span>}
+        subtitle={<span className="flex items-center gap-2"><span>{deal.deal_type}</span>{deal.status && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLORS[deal.status] || 'bg-crm-border text-crm-muted'}`}>{deal.status}</span>}</span>}
         onClose={onClose}
       >
         <button onClick={handleDelete} className="text-crm-muted hover:text-red-400 w-8 h-8 flex items-center justify-center rounded-md hover:bg-crm-hover transition-colors" title="Delete deal">

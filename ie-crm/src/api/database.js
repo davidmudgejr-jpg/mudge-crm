@@ -1134,6 +1134,111 @@ export async function batchGetDealCompanies(dealIds) {
   return groupBy(r.rows, 'deal_id');
 }
 
+// -- Interaction linked records (batch) --
+export async function batchGetContactInteractions(contactIds) {
+  if (!contactIds.length) return {};
+  const r = await query(`
+    SELECT ranked.* FROM (
+      SELECT i.interaction_id, i.type, i.subject, i.date, i.notes, i.email_heading,
+             ic.contact_id,
+             ROW_NUMBER() OVER (PARTITION BY ic.contact_id ORDER BY i.date DESC NULLS LAST) AS rn
+      FROM interactions i
+      JOIN interaction_contacts ic ON i.interaction_id = ic.interaction_id
+      WHERE ic.contact_id = ANY($1)
+    ) ranked WHERE rn <= 5
+    ORDER BY ranked.contact_id, ranked.date DESC NULLS LAST
+  `, [contactIds]);
+  return groupBy(r.rows, 'contact_id');
+}
+
+export async function batchGetPropertyInteractions(propertyIds) {
+  if (!propertyIds.length) return {};
+  const r = await query(`
+    SELECT ranked.* FROM (
+      SELECT i.interaction_id, i.type, i.subject, i.date, i.notes, i.email_heading,
+             ip.property_id,
+             ROW_NUMBER() OVER (PARTITION BY ip.property_id ORDER BY i.date DESC NULLS LAST) AS rn
+      FROM interactions i
+      JOIN interaction_properties ip ON i.interaction_id = ip.interaction_id
+      WHERE ip.property_id = ANY($1)
+    ) ranked WHERE rn <= 5
+    ORDER BY ranked.property_id, ranked.date DESC NULLS LAST
+  `, [propertyIds]);
+  return groupBy(r.rows, 'property_id');
+}
+
+export async function batchGetCompanyInteractions(companyIds) {
+  if (!companyIds.length) return {};
+  const r = await query(`
+    SELECT ranked.* FROM (
+      SELECT i.interaction_id, i.type, i.subject, i.date, i.notes, i.email_heading,
+             ic.company_id,
+             ROW_NUMBER() OVER (PARTITION BY ic.company_id ORDER BY i.date DESC NULLS LAST) AS rn
+      FROM interactions i
+      JOIN interaction_companies ic ON i.interaction_id = ic.interaction_id
+      WHERE ic.company_id = ANY($1)
+    ) ranked WHERE rn <= 5
+    ORDER BY ranked.company_id, ranked.date DESC NULLS LAST
+  `, [companyIds]);
+  return groupBy(r.rows, 'company_id');
+}
+
+export async function batchGetDealInteractions(dealIds) {
+  if (!dealIds.length) return {};
+  const r = await query(`
+    SELECT ranked.* FROM (
+      SELECT i.interaction_id, i.type, i.subject, i.date, i.notes, i.email_heading,
+             id.deal_id,
+             ROW_NUMBER() OVER (PARTITION BY id.deal_id ORDER BY i.date DESC NULLS LAST) AS rn
+      FROM interactions i
+      JOIN interaction_deals id ON i.interaction_id = id.interaction_id
+      WHERE id.deal_id = ANY($1)
+    ) ranked WHERE rn <= 5
+    ORDER BY ranked.deal_id, ranked.date DESC NULLS LAST
+  `, [dealIds]);
+  return groupBy(r.rows, 'deal_id');
+}
+
+export async function getDealAggregatedInteractions(dealId) {
+  return query(`
+    SELECT DISTINCT ON (i.interaction_id) i.*, 'deal' AS source_type, NULL AS source_name
+    FROM interactions i
+    JOIN interaction_deals id ON i.interaction_id = id.interaction_id
+    WHERE id.deal_id = $1
+
+    UNION ALL
+
+    SELECT DISTINCT ON (i.interaction_id) i.*, 'contact' AS source_type, c.full_name AS source_name
+    FROM interactions i
+    JOIN interaction_contacts ic ON i.interaction_id = ic.interaction_id
+    JOIN contacts c ON ic.contact_id = c.contact_id
+    JOIN deal_contacts dc ON ic.contact_id = dc.contact_id
+    WHERE dc.deal_id = $1
+    AND i.interaction_id NOT IN (
+      SELECT id2.interaction_id FROM interaction_deals id2 WHERE id2.deal_id = $1
+    )
+
+    UNION ALL
+
+    SELECT DISTINCT ON (i.interaction_id) i.*, 'property' AS source_type, p.property_address AS source_name
+    FROM interactions i
+    JOIN interaction_properties ip ON i.interaction_id = ip.interaction_id
+    JOIN properties p ON ip.property_id = p.property_id
+    JOIN deal_properties dp ON ip.property_id = dp.property_id
+    WHERE dp.deal_id = $1
+    AND i.interaction_id NOT IN (
+      SELECT id2.interaction_id FROM interaction_deals id2 WHERE id2.deal_id = $1
+    )
+    AND i.interaction_id NOT IN (
+      SELECT ic2.interaction_id FROM interaction_contacts ic2
+      JOIN deal_contacts dc2 ON ic2.contact_id = dc2.contact_id
+      WHERE dc2.deal_id = $1
+    )
+
+    ORDER BY date DESC NULLS LAST
+  `, [dealId]);
+}
+
 // -- Action Item linked records (batch) --
 export async function batchGetActionItemContacts(actionItemIds) {
   if (!actionItemIds.length) return {};

@@ -19,6 +19,7 @@ export default function LinkedRecordSection({
   sourceId,
   onRefresh,
   defaultOpen = true,
+  role,
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [modal, setModal] = useState(null); // 'link' | 'create' | null
@@ -54,7 +55,8 @@ export default function LinkedRecordSection({
       return;
     }
     try {
-      const result = await linkRecords(junction.table, mapping.srcCol, sourceId, mapping.tgtCol, targetId);
+      const extras = role ? { role } : {};
+      const result = await linkRecords(junction.table, mapping.srcCol, sourceId, mapping.tgtCol, targetId, extras);
       console.log('[handleLink] linkRecords returned:', result);
       setModal(null);
       if (onRefresh) onRefresh();
@@ -68,7 +70,8 @@ export default function LinkedRecordSection({
     const mapping = getColMapping();
     if (!mapping || !sourceId || !newId) return;
     try {
-      await linkRecords(junction.table, mapping.srcCol, sourceId, mapping.tgtCol, newId);
+      const extras = role ? { role } : {};
+      await linkRecords(junction.table, mapping.srcCol, sourceId, mapping.tgtCol, newId, extras);
       setModal(null);
       if (onRefresh) onRefresh();
     } catch (err) {

@@ -3,6 +3,14 @@ import { formatDatePacific, formatDateTimePacific } from '../../utils/timezone';
 
 // Unified cell formatter — replaces 4 duplicate formatCell functions across pages
 
+export function formatPhone(raw) {
+  if (!raw) return raw;
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.length === 10) return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 11 && digits[0] === '1') return `+1 (${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;
+  return String(raw); // fallback: return as-is if not 10/11 digits
+}
+
 export default function formatCell(value, format) {
   if (value == null || value === '') return <span className="text-crm-muted">--</span>;
 
@@ -102,8 +110,8 @@ export default function formatCell(value, format) {
 
     case 'phone':
       return (
-        <a href={`tel:${value}`} className="text-crm-accent hover:underline">
-          {value}
+        <a href={`tel:${value}`} className="text-crm-accent hover:underline whitespace-nowrap">
+          {formatPhone(value)}
         </a>
       );
 

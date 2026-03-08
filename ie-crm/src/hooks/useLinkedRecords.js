@@ -5,6 +5,7 @@ import {
   batchGetCompanyContacts, batchGetCompanyProperties, batchGetCompanyDeals,
   batchGetDealProperties, batchGetDealContacts, batchGetDealCompanies,
   batchGetActionItemContacts, batchGetActionItemProperties, batchGetActionItemDeals, batchGetActionItemCompanies,
+  batchGetContactInteractions, batchGetPropertyInteractions, batchGetCompanyInteractions, batchGetDealInteractions,
 } from '../api/database';
 
 const ENTITY_FETCHERS = {
@@ -14,6 +15,7 @@ const ENTITY_FETCHERS = {
       linked_contacts: batchGetPropertyContacts,
       linked_companies: batchGetPropertyCompanies,
       linked_deals: batchGetPropertyDeals,
+      linked_interactions: batchGetPropertyInteractions,
     },
   },
   contacts: {
@@ -23,6 +25,7 @@ const ENTITY_FETCHERS = {
       linked_companies: batchGetContactCompanies,
       linked_deals: batchGetContactDeals,
       linked_campaigns: batchGetContactCampaigns,
+      linked_interactions: batchGetContactInteractions,
     },
   },
   companies: {
@@ -31,6 +34,7 @@ const ENTITY_FETCHERS = {
       linked_contacts: batchGetCompanyContacts,
       linked_properties: batchGetCompanyProperties,
       linked_deals: batchGetCompanyDeals,
+      linked_interactions: batchGetCompanyInteractions,
     },
   },
   deals: {
@@ -39,6 +43,7 @@ const ENTITY_FETCHERS = {
       linked_properties: batchGetDealProperties,
       linked_contacts: batchGetDealContacts,
       linked_companies: batchGetDealCompanies,
+      linked_interactions: batchGetDealInteractions,
     },
   },
   action_items: {

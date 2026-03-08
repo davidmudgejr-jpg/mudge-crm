@@ -10,16 +10,21 @@ import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import LinkedChips from '../components/shared/LinkedChips';
 import DealDetail, { STATUSES } from './DealDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
+import ActivityCellPreview from '../components/shared/ActivityCellPreview';
+import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import { playDealSound } from '../utils/dealSound';
 
 const STATUS_COLORS = {
-  Active: 'bg-blue-500/20 text-blue-400',
+  Active: 'bg-green-500/20 text-green-400',
   Lead: 'bg-cyan-500/20 text-cyan-400',
   Prospect: 'bg-yellow-500/20 text-yellow-400',
+  Prospecting: 'bg-yellow-500/20 text-yellow-400',
   'Long Leads': 'bg-orange-500/20 text-orange-400',
-  Closed: 'bg-green-500/20 text-green-400',
+  'Under Contract': 'bg-blue-500/20 text-blue-400',
+  Closed: 'bg-purple-500/20 text-purple-400',
   'Deal fell through': 'bg-red-500/20 text-red-400',
+  Dead: 'bg-gray-500/20 text-gray-400',
   'Dead Lead': 'bg-gray-500/20 text-gray-400',
 };
 
@@ -71,6 +76,7 @@ const ALL_COLUMNS = [
 export default function Deals({ onCountChange }) {
   const { addToast } = useToast();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
+  const [activityModal, setActivityModal] = useState(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -83,7 +89,24 @@ export default function Deals({ onCountChange }) {
   const [totalCount, setTotalCount] = useState(0);
   const { formulas, evaluateFormulas } = useFormulaColumns('deals');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('deals');
-  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('deals', ALL_COLUMNS);
+
+  const allColumnsWithActivity = useMemo(() => {
+    const idx = ALL_COLUMNS.findIndex(c => c.defaultVisible === false);
+    const activityCol = {
+      key: 'linked_interactions', label: 'Activity', defaultWidth: 220,
+      renderCell: (val, row) => (
+        <ActivityCellPreview
+          interactions={val}
+          onExpand={() => setActivityModal({ entityId: row.deal_id, entityLabel: row.deal_name || 'Deal' })}
+        />
+      ),
+    };
+    const result = [...ALL_COLUMNS];
+    result.splice(idx >= 0 ? idx : result.length, 0, activityCol);
+    return result;
+  }, []);
+
+  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('deals', allColumnsWithActivity);
   const linked = useLinkedRecords('deals', rows);
 
   const augmentedRows = useMemo(() => {
@@ -93,6 +116,7 @@ export default function Deals({ onCountChange }) {
       linked_properties: linked.linked_properties?.[row.deal_id] || [],
       linked_contacts: linked.linked_contacts?.[row.deal_id] || [],
       linked_companies: linked.linked_companies?.[row.deal_id] || [],
+      linked_interactions: linked.linked_interactions?.[row.deal_id] || [],
     }));
   }, [rows, linked]);
 
@@ -167,7 +191,7 @@ export default function Deals({ onCountChange }) {
             {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           <ColumnToggleMenu
-            allColumns={ALL_COLUMNS}
+            allColumns={allColumnsWithActivity}
             visibleKeys={visibleKeys}
             toggleColumn={toggleColumn}
             showAll={showAll}
@@ -218,6 +242,16 @@ export default function Deals({ onCountChange }) {
           entityType="deal"
           onClose={() => setShowQuickAdd(false)}
           onCreated={() => { setShowQuickAdd(false); addToast('Deal created'); fetchData(); playDealSound(); }}
+        />
+      )}
+
+      {activityModal && (
+        <ActivityModal
+          entityType="deal"
+          entityId={activityModal.entityId}
+          entityLabel={activityModal.entityLabel}
+          onClose={() => setActivityModal(null)}
+          onActivityCreated={fetchData}
         />
       )}
     </div>

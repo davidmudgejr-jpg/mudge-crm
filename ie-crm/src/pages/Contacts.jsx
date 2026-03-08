@@ -11,13 +11,22 @@ import LinkedChips from '../components/shared/LinkedChips';
 import ContactDetail from './ContactDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import LinkPickerModal from '../components/shared/LinkPickerModal';
+import ActivityCellPreview from '../components/shared/ActivityCellPreview';
+import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 
 const TYPE_COLORS = {
-  Owner: 'bg-blue-500/20 text-blue-400',
-  Broker: 'bg-purple-500/20 text-purple-400',
-  Tenant: 'bg-green-500/20 text-green-400',
-  Investor: 'bg-yellow-500/20 text-yellow-400',
+  Owner: 'bg-green-500/20 text-green-400',
+  Tenant: 'bg-yellow-500/20 text-yellow-400',
+  Landlord: 'bg-teal-500/20 text-teal-400',
+  Buyer: 'bg-blue-500/20 text-blue-400',
+  Seller: 'bg-orange-500/20 text-orange-400',
+  Investor: 'bg-purple-500/20 text-purple-400',
+  Developer: 'bg-indigo-500/20 text-indigo-400',
+  Broker: 'bg-cyan-500/20 text-cyan-400',
+  Lender: 'bg-rose-500/20 text-rose-400',
+  Attorney: 'bg-slate-500/20 text-slate-400',
+  Other: 'bg-gray-500/20 text-gray-400',
 };
 
 const LEVEL_COLORS = { A: 'text-crm-success', B: 'text-yellow-400', C: 'text-crm-muted', D: 'text-red-400' };
@@ -96,6 +105,7 @@ export default function Contacts({ onCountChange }) {
   const { addToast } = useToast();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showCampaignPicker, setShowCampaignPicker] = useState(false);
+  const [activityModal, setActivityModal] = useState(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -108,7 +118,24 @@ export default function Contacts({ onCountChange }) {
   const [totalCount, setTotalCount] = useState(0);
   const { formulas } = useFormulaColumns('contacts');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('contacts');
-  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('contacts', ALL_COLUMNS);
+
+  const allColumnsWithActivity = useMemo(() => {
+    const idx = ALL_COLUMNS.findIndex(c => c.defaultVisible === false);
+    const activityCol = {
+      key: 'linked_interactions', label: 'Activity', defaultWidth: 220,
+      renderCell: (val, row) => (
+        <ActivityCellPreview
+          interactions={val}
+          onExpand={() => setActivityModal({ entityId: row.contact_id, entityLabel: row.full_name || 'Contact' })}
+        />
+      ),
+    };
+    const result = [...ALL_COLUMNS];
+    result.splice(idx >= 0 ? idx : result.length, 0, activityCol);
+    return result;
+  }, []);
+
+  const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('contacts', allColumnsWithActivity);
   const linked = useLinkedRecords('contacts', rows);
 
   const augmentedRows = useMemo(() => {
@@ -119,6 +146,7 @@ export default function Contacts({ onCountChange }) {
       linked_companies: linked.linked_companies?.[row.contact_id] || [],
       linked_deals: linked.linked_deals?.[row.contact_id] || [],
       linked_campaigns: linked.linked_campaigns?.[row.contact_id] || [],
+      linked_interactions: linked.linked_interactions?.[row.contact_id] || [],
     }));
   }, [rows, linked]);
 
@@ -220,7 +248,7 @@ export default function Contacts({ onCountChange }) {
             {CONTACT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
           <ColumnToggleMenu
-            allColumns={ALL_COLUMNS}
+            allColumns={allColumnsWithActivity}
             visibleKeys={visibleKeys}
             toggleColumn={toggleColumn}
             showAll={showAll}
@@ -279,6 +307,16 @@ export default function Contacts({ onCountChange }) {
           entityType="contact"
           onClose={() => setShowQuickAdd(false)}
           onCreated={() => { setShowQuickAdd(false); addToast('Contact created'); fetchData(); }}
+        />
+      )}
+
+      {activityModal && (
+        <ActivityModal
+          entityType="contact"
+          entityId={activityModal.entityId}
+          entityLabel={activityModal.entityLabel}
+          onClose={() => setActivityModal(null)}
+          onActivityCreated={fetchData}
         />
       )}
     </div>

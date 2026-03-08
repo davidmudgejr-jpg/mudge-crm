@@ -107,16 +107,20 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
 
   const priorityColors = { Hot: 'text-red-400', Warm: 'text-orange-400', Cold: 'text-blue-400', Dead: 'text-gray-400' };
 
-  const contactRecords = contacts.map((c) => ({
-    id: c.contact_id,
-    label: `${c.full_name}${c.role ? ` (${c.role})` : ''}`,
-    secondary: c.email,
-  }));
-  const companyRecords = companies.map((co) => ({
-    id: co.company_id,
-    label: `${co.company_name}${co.role ? ` (${co.role})` : ''}`,
-    secondary: co.city,
-  }));
+  const mapContact = (c) => ({ id: c.contact_id, label: c.full_name, secondary: c.email });
+  const mapCompany = (co) => ({ id: co.company_id, label: co.company_name, secondary: co.city });
+
+  // Role-specific filtering
+  const ownerContacts = contacts.filter(c => c.role === 'owner').map(mapContact);
+  const brokerContacts = contacts.filter(c => c.role === 'broker').map(mapContact);
+  const tenantCompanies = companies.filter(co => co.role === 'tenant').map(mapCompany);
+  const ownerCompanies = companies.filter(co => co.role === 'owner').map(mapCompany);
+  const leasingCompanies = companies.filter(co => co.role === 'leasing').map(mapCompany);
+
+  // Legacy records with no role assigned
+  const otherContacts = contacts.filter(c => !c.role).map(mapContact);
+  const otherCompanies = companies.filter(co => !co.role).map(mapCompany);
+
   const dealRecords = deals.map((d) => ({
     id: d.deal_id,
     label: d.deal_name,
@@ -187,8 +191,17 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
         </div>
       </Section>
 
-      <LinkedRecordSection title="Owner Contact" entityType="contact" records={contactRecords} defaultOpen={contacts.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
-      <LinkedRecordSection title="Companies" entityType="company" records={companyRecords} defaultOpen={companies.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
+      <LinkedRecordSection title="Owner Contact" entityType="contact" records={ownerContacts} defaultOpen={ownerContacts.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} role="owner" />
+      <LinkedRecordSection title="Broker Contact" entityType="contact" records={brokerContacts} defaultOpen={brokerContacts.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} role="broker" />
+      <LinkedRecordSection title="Company Tenants" entityType="company" records={tenantCompanies} defaultOpen={tenantCompanies.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} role="tenant" />
+      <LinkedRecordSection title="Company Owner" entityType="company" records={ownerCompanies} defaultOpen={ownerCompanies.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} role="owner" />
+      <LinkedRecordSection title="Leasing Company" entityType="company" records={leasingCompanies} defaultOpen={leasingCompanies.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} role="leasing" />
+      {otherContacts.length > 0 && (
+        <LinkedRecordSection title="Other Contacts" entityType="contact" records={otherContacts} defaultOpen={false} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
+      )}
+      {otherCompanies.length > 0 && (
+        <LinkedRecordSection title="Other Companies" entityType="company" records={otherCompanies} defaultOpen={false} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
+      )}
       <LinkedRecordSection title="Deals" entityType="deal" records={dealRecords} defaultOpen={deals.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
 
       <ActivitySection interactions={interactions} onNewInteraction={() => setShowNewInteraction(true)} onSelectInteraction={(id) => setSelectedInteraction(id)} />

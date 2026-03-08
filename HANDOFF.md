@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
 > Updated: 2026-03-08
-> Previous session: "Audited actual build state vs stale handoff — handoff was 10+ commits behind"
-> Next task: **Wire up role-specific linked fields** → then continue remaining Phase 1A gaps
+> Previous session: "Activity column in all table views + ActivityModal with quick note + deal activity aggregation"
+> Next task: **Inline cell editing** in table views (click-to-edit cells, linked fields still open detail panel) → then **Fix 9 phantom columns** → remaining Phase 1A gaps
 
 ---
 
@@ -43,8 +43,9 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] Interaction types expanded from 7 to 17
 
 ### Phase 1A — Remaining Gaps ⬜
-- [ ] **Role-specific linked columns on Properties** — Currently 3 generic columns (Contacts, Companies, Deals) with `defaultVisible: false`. Need 5 role-filtered columns: Company Tenants (role='tenant'), Company Owner (role='owner'), Leasing Company (role='leasing'), Owner Contact (role='owner'), Broker Contact (role='broker')
-- [ ] **Add `role` to batch queries** — `batchGetPropertyContacts` and `batchGetPropertyCompanies` don't SELECT `pc.role`
+- [x] **Role-specific linked columns on Properties** — 5 role-filtered columns in table view (Owner Contact, Broker Contact, Company Tenants, Company Owner, Leasing Company) + `augmentedRows` filtering (commit `87c88cd`)
+- [x] **Add `role` to batch queries** — `batchGetPropertyContacts` and `batchGetPropertyCompanies` now SELECT `pc.role` (commit `87c88cd`)
+- [x] **Role-specific sections in PropertyDetail** — 5 role-filtered LinkedRecordSection panels replace 2 generic ones. `role` prop passed through to `linkRecords()` extras so new links get correct role. Legacy NULL-role records shown in conditional "Other" sections.
 - [ ] **9 phantom columns in Properties ALL_COLUMNS** — `apn`, `units`, `stories`, `parking_spaces`, `asking_price`, `price_per_sqft`, `noi`, `owner_email`, `owner_mailing_address` have no backing DB column (need ALTER TABLE or remove from UI)
 - [ ] **schema.sql is stale** — doesn't include migration 001/002/003 tables/columns. Fresh install from schema.sql alone would be incomplete.
 - [ ] Add indexes on all filtered/searched columns
@@ -93,6 +94,14 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] Date formatting via formatDatePacific globally
 - [x] Delete buttons on all detail panels
 - [x] Deal creation sound effect
+
+### Activity Column in Table Views ✅
+- [x] **Batch interaction queries** — `batchGetContactInteractions`, `batchGetPropertyInteractions`, `batchGetCompanyInteractions`, `batchGetDealInteractions` in database.js. Uses `ROW_NUMBER() OVER (PARTITION BY entity_id ORDER BY date DESC)` to limit to 5 most recent per entity.
+- [x] **Deal aggregation query** — `getDealAggregatedInteractions(dealId)` — UNION ALL across deal + linked contacts/properties/companies with `source_type`/`source_name` provenance labels
+- [x] **`linked_interactions` registered in useLinkedRecords** — piggybacks on existing parallel batch fetch for all 4 entity types
+- [x] **ActivityCellPreview component** — Compact cell renderer: 3 most recent activities with colored type icon circles, truncated text, actual dates (formatDateCompact). "+N more" link. Click opens ActivityModal. `e.stopPropagation()` prevents row click.
+- [x] **ActivityModal component** — Full modal with quick note input (creates Note-type interaction linked to entity), full interaction list with type icons/dates/notes preview. For deals: shows aggregated activities from linked entities with "via [name]" provenance. Click any activity → InteractionDetail slide-over.
+- [x] **Activity column added to all 4 table views** — Properties, Contacts, Deals, Companies. Column key: `linked_interactions`. Default visible. Uses `useMemo` to create `allColumnsWithActivity` closing over `setActivityModal`. Existing users need "Reset" in Column menu to see it (localStorage column preferences).
 
 ---
 

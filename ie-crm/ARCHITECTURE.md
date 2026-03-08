@@ -156,6 +156,14 @@ The backbone of the notes/activity system. Powers the Activity tab (global feed)
 
 **Most important index in the app:** type, date, team_member
 
+**Activity Column (table views):**
+Interactions are surfaced directly in all 4 main table views (Properties, Contacts, Deals, Companies) via a batch-fetched `linked_interactions` column. Architecture:
+- **Batch queries:** `batchGet[Entity]Interactions()` uses `ROW_NUMBER() OVER (PARTITION BY entity_id ORDER BY date DESC)` to fetch the 5 most recent interactions per entity in a single query, then groups by entity ID.
+- **Deal aggregation:** `getDealAggregatedInteractions(dealId)` — UNION ALL across the deal's own interactions + interactions from all linked contacts, properties, and companies. Returns `source_type` and `source_name` for provenance display ("via John Smith").
+- **Hook integration:** Registered as `linked_interactions` in `useLinkedRecords.js` ENTITY_FETCHERS config. Piggybacks on the existing parallel batch fetch — no additional round trips.
+- **Cell rendering:** `ActivityCellPreview` shows 3 most recent with colored type icon, truncated text, and date. Click opens `ActivityModal` (full list + quick note input). `e.stopPropagation()` prevents row click.
+- **Column definition:** Created via `useMemo` inside each page component (closes over `setActivityModal` state setter). Merged into `allColumnsWithActivity` before passing to `useColumnVisibility`.
+
 ---
 
 ### action_items (NEW — not yet created)
@@ -317,6 +325,13 @@ Deal formulas, TPE scores, and commission splits are all computed live via SQL V
 
 ### Why Junction Tables for Action Items (not polymorphic)
 Action items use 4 dedicated junction tables instead of the polymorphic pattern used by interactions. Reason: an action item can link to a property AND a contact AND a deal simultaneously. Polymorphic (record_type + record_id) only allows one link per row. Junction tables allow many-to-many across all types.
+
+### Why Activity Propagation for Deals (UNION ALL, not denormalization)
+Deal activity aggregation pulls interactions from linked contacts, properties, and companies using a UNION ALL query at read time rather than copying/denormalizing interactions into the deal. Reasons:
+- Always current — adding an interaction to a contact instantly appears in the deal's activity feed
+- No sync jobs or triggers to maintain
+- Provenance is clear — each row carries `source_type` and `source_name` so the UI shows "via John Smith" or "via 123 Main St"
+- Performance is fine — deals rarely link to more than 5-10 entities, so the UNION is fast
 
 ### Why Web App (not Electron)
 Originally built as Electron desktop app but migrated to React (Vercel) + Node.js (Railway). Web app is the right choice because:
