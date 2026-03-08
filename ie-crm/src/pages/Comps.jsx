@@ -9,6 +9,7 @@ import CompDetail from './CompDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
 import { useSlideOver } from '../components/shared/SlideOverContext';
+import useDetailPanel from '../hooks/useDetailPanel';
 
 const PROPERTY_TYPES = ['Industrial', 'Office', 'Retail', 'Multifamily', 'Land', 'Mixed-Use'];
 const RENT_TYPES = ['NNN', 'GRS', 'MGR'];
@@ -142,6 +143,7 @@ export default function Comps({ onCountChange }) {
   const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
   const [detailId, setDetailId] = useState(null);
+  useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
 
   // Column visibility for both tabs

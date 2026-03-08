@@ -7,6 +7,8 @@ const SlideOverContext = createContext(null);
 export function SlideOverProvider({ children }) {
   // Stack of { entityType, entityId } objects
   const [stack, setStack] = useState([]);
+  // Counter for page-level detail panels (not managed by the stack)
+  const [pageDetailCount, setPageDetailCount] = useState(0);
 
   const open = useCallback((entityType, entityId) => {
     setStack((prev) => {
@@ -26,10 +28,15 @@ export function SlideOverProvider({ children }) {
     setStack([]);
   }, []);
 
+  // Pages call these when they open/close their own detail panels
+  const registerDetail = useCallback(() => setPageDetailCount((c) => c + 1), []);
+  const unregisterDetail = useCallback(() => setPageDetailCount((c) => Math.max(0, c - 1)), []);
+
   const canNest = stack.length < MAX_DEPTH;
+  const hasAnyPanel = stack.length > 0 || pageDetailCount > 0;
 
   return (
-    <SlideOverContext.Provider value={{ stack, open, close, closeAll, canNest }}>
+    <SlideOverContext.Provider value={{ stack, open, close, closeAll, canNest, hasAnyPanel, registerDetail, unregisterDetail }}>
       {children}
     </SlideOverContext.Provider>
   );

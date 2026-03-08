@@ -4,6 +4,7 @@ import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import useLinkedRecords from '../hooks/useLinkedRecords';
+import useDetailPanel from '../hooks/useDetailPanel';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import LinkedChips from '../components/shared/LinkedChips';
@@ -103,6 +104,7 @@ export default function Contacts({ onCountChange }) {
   const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
   const [detailId, setDetailId] = useState(null);
+  useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
   const { formulas } = useFormulaColumns('contacts');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('contacts');

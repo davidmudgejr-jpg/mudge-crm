@@ -8,6 +8,7 @@ import QuickAddModal from '../components/shared/QuickAddModal';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import { useToast } from '../components/shared/Toast';
 import { formatDatePacific, formatDateTimePacific } from '../utils/timezone';
+import useDetailPanel from '../hooks/useDetailPanel';
 
 const STATUS_COLORS = {
   Draft: 'bg-gray-500/20 text-gray-400',
@@ -242,6 +243,7 @@ export default function Campaigns({ onCountChange }) {
   const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
   const [detailId, setDetailId] = useState(null);
+  useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('campaigns');
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('campaigns', ALL_COLUMNS);

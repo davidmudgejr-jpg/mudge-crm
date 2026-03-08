@@ -63,8 +63,7 @@ function AppShell() {
   const [currentTable, setCurrentTable] = useState('properties');
   const [rowCount, setRowCount] = useState(0);
   const { devMode } = useDevMode();
-  const { stack: slideOverStack } = useSlideOver();
-  const hasSlideOver = slideOverStack.length > 0;
+  const { hasAnyPanel } = useSlideOver();
 
   return (
     <div className={`flex h-screen bg-crm-bg text-crm-text overflow-hidden ${devMode ? 'dev-mode' : ''}`}>
@@ -97,6 +96,7 @@ function AppShell() {
         onToggle={() => setClaudeOpen(!claudeOpen)}
         currentTable={currentTable}
         rowCount={rowCount}
+        hasAnyPanel={hasAnyPanel}
       />
 
       {/* Nested SlideOver panels */}
@@ -106,7 +106,7 @@ function AppShell() {
       {!claudeOpen && (
         <button
           onClick={(e) => { e.stopPropagation(); setClaudeOpen(true); }}
-          className={`fixed bottom-4 z-[45] bg-crm-accent hover:bg-crm-accent-hover text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-all duration-200 ${hasSlideOver ? 'right-[540px]' : 'right-4'}`}
+          className={`fixed bottom-4 z-[45] bg-crm-accent hover:bg-crm-accent-hover text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-all duration-200 ${hasAnyPanel ? 'right-[540px]' : 'right-4'}`}
           title="Open Claude"
         >
           <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

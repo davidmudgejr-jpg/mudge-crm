@@ -4,6 +4,7 @@ import ActionItemDetail, { STATUSES } from './ActionItemDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
 import { formatDatePacific } from '../utils/timezone';
+import useDetailPanel from '../hooks/useDetailPanel';
 
 const CIRCLE_COLORS = {
   Todo: 'border-red-500/60',
@@ -116,6 +117,7 @@ export default function ActionItems({ onCountChange }) {
   const [orderBy, setOrderBy] = useState('due_date');
   const [order, setOrder] = useState('ASC');
   const [detailId, setDetailId] = useState(null);
+  useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
   const [showCompleted, setShowCompleted] = useState(false);
 

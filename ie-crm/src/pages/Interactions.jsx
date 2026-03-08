@@ -5,6 +5,7 @@ import InteractionDetail, { formatDate, formatTime } from './InteractionDetail';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
 import { useToast } from '../components/shared/Toast';
 import { todayPacific } from '../utils/timezone';
+import useDetailPanel from '../hooks/useDetailPanel';
 
 const TYPES = INTERACTION_TYPES;
 
@@ -18,6 +19,7 @@ export default function Interactions({ onCountChange }) {
   const [orderBy, setOrderBy] = useState('date');
   const [order, setOrder] = useState('DESC');
   const [detailId, setDetailId] = useState(null);
+  useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
 
   const fetchData = useCallback(async () => {
