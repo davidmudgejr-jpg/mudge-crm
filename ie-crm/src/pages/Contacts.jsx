@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getContacts, linkRecords } from '../api/database';
+import { getContacts, linkRecords, updateContact } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
@@ -33,9 +33,9 @@ const LEVEL_COLORS = { A: 'text-crm-success', B: 'text-yellow-400', C: 'text-crm
 
 const ALL_COLUMNS = [
   // Default visible
-  { key: 'full_name', label: 'Name', defaultWidth: 160 },
-  {
-    key: 'type', label: 'Type', defaultWidth: 90,
+  { key: 'full_name', label: 'Name', defaultWidth: 160, editable: false },
+  { key: 'type', label: 'Type', defaultWidth: 90, format: 'type',
+    editType: 'select', editOptions: ['Owner', 'Broker', 'Tenant', 'Investor', 'Vendor', 'Attorney', 'Lender', 'Other'],
     renderCell: (val) => val ? (
       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${TYPE_COLORS[val] || 'bg-crm-border text-crm-muted'}`}>{val}</span>
     ) : <span className="text-crm-muted">--</span>,
@@ -43,21 +43,21 @@ const ALL_COLUMNS = [
   { key: 'title', label: 'Title', defaultWidth: 140 },
   { key: 'email', label: 'Email', defaultWidth: 180, format: 'email' },
   { key: 'phone_1', label: 'Phone', defaultWidth: 120, format: 'phone' },
-  {
-    key: 'client_level', label: 'Level', defaultWidth: 80,
+  { key: 'client_level', label: 'Level', defaultWidth: 80, format: 'level',
+    editType: 'select', editOptions: ['A', 'B', 'C', 'D'],
     renderCell: (val) => val ? (
       <span className={`font-semibold ${LEVEL_COLORS[val] || 'text-crm-muted'}`}>{val}</span>
     ) : <span className="text-crm-muted">--</span>,
   },
   { key: 'last_contacted', label: 'Last Contact', defaultWidth: 100, format: 'date' },
   { key: 'follow_up', label: 'Follow Up', defaultWidth: 100, format: 'date' },
-  { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags' },
+  { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags' },
   // Hidden by default
   { key: 'first_name', label: 'First Name', defaultWidth: 120, defaultVisible: false },
   { key: 'email_2', label: 'Email 2', defaultWidth: 180, format: 'email', defaultVisible: false },
   { key: 'phone_2', label: 'Phone 2', defaultWidth: 120, format: 'phone', defaultVisible: false },
-  { key: 'phone_hot', label: 'Phone Hot', defaultWidth: 80, format: 'bool', defaultVisible: false },
-  { key: 'email_hot', label: 'Email Hot', defaultWidth: 80, format: 'bool', defaultVisible: false },
+  { key: 'phone_hot', label: 'Phone Hot', defaultWidth: 80, format: 'bool', editType: 'boolean', defaultVisible: false },
+  { key: 'email_hot', label: 'Email Hot', defaultWidth: 80, format: 'bool', editType: 'boolean', defaultVisible: false },
   { key: 'linkedin', label: 'LinkedIn', defaultWidth: 160, defaultVisible: false },
   { key: 'active_need', label: 'Active Need', defaultWidth: 140, defaultVisible: false },
   { key: 'home_address', label: 'Home Address', defaultWidth: 180, defaultVisible: false },
@@ -68,9 +68,9 @@ const ALL_COLUMNS = [
   { key: 'data_source', label: 'Source', defaultWidth: 100, defaultVisible: false },
   { key: 'email_3', label: 'Email 3', defaultWidth: 180, format: 'email', defaultVisible: false },
   { key: 'phone_3', label: 'Phone 3', defaultWidth: 120, format: 'phone', defaultVisible: false },
-  { key: 'email_kickback', label: 'Email Kickback', defaultWidth: 100, format: 'bool', defaultVisible: false },
+  { key: 'email_kickback', label: 'Email Kickback', defaultWidth: 100, format: 'bool', editType: 'boolean', defaultVisible: false },
   { key: 'born', label: 'Birthday', defaultWidth: 90, format: 'date', defaultVisible: false },
-  { key: 'age', label: 'Age', defaultWidth: 50, format: 'number', defaultVisible: false },
+  { key: 'age', label: 'Age', defaultWidth: 50, format: 'number', editable: false, defaultVisible: false },
   // Research links
   { key: 'white_pages_url', label: 'White Pages', defaultWidth: 80, defaultVisible: false },
   { key: 'been_verified_url', label: 'Been Verified', defaultWidth: 80, defaultVisible: false },
@@ -184,6 +184,23 @@ export default function Contacts({ onCountChange }) {
     selected.size === rows.length ? setSelected(new Set()) : setSelected(new Set(rows.map((r) => r.contact_id)));
   };
 
+  const handleCellSave = useCallback(async (rowId, field, value) => {
+    let oldValue;
+    setRows((prev) => prev.map((r) => {
+      if (r.contact_id === rowId) { oldValue = r[field]; return { ...r, [field]: value }; }
+      return r;
+    }));
+    try {
+      await updateContact(rowId, { [field]: value });
+      addToast('Saved', 'success', 1500);
+    } catch (err) {
+      setRows((prev) => prev.map((r) =>
+        r.contact_id === rowId ? { ...r, [field]: oldValue } : r
+      ));
+      addToast(`Save failed: ${err.message}`, 'error', 4000);
+    }
+  }, [addToast]);
+
   const handleBulkCampaign = async (campaignId) => {
     setShowCampaignPicker(false);
     try {
@@ -287,6 +304,7 @@ export default function Contacts({ onCountChange }) {
           onRenameField={(id, name) => updateField(id, { name })}
           onDeleteField={removeField}
           onHideCustomField={hideField}
+          onCellSave={handleCellSave}
         />
       </div>
 

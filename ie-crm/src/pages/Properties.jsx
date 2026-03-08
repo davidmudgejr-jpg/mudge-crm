@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getProperties } from '../api/database';
+import { getProperties, updateProperty } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
@@ -14,19 +14,26 @@ import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 
+const CONTACTED_OPTIONS = [
+  'Contacted Owner', 'Not Contacted', 'Broker/Not worth it',
+  'Emailed Owner/Tenant', 'Cold called', 'Left VM',
+  'Contacted Tenant', 'Contacted Owner & Tenant', 'Listing',
+  'Doorknocked', 'BOV Sent', 'Offer Sent', 'Letter Sent', 'Met with Owner',
+];
+
 const ALL_COLUMNS = [
   // Default visible
-  { key: 'property_address', label: 'Address', defaultWidth: 200 },
+  { key: 'property_address', label: 'Address', defaultWidth: 200, editable: false },
   { key: 'city', label: 'City', defaultWidth: 100 },
   { key: 'county', label: 'County', defaultWidth: 90 },
-  { key: 'property_type', label: 'Type', defaultWidth: 100 },
+  { key: 'property_type', label: 'Type', defaultWidth: 100, editType: 'select', editOptions: ['Office', 'Retail', 'Industrial', 'Multifamily', 'Land', 'Mixed-Use', 'Special Purpose'] },
   { key: 'rba', label: 'Bldg SF', defaultWidth: 80, format: 'number' },
   { key: 'land_sf', label: 'Lot SF', defaultWidth: 80, format: 'number' },
-  { key: 'year_built', label: 'Year', defaultWidth: 60 },
+  { key: 'year_built', label: 'Year', defaultWidth: 60, format: 'number' },
   { key: 'owner_name', label: 'Entity Name', defaultWidth: 140 },
-  { key: 'priority', label: 'Priority', defaultWidth: 80, format: 'priority' },
-  { key: 'contacted', label: 'Contacted', defaultWidth: 120, format: 'tags' },
-  { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags' },
+  { key: 'priority', label: 'Priority', defaultWidth: 80, format: 'priority', editType: 'select', editOptions: ['Hot', 'Warm', 'Cold', 'Dead'] },
+  { key: 'contacted', label: 'Contacted', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: CONTACTED_OPTIONS },
+  { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags' },
   // Hidden by default
   { key: 'property_name', label: 'Property Name', defaultWidth: 160, defaultVisible: false },
   { key: 'zip', label: 'ZIP', defaultWidth: 70, defaultVisible: false },
@@ -78,8 +85,8 @@ const ALL_COLUMNS = [
   { key: 'owner_type', label: 'Owner Type', defaultWidth: 100, defaultVisible: false },
   { key: 'owner_contact', label: 'Owner Contact', defaultWidth: 120, defaultVisible: false },
   { key: 'owner_user_or_investor', label: 'Owner/Investor', defaultWidth: 110, defaultVisible: false },
-  { key: 'out_of_area_owner', label: 'Out of Area', defaultWidth: 80, format: 'bool', defaultVisible: false },
-  { key: 'office_courtesy', label: 'Office Courtesy', defaultWidth: 100, format: 'bool', defaultVisible: false },
+  { key: 'out_of_area_owner', label: 'Out of Area', defaultWidth: 80, format: 'bool', editType: 'boolean', defaultVisible: false },
+  { key: 'office_courtesy', label: 'Office Courtesy', defaultWidth: 100, format: 'bool', editType: 'boolean', defaultVisible: false },
   // Broker
   { key: 'leasing_company', label: 'Leasing Co', defaultWidth: 120, defaultVisible: false },
   { key: 'broker_contact', label: 'Broker Contact', defaultWidth: 120, defaultVisible: false },
@@ -91,7 +98,7 @@ const ALL_COLUMNS = [
   { key: 'submarket_name', label: 'Submarket', defaultWidth: 100, defaultVisible: false },
   { key: 'submarket_cluster', label: 'Cluster', defaultWidth: 100, defaultVisible: false },
   { key: 'tenancy', label: 'Tenancy', defaultWidth: 80, defaultVisible: false },
-  { key: 'off_market_deal', label: 'Off Market', defaultWidth: 80, format: 'bool', defaultVisible: false },
+  { key: 'off_market_deal', label: 'Off Market', defaultWidth: 80, format: 'bool', editType: 'boolean', defaultVisible: false },
   // Links / URLs
   { key: 'costar_url', label: 'CoStar', defaultWidth: 80, defaultVisible: false },
   { key: 'landvision_url', label: 'Landvision', defaultWidth: 80, defaultVisible: false },
@@ -234,6 +241,23 @@ export default function Properties({ onCountChange }) {
     }
   };
 
+  const handleCellSave = useCallback(async (rowId, field, value) => {
+    let oldValue;
+    setRows((prev) => prev.map((r) => {
+      if (r.property_id === rowId) { oldValue = r[field]; return { ...r, [field]: value }; }
+      return r;
+    }));
+    try {
+      await updateProperty(rowId, { [field]: value });
+      addToast('Saved', 'success', 1500);
+    } catch (err) {
+      setRows((prev) => prev.map((r) =>
+        r.property_id === rowId ? { ...r, [field]: oldValue } : r
+      ));
+      addToast(`Save failed: ${err.message}`, 'error', 4000);
+    }
+  }, [addToast]);
+
   const rowClassName = (row) => PRIORITY_BORDERS[row.priority] || '';
 
   return (
@@ -340,6 +364,7 @@ export default function Properties({ onCountChange }) {
           onRenameField={(id, name) => updateField(id, { name })}
           onDeleteField={removeField}
           onHideCustomField={hideField}
+          onCellSave={handleCellSave}
         />
       </div>
 

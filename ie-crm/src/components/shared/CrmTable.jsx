@@ -3,6 +3,7 @@ import { useColumnResize } from '../../hooks/useColumnResize';
 import defaultFormatCell from './formatCell';
 import AddFieldPanel from './AddFieldPanel';
 import { FIELD_TYPE_MAP } from '../../config/fieldTypes';
+import InlineTableCellEditor from './InlineTableCellEditor';
 
 /* ── Inline cell editor for custom fields ───────────────────────────── */
 
@@ -286,6 +287,8 @@ export default function CrmTable({
   onRenameField,
   onDeleteField,
   onHideCustomField,
+  // Inline cell editing for native (DB) columns
+  onCellSave,
 }) {
   /* ── Column order: drag-to-reorder with localStorage persistence ─── */
   const colOrderKey = `crm_column_order_${tableKey}`;
@@ -495,18 +498,42 @@ export default function CrmTable({
                   />
                 </td>
 
-                {/* Regular cells (matching header order) */}
-                {orderedColumns.map((col) => (
-                  <td
-                    key={col.key}
-                    className="px-3 py-3.5"
-                    style={{ width: widths[col.key] || col.defaultWidth || 150 }}
-                  >
-                    {col.renderCell
-                      ? col.renderCell(row[col.key], row)
-                      : fmt(row[col.key], col.format)}
-                  </td>
-                ))}
+                {/* Regular cells (matching header order) — with inline editing */}
+                {orderedColumns.map((col) => {
+                  const cellValue = row[col.key];
+                  const isEditable = col.editable !== false
+                    && !col.key.startsWith('linked_')
+                    && !!onCellSave;
+                  const isEditing = editingCell?.rowId === id && editingCell?.colKey === col.key;
+
+                  return (
+                    <td
+                      key={col.key}
+                      className={`px-3 py-3.5${isEditable && !isEditing ? ' cursor-cell' : ''}`}
+                      style={{ width: widths[col.key] || col.defaultWidth || 150 }}
+                      onClick={isEditable ? (e) => {
+                        e.stopPropagation();
+                        if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
+                      } : undefined}
+                    >
+                      {isEditing ? (
+                        <InlineTableCellEditor
+                          value={cellValue}
+                          column={col}
+                          onSave={(val) => {
+                            onCellSave(id, col.key, val);
+                            setEditingCell(null);
+                          }}
+                          onCancel={() => setEditingCell(null)}
+                        />
+                      ) : (
+                        col.renderCell
+                          ? col.renderCell(cellValue, row)
+                          : fmt(cellValue, col.format)
+                      )}
+                    </td>
+                  );
+                })}
 
                 {/* Custom field cells */}
                 {customColumns.map((col) => {

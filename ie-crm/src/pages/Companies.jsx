@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getCompanies } from '../api/database';
+import { getCompanies, updateCompany } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
@@ -25,16 +25,16 @@ function formatRevenue(val) {
 
 const ALL_COLUMNS = [
   // Default visible
-  { key: 'company_name', label: 'Company', defaultWidth: 180 },
+  { key: 'company_name', label: 'Company', defaultWidth: 180, editable: false },
   { key: 'company_type', label: 'Type', defaultWidth: 100 },
   { key: 'industry_type', label: 'Industry', defaultWidth: 100 },
   { key: 'city', label: 'City', defaultWidth: 90 },
   { key: 'sf', label: 'SF', defaultWidth: 70, format: 'number' },
   { key: 'employees', label: 'Employees', defaultWidth: 80, format: 'number' },
-  { key: 'revenue', label: 'Revenue', defaultWidth: 90, renderCell: (val) => formatRevenue(val) },
+  { key: 'revenue', label: 'Revenue', defaultWidth: 90, editType: 'number', renderCell: (val) => formatRevenue(val) },
   { key: 'lease_exp', label: 'Lease Exp', defaultWidth: 90, format: 'date' },
   { key: 'last_contacted', label: 'Last Contact', defaultWidth: 100, format: 'date' },
-  { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags' },
+  { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags' },
   // Hidden by default
   { key: 'website', label: 'Website', defaultWidth: 160, defaultVisible: false },
   { key: 'company_hq', label: 'HQ', defaultWidth: 140, defaultVisible: false },
@@ -133,6 +133,23 @@ export default function Companies({ onCountChange }) {
     selected.size === rows.length ? setSelected(new Set()) : setSelected(new Set(rows.map((r) => r.company_id)));
   };
 
+  const handleCellSave = useCallback(async (rowId, field, value) => {
+    let oldValue;
+    setRows((prev) => prev.map((r) => {
+      if (r.company_id === rowId) { oldValue = r[field]; return { ...r, [field]: value }; }
+      return r;
+    }));
+    try {
+      await updateCompany(rowId, { [field]: value });
+      addToast('Saved', 'success', 1500);
+    } catch (err) {
+      setRows((prev) => prev.map((r) =>
+        r.company_id === rowId ? { ...r, [field]: oldValue } : r
+      ));
+      addToast(`Save failed: ${err.message}`, 'error', 4000);
+    }
+  }, [addToast]);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-shrink-0 px-6 py-4 border-b border-crm-border">
@@ -204,6 +221,7 @@ export default function Companies({ onCountChange }) {
           onRenameField={(id, name) => updateField(id, { name })}
           onDeleteField={removeField}
           onHideCustomField={hideField}
+          onCellSave={handleCellSave}
         />
       </div>
 

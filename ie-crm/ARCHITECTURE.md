@@ -163,6 +163,14 @@ Interactions are surfaced directly in all 4 main table views (Properties, Contac
 - **Hook integration:** Registered as `linked_interactions` in `useLinkedRecords.js` ENTITY_FETCHERS config. Piggybacks on the existing parallel batch fetch — no additional round trips.
 - **Cell rendering:** `ActivityCellPreview` shows 3 most recent with colored type icon, truncated text, and date. Click opens `ActivityModal` (full list + quick note input). `e.stopPropagation()` prevents row click.
 - **Column definition:** Created via `useMemo` inside each page component (closes over `setActivityModal` state setter). Merged into `allColumnsWithActivity` before passing to `useColumnVisibility`.
+- **Empty state click:** `ActivityCellPreview` renders `--` with `onClick` that opens ActivityModal (not detail panel).
+
+**Inline Cell Editing (table views):**
+All 4 main table views support click-to-edit cells (spreadsheet-style). Architecture:
+- **InlineTableCellEditor** (`src/components/shared/InlineTableCellEditor.jsx`): Shared editor component. Routes to sub-editors based on `editType` (text, number, date, select, multi-select, tags, boolean, email, tel, url). Infers type from column `format` if `editType` not set.
+- **Column metadata:** Each page's `ALL_COLUMNS` array annotates columns with `editable: false` (primary column, computed fields), `editType`, and `editOptions`. Linked record columns (`linked_*` prefix) are auto-excluded.
+- **CrmTable integration:** `onCellSave` prop enables inline editing. Editable cells get `cursor-cell` + `e.stopPropagation()` on click. Shares `editingCell` state with custom field editors.
+- **Optimistic saves:** `handleCellSave` in each page does optimistic `setRows` update, calls `update[Entity]()`, shows toast. On error, rolls back to old value.
 
 ---
 

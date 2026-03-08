@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
 > Updated: 2026-03-08
-> Previous session: "Activity column in all table views + ActivityModal with quick note + deal activity aggregation"
-> Next task: **Inline cell editing** in table views (click-to-edit cells, linked fields still open detail panel) → then **Fix 9 phantom columns** → remaining Phase 1A gaps
+> Previous session: "Inline cell editing in all table views + empty activity cell click fix"
+> Next task: **Fix 9 phantom columns** → remaining Phase 1A gaps → Phase 1B Deals Consolidation
 
 ---
 
@@ -102,6 +102,13 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **ActivityCellPreview component** — Compact cell renderer: 3 most recent activities with colored type icon circles, truncated text, actual dates (formatDateCompact). "+N more" link. Click opens ActivityModal. `e.stopPropagation()` prevents row click.
 - [x] **ActivityModal component** — Full modal with quick note input (creates Note-type interaction linked to entity), full interaction list with type icons/dates/notes preview. For deals: shows aggregated activities from linked entities with "via [name]" provenance. Click any activity → InteractionDetail slide-over.
 - [x] **Activity column added to all 4 table views** — Properties, Contacts, Deals, Companies. Column key: `linked_interactions`. Default visible. Uses `useMemo` to create `allColumnsWithActivity` closing over `setActivityModal`. Existing users need "Reset" in Column menu to see it (localStorage column preferences).
+
+### Inline Cell Editing ✅
+- [x] **InlineTableCellEditor component** — New shared component (`src/components/shared/InlineTableCellEditor.jsx`). Handles all edit types: text, number, date, email, tel, url, select, multi-select (checkbox dropdown), tags (comma-separated freeform), boolean (toggle immediately). Infers edit type from column `editType` override or `format` field. All inputs: blur/Enter saves, Escape cancels.
+- [x] **CrmTable.jsx inline edit support** — Added `onCellSave` prop. Cells with `editable !== false` and not `linked_*` keys get `cursor-cell` class and click-to-edit. `e.stopPropagation()` prevents row click (detail panel). Shares `editingCell` state with existing custom field editors.
+- [x] **Column metadata on all 4 pages** — Added `editable: false` to primary columns (address/name), `editType`/`editOptions` to select/multi-select/tags/boolean columns. Properties: property_type select (7 options), contacted multi-select (14 options), priority select, boolean flags. Contacts: type select (8 types), client_level select (A-D), boolean flags. Deals: status select (9 statuses), deal_type select, repping/run_by multi-select, priority_deal boolean. Companies: revenue number, tags.
+- [x] **handleCellSave on all 4 pages** — Optimistic update with rollback on error. Uses `updateProperty`/`updateContact`/`updateDeal`/`updateCompany` DB functions. Toast notifications for success/failure.
+- [x] **Empty activity cell click** — ActivityCellPreview `--` placeholder now has `onClick` → opens ActivityModal instead of falling through to detail panel. Works on all 4 table views.
 
 ---
 

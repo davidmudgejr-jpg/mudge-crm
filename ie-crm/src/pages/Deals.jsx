@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getDeals } from '../api/database';
+import { getDeals, updateDeal } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
@@ -28,42 +28,45 @@ const STATUS_COLORS = {
   'Dead Lead': 'bg-gray-500/20 text-gray-400',
 };
 
+const DEAL_TYPES = ['Lease', 'Sale', 'Purchase', 'Sub-Lease', 'Renewal', 'Other'];
+const REPPING_OPTIONS = ['Landlord', 'Tenant', 'Buyer', 'Seller', 'Dual'];
+const RUN_BY_OPTIONS = ['Dave Mudge', 'David Mudge Jr', 'Missy'];
+
 const ALL_COLUMNS = [
   // Default visible
-  { key: 'deal_name', label: 'Deal', defaultWidth: 180 },
-  { key: 'deal_type', label: 'Type', defaultWidth: 100 },
-  {
-    key: 'status', label: 'Status', defaultWidth: 90,
+  { key: 'deal_name', label: 'Deal', defaultWidth: 180, editable: false },
+  { key: 'deal_type', label: 'Type', defaultWidth: 100, editType: 'select', editOptions: DEAL_TYPES },
+  { key: 'status', label: 'Status', defaultWidth: 90,
+    editType: 'select', editOptions: ['Prospecting', 'Active', 'Lead', 'Long Leads', 'Under Contract', 'Closed', 'Deal fell through', 'Dead', 'Dead Lead'],
     renderCell: (val) => val ? (
       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLORS[val] || 'bg-crm-border text-crm-muted'}`}>{val}</span>
     ) : <span className="text-crm-muted">--</span>,
   },
-  { key: 'repping', label: 'Repping', defaultWidth: 100, format: 'tags' },
+  { key: 'repping', label: 'Repping', defaultWidth: 100, format: 'tags', editType: 'multi-select', editOptions: REPPING_OPTIONS },
   { key: 'sf', label: 'SF', defaultWidth: 70, format: 'number' },
   { key: 'rate', label: 'Rate', defaultWidth: 70, format: 'currency' },
   { key: 'gross_fee_potential', label: 'Gross Fee', defaultWidth: 90, format: 'currency' },
   { key: 'close_date', label: 'Close Date', defaultWidth: 90, format: 'date' },
-  {
-    key: 'priority_deal', label: 'Priority', defaultWidth: 70,
+  { key: 'priority_deal', label: 'Priority', defaultWidth: 70, editType: 'boolean',
     renderCell: (val) => val ? <span className="text-crm-success">Yes</span> : <span className="text-crm-muted">No</span>,
   },
   // Hidden by default
-  { key: 'deal_source', label: 'Source', defaultWidth: 120, format: 'tags', defaultVisible: false },
+  { key: 'deal_source', label: 'Source', defaultWidth: 120, format: 'tags', editType: 'tags', defaultVisible: false },
   { key: 'term', label: 'Term (mo)', defaultWidth: 80, format: 'number', defaultVisible: false },
   { key: 'price', label: 'Price', defaultWidth: 100, format: 'currency', defaultVisible: false },
-  { key: 'commission_rate', label: 'Commission %', defaultWidth: 100, defaultVisible: false },
+  { key: 'commission_rate', label: 'Commission %', defaultWidth: 100, format: 'number', defaultVisible: false },
   { key: 'net_potential', label: 'Net Potential', defaultWidth: 100, format: 'currency', defaultVisible: false },
   { key: 'important_date', label: 'Important Date', defaultWidth: 100, format: 'date', defaultVisible: false },
-  { key: 'deal_dead_reason', label: 'Dead Reason', defaultWidth: 140, format: 'tags', defaultVisible: false },
+  { key: 'deal_dead_reason', label: 'Dead Reason', defaultWidth: 140, format: 'tags', editType: 'tags', defaultVisible: false },
   { key: 'increases', label: 'Escalation %', defaultWidth: 90, format: 'number', defaultVisible: false },
-  { key: 'run_by', label: 'Run By', defaultWidth: 120, format: 'tags', defaultVisible: false },
+  { key: 'run_by', label: 'Run By', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: RUN_BY_OPTIONS, defaultVisible: false },
   { key: 'other_broker', label: 'Other Broker', defaultWidth: 120, defaultVisible: false },
   { key: 'industry', label: 'Industry', defaultWidth: 100, defaultVisible: false },
   { key: 'deadline', label: 'Deadline', defaultWidth: 90, format: 'date', defaultVisible: false },
   { key: 'fell_through_reason', label: 'Fell Through', defaultWidth: 120, defaultVisible: false },
   { key: 'escrow_url', label: 'Escrow', defaultWidth: 80, defaultVisible: false },
   { key: 'surveys_brochures_url', label: 'Surveys/Brochures', defaultWidth: 80, defaultVisible: false },
-  { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', defaultVisible: false },
+  { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags', defaultVisible: false },
   // Linked record columns
   { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false,
     renderCell: (val) => <LinkedChips items={val} type="property" labelKey="property_address" /> },
@@ -154,6 +157,23 @@ export default function Deals({ onCountChange }) {
     selected.size === rows.length ? setSelected(new Set()) : setSelected(new Set(rows.map((r) => r.deal_id)));
   };
 
+  const handleCellSave = useCallback(async (rowId, field, value) => {
+    let oldValue;
+    setRows((prev) => prev.map((r) => {
+      if (r.deal_id === rowId) { oldValue = r[field]; return { ...r, [field]: value }; }
+      return r;
+    }));
+    try {
+      await updateDeal(rowId, { [field]: value });
+      addToast('Saved', 'success', 1500);
+    } catch (err) {
+      setRows((prev) => prev.map((r) =>
+        r.deal_id === rowId ? { ...r, [field]: oldValue } : r
+      ));
+      addToast(`Save failed: ${err.message}`, 'error', 4000);
+    }
+  }, [addToast]);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-shrink-0 px-6 py-4 border-b border-crm-border">
@@ -230,6 +250,7 @@ export default function Deals({ onCountChange }) {
           onRenameField={(id, name) => updateField(id, { name })}
           onDeleteField={removeField}
           onHideCustomField={hideField}
+          onCellSave={handleCellSave}
         />
       </div>
 
