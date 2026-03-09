@@ -81,13 +81,13 @@ const ALL_COLUMNS = [
   { key: 'debt_date', label: 'Debt Date', defaultWidth: 90, format: 'date', defaultVisible: false },
   // Ownership
   { key: 'owner_type', label: 'Owner Type', defaultWidth: 100, defaultVisible: false },
-  { key: 'owner_contact', label: 'Owner Contact', defaultWidth: 120, defaultVisible: false },
+  { key: 'owner_contact', label: 'Owner Name', defaultWidth: 120, defaultVisible: false },
   { key: 'owner_user_or_investor', label: 'Owner/Investor', defaultWidth: 110, defaultVisible: false },
   { key: 'out_of_area_owner', label: 'Out of Area', defaultWidth: 80, format: 'bool', editType: 'boolean', defaultVisible: false },
   { key: 'office_courtesy', label: 'Office Courtesy', defaultWidth: 100, format: 'bool', editType: 'boolean', defaultVisible: false },
   // Broker
   { key: 'leasing_company', label: 'Leasing Co', defaultWidth: 120, defaultVisible: false },
-  { key: 'broker_contact', label: 'Broker Contact', defaultWidth: 120, defaultVisible: false },
+  { key: 'broker_contact', label: 'Broker Name', defaultWidth: 120, defaultVisible: false },
   // Location / Parcel
   { key: 'parcel_number', label: 'APN', defaultWidth: 120, defaultVisible: false },
   { key: 'sb_county_zoning', label: 'SB Zoning', defaultWidth: 100, defaultVisible: false },
