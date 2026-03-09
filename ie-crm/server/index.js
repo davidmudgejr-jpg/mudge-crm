@@ -267,6 +267,8 @@ const IMPORT_COLS = {
     'sb_county_zoning', 'google_maps_url', 'zoning_map_url', 'listing_url',
     'avg_weighted_rent', 'building_image_path', 'latitude', 'longitude',
     'owner_user_or_investor', 'out_of_area_owner', 'office_courtesy',
+    // migration 004
+    'units', 'stories', 'parking_spaces', 'price_per_sqft', 'noi', 'owner_email', 'owner_mailing_address',
   ]),
   contacts: new Set([
     'full_name', 'first_name', 'type', 'title', 'email', 'email_2', 'email_3',
