@@ -6,7 +6,7 @@ import useColumnVisibility from '../hooks/useColumnVisibility';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import CompDetail from './CompDetail';
-import QuickAddModal from '../components/shared/QuickAddModal';
+import CompManualEntryModal from '../components/shared/CompManualEntryModal';
 import { useToast } from '../components/shared/Toast';
 import { useSlideOver } from '../components/shared/SlideOverContext';
 import useDetailPanel from '../hooks/useDetailPanel';
@@ -341,10 +341,10 @@ export default function Comps({ onCountChange }) {
 
       {/* Quick add modal */}
       {showQuickAdd && (
-        <QuickAddModal
-          entityType={activeTab === 'lease' ? 'lease_comp' : 'sale_comp'}
+        <CompManualEntryModal
+          compType={activeTab}
           onClose={() => setShowQuickAdd(false)}
-          onCreated={() => { setShowQuickAdd(false); addToast(`${activeTab === 'lease' ? 'Lease' : 'Sale'} comp created`); fetchData(); }}
+          onCreated={() => { setShowQuickAdd(false); fetchData(); }}
         />
       )}
 
