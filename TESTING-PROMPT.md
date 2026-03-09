@@ -572,7 +572,194 @@ Confirm these do NOT exist and need to be created:
 
 ---
 
-## Phase 10: Final Report
+## Phase 10: Role-Specific Linked Columns (Properties)
+
+Properties table has 5 columns that are filtered by the `role` field on junction tables — they are NOT regular data columns. These must be tested separately from generic linked records.
+
+### 10.1 Verify Role Columns Appear in Properties Table View
+
+The following 5 columns should be visible (or toggleable) in the Properties table:
+
+| Column Label | Source Table | Role Filter |
+|---|---|---|
+| Owner Contact | `property_contacts` | role = 'owner' |
+| Broker Contact | `property_contacts` | role = 'broker' |
+| Company Tenants | `property_companies` | role = 'tenant' |
+| Company Owner | `property_companies` | role = 'owner' |
+| Leasing Company | `property_companies` | role = 'leasing' |
+
+- [ ] All 5 columns appear in the Properties table (may be hidden — use column toggle to show them)
+- [ ] Columns show `--` for properties with no linked records of that role
+- [ ] Columns show chips/names for properties that have linked records with those roles
+
+### 10.2 Link Records with Roles from PropertyDetail
+
+Open **Property 1** ([TEST] 1234 Commerce Center Dr) detail panel:
+
+- [ ] Link **Contact 1** ([TEST] Mike Thompson) with role = `owner` → verify it appears in "Owner Contact" column in table
+- [ ] Link **Contact 2** ([TEST] Sarah Chen) with role = `broker` → verify it appears in "Broker Contact" column
+- [ ] Link **Company 1** ([TEST] Pacific Industrial LLC) with role = `owner` → verify in "Company Owner" column
+- [ ] Link **Company 2** ([TEST] SoCal Distribution Inc) with role = `tenant` → verify in "Company Tenants" column
+
+### 10.3 Verify Role-Filtered Sections in PropertyDetail
+
+Open **Property 1** detail panel and confirm these 5 separate linked record sections exist (not one generic "Contacts" section):
+
+- [ ] **Owner Contact** section — shows Contact 1
+- [ ] **Broker Contact** section — shows Contact 2
+- [ ] **Company Tenants** section — shows Company 2
+- [ ] **Company Owner** section — shows Company 1
+- [ ] **Leasing Company** section — exists (may be empty)
+
+### 10.4 Verify NULL-role Records Shown in "Other" Sections
+
+If any contacts/companies were linked before roles were added (NULL role), they should appear in conditional "Other" sections:
+- [ ] "Other Contacts" section appears only if there are NULL-role contacts linked
+- [ ] "Other Companies" section appears only if there are NULL-role companies linked
+- [ ] If no NULL-role records exist, "Other" sections do NOT appear
+
+### 10.5 Test New Links Get Correct Role
+
+- [ ] Click "+" on the "Owner Contact" section → link picker opens → select a contact → link is saved with `role = 'owner'`
+- [ ] Verify the newly linked contact appears in "Owner Contact" column in table view (not in Broker/Other sections)
+
+---
+
+## Phase 11: Activity Column in Table Views
+
+The Activity column (`linked_interactions`) was added to all 4 main tables. It shows the 3 most recent interactions as compact colored chips and opens a full ActivityModal.
+
+### 11.1 Verify Activity Column Exists on All 4 Tables
+
+Navigate to each tab and confirm the Activity column is present (may need column toggle → Reset if user has saved column preferences):
+
+- [ ] **Properties** — Activity column visible
+- [ ] **Contacts** — Activity column visible
+- [ ] **Deals** — Activity column visible
+- [ ] **Companies** — Activity column visible
+
+### 11.2 Test ActivityCellPreview Rendering
+
+Find a record that has interactions linked to it (use test interactions created in Phase 2):
+
+- [ ] **Populated cell** — Shows colored type-icon circles + truncated notes + date
+- [ ] **"+N more" link** — Appears when there are more than 3 interactions
+- [ ] **Empty cell** — Shows `--` placeholder (not blank, not an error)
+- [ ] **Cell width** — Doesn't overflow or break the row layout
+
+### 11.3 Test Clicking Populated Activity Cell → Opens Modal
+
+Click on an activity cell that has interactions:
+- [ ] ActivityModal opens (does NOT open the row detail panel)
+- [ ] Modal title shows the entity name
+- [ ] Full list of interactions displays with type icons, dates, notes preview
+- [ ] `e.stopPropagation()` is working — the detail panel does NOT open behind the modal
+
+### 11.4 Test Clicking Empty Activity Cell → Opens Modal
+
+Click on a `--` activity cell (record with no interactions):
+- [ ] ActivityModal opens (NOT the detail panel)
+- [ ] Modal shows "No activity yet" or empty state
+- [ ] Quick Note input is present in the modal
+
+### 11.5 Test Quick Note from ActivityModal
+
+With ActivityModal open on any entity:
+- [ ] Type a note in the Quick Note input field
+- [ ] Submit (Enter or button click)
+- [ ] New interaction appears in the modal's list immediately
+- [ ] Navigate to Activity tab → new interaction is present there too
+- [ ] Open entity detail panel → interaction appears in ActivitySection
+
+### 11.6 Test Deals Aggregated Activity
+
+The Deals Activity column shows interactions from the deal itself PLUS linked contacts, properties, and companies — with "via [name]" provenance labels:
+- [ ] Open ActivityModal for a Deal that has linked contacts/properties/companies with interactions
+- [ ] Verify "via [Contact Name]" / "via [Property Address]" labels appear on aggregated items
+- [ ] Direct deal interactions show without a "via" label
+
+### 11.7 Test Click-Through to InteractionDetail
+
+From within ActivityModal, click any individual interaction:
+- [ ] InteractionDetail slide-over opens
+- [ ] Correct interaction data displays
+- [ ] Back navigation returns to ActivityModal (or closes cleanly)
+
+---
+
+## Phase 12: Inline Cell Editing
+
+All 4 main table views support click-to-edit directly in the table cell — no need to open the detail panel for simple field updates.
+
+### 12.1 Verify Click-to-Edit Triggers on Editable Cells
+
+On the Properties table:
+- [ ] Click a **text cell** (e.g., City, Owner Name) → text input appears in the cell
+- [ ] Click a **select cell** (e.g., Property Type) → dropdown opens with options
+- [ ] Click a **multi-select cell** (e.g., Contacted status) → checkbox dropdown opens
+- [ ] Click a **boolean cell** (e.g., Off Market Deal) → toggles immediately without extra click
+- [ ] Click a **number cell** (e.g., Building SF / RBA) → number input appears
+
+### 12.2 Verify Primary Columns Do NOT Trigger Edit
+
+These columns should open the detail panel, not inline edit:
+- [ ] Click **Address** (Properties) → opens PropertyDetail, NOT an input
+- [ ] Click **Full Name** (Contacts) → opens ContactDetail, NOT an input
+- [ ] Click **Deal Name** (Deals) → opens DealDetail, NOT an input
+- [ ] Click **Company Name** (Companies) → opens CompanyDetail, NOT an input
+
+### 12.3 Verify Linked Columns Do NOT Trigger Edit
+
+- [ ] Click any `linked_*` column cell (e.g., Owner Contact, Activity) → does NOT enter edit mode
+
+### 12.4 Test Save on Blur / Enter
+
+- [ ] Edit a text cell → click elsewhere (blur) → value saves → verify in detail panel
+- [ ] Edit a text cell → press Enter → value saves
+- [ ] Navigate away and back → edited value persists (confirms DB write, not just local state)
+
+### 12.5 Test Cancel on Escape
+
+- [ ] Enter edit mode on any cell → press Escape → original value restored, no save occurs
+
+### 12.6 Test Each Editable Column Type Per Table
+
+**Properties** (`handleCellSave` → `updateProperty`):
+- [ ] `property_type` select — 7 options (Industrial, Office, Retail, etc.)
+- [ ] `contacted` multi-select — 14 options (Contacted Owner, Not Contacted, etc.)
+- [ ] `priority` select
+- [ ] Boolean flag (e.g., `off_market_deal`) — toggles on click
+- [ ] Number field (e.g., `rba`) — saves numeric value
+
+**Contacts** (`handleCellSave` → `updateContact`):
+- [ ] `type` select — 8 types (Owner, Tenant, Broker, etc.)
+- [ ] `client_level` select — A, B, C, D options
+- [ ] Boolean flag (e.g., `email_hot`) — toggles on click
+
+**Deals** (`handleCellSave` → `updateDeal`):
+- [ ] `status` select — 9 status options
+- [ ] `deal_type` select
+- [ ] `repping` multi-select
+- [ ] `priority_deal` boolean toggle
+
+**Companies** (`handleCellSave` → `updateCompany`):
+- [ ] `revenue` number field
+- [ ] `tags` field (comma-separated freeform)
+
+### 12.7 Test Optimistic Update + Error Rollback
+
+- [ ] Edit a cell → value updates immediately in the UI (before server responds)
+- [ ] Simulate an error (disconnect or test with invalid value) → value reverts to original
+- [ ] Toast notification appears on both success and failure
+
+### 12.8 Test That Activity Column Is Not Editable
+
+- [ ] Click the Activity column cell → ActivityModal opens (from Phase 11), NOT an edit input
+- [ ] No cursor-cell style on the Activity column
+
+---
+
+## Phase 13: Final Report
 
 After all tests complete, produce a report in this format:
 
@@ -606,6 +793,32 @@ After all tests complete, produce a report in this format:
 - Bidirectional verification: PASS/FAIL
 - Link picker search: PASS/FAIL
 - Unlinking: PASS/FAIL
+
+## Role-Specific Columns (Phase 10)
+- 5 role columns visible in Properties table: PASS/FAIL
+- Role-filtered sections in PropertyDetail: PASS/FAIL
+- New links save correct role: PASS/FAIL
+- NULL-role "Other" sections conditional: PASS/FAIL
+
+## Activity Column (Phase 11)
+- Activity column on all 4 tables: PASS/FAIL
+- Populated cell renders correctly: PASS/FAIL
+- Empty cell click opens modal: PASS/FAIL
+- Populated cell click opens modal (not detail panel): PASS/FAIL
+- Quick Note from modal creates interaction: PASS/FAIL
+- Deals aggregated activity with provenance: PASS/FAIL
+- Click-through to InteractionDetail: PASS/FAIL
+
+## Inline Cell Editing (Phase 12)
+- Text fields editable: PASS/FAIL
+- Select fields editable: PASS/FAIL
+- Multi-select fields editable: PASS/FAIL
+- Boolean toggle works: PASS/FAIL
+- Primary columns NOT editable (open detail): PASS/FAIL
+- Linked columns NOT editable: PASS/FAIL
+- Blur/Enter saves: PASS/FAIL
+- Escape cancels: PASS/FAIL
+- Optimistic update + rollback: PASS/FAIL
 
 ## Fixes Applied
 1. [file:line] — description of what was broken and how it was fixed

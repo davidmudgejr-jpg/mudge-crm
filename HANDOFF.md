@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
 > Updated: 2026-03-08
-> Previous session: "Inline cell editing in all table views + empty activity cell click fix"
-> Next task: **Fix 9 phantom columns** → remaining Phase 1A gaps → Phase 1B Deals Consolidation
+> Previous session: "Phantom columns fix + Deals consolidation (1B) + Comps manual entry form (1D)"
+> Next task: **Load real data** (Properties/Contacts/Companies/Deals) → test everything → Phase 1E TPE
 
 ---
 
@@ -46,13 +46,17 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **Role-specific linked columns on Properties** — 5 role-filtered columns in table view (Owner Contact, Broker Contact, Company Tenants, Company Owner, Leasing Company) + `augmentedRows` filtering (commit `87c88cd`)
 - [x] **Add `role` to batch queries** — `batchGetPropertyContacts` and `batchGetPropertyCompanies` now SELECT `pc.role` (commit `87c88cd`)
 - [x] **Role-specific sections in PropertyDetail** — 5 role-filtered LinkedRecordSection panels replace 2 generic ones. `role` prop passed through to `linkRecords()` extras so new links get correct role. Legacy NULL-role records shown in conditional "Other" sections.
-- [ ] **9 phantom columns in Properties ALL_COLUMNS** — `apn`, `units`, `stories`, `parking_spaces`, `asking_price`, `price_per_sqft`, `noi`, `owner_email`, `owner_mailing_address` have no backing DB column (need ALTER TABLE or remove from UI)
+- [x] **9 phantom columns in Properties ALL_COLUMNS** — fixed via migration 004: `apn`/`asking_price` were naming mismatches (removed dupes); `units`, `stories`, `parking_spaces`, `price_per_sqft`, `noi`, `owner_email`, `owner_mailing_address` added to DB via ALTER TABLE (commit `e062b84`)
 - [ ] **schema.sql is stale** — doesn't include migration 001/002/003 tables/columns. Fresh install from schema.sql alone would be incomplete.
 - [ ] Add indexes on all filtered/searched columns
 - [ ] Confirm Vercel frontend works end-to-end
 
-### Phase 1B — Deals Consolidation ⬜
-- [ ] Not started (commission split VIEWs, expanded status options, 3→1 deal table merge)
+### Phase 1B — Deals Consolidation ✅
+- [x] `deal_formulas` PostgreSQL VIEW — geometric series lease commission formula + flat sale commission (migration 005, commit `be7e8e4`)
+- [x] `getDeals` now queries `deal_formulas` VIEW — `team_gross_computed`, `jr_gross_computed`, `jr_net_computed` available on every row
+- [x] `deal_source` → 22-option constrained multi-select (was freeform tags)
+- [x] `deal_dead_reason` → 14-option constrained multi-select (was freeform tags)
+- [x] Three computed columns added to Deals table column toggle (read-only): Team Gross, Jr Gross, Jr Net
 
 ### Phase 1C — Action Items ✅
 - [x] action_items table + 4 junction tables created (migration 001)
@@ -64,7 +68,7 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] lease_comps + sale_comps tables created (migration 001)
 - [x] Comps page built with Lease/Sale toggle + CSV import (commit `fb4645c`)
 - [x] Additional comp columns via migration 003
-- [ ] Manual entry form
+- [x] Manual entry form — `CompManualEntryModal` with property search autocomplete, all lease fields (tenant/space/terms/dates/concessions/reps) and all sale fields (details/pricing) (commit `c242425`)
 - [ ] Lease expiration auto-sync to companies.lease_exp
 - [ ] Sale comp auto-update of property last_sale_date/last_sale_price
 
