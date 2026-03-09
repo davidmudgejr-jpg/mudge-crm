@@ -323,7 +323,7 @@ export async function getDeals({ limit = 200, offset = 0, orderBy = 'created_at'
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'deals', 'created_at');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT * FROM deals ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+  const sql = `SELECT * FROM deal_formulas ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);

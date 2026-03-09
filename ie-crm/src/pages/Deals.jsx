@@ -32,6 +32,21 @@ const DEAL_TYPES = ['Lease', 'Sale', 'Purchase', 'Sub-Lease', 'Renewal', 'Other'
 const REPPING_OPTIONS = ['Landlord', 'Tenant', 'Buyer', 'Seller', 'Dual'];
 const RUN_BY_OPTIONS = ['Dave Mudge', 'David Mudge Jr', 'Missy'];
 
+const DEAL_SOURCE_OPTIONS = [
+  'Sarah', 'Mat/Ryan', 'Dave', 'Doorknock', 'Relationship', 'Referral',
+  'Loopnet', 'Email Campaign', 'Cold Email', 'Cold Call', 'Outside Broker',
+  'Creativity', 'Snailmail', 'Existing Tenant', 'Previous Deal', 'Sign Call',
+  'Sent Purchase Offer', 'Walk In', 'Reid', 'Listing', 'BOV', 'Lease vs Buy Analysis',
+];
+
+const DEAL_DEAD_REASON_OPTIONS = [
+  'Unqualified', 'Unlucky', 'Client renewed', 'Radio Silent',
+  'Never got ahold of', 'Found Space w/o our help', 'Working with another broker',
+  'Not Interested', 'Lost listing to another broker', "Didn't want to pay commission",
+  'No Money', 'Fired off listing', "Deal didn't make sense for client",
+  'Too difficult of requirement',
+];
+
 const ALL_COLUMNS = [
   // Default visible
   { key: 'deal_name', label: 'Deal', defaultWidth: 180, editable: false },
@@ -51,13 +66,13 @@ const ALL_COLUMNS = [
     renderCell: (val) => val ? <span className="text-crm-success">Yes</span> : <span className="text-crm-muted">No</span>,
   },
   // Hidden by default
-  { key: 'deal_source', label: 'Source', defaultWidth: 120, format: 'tags', editType: 'tags', defaultVisible: false },
+  { key: 'deal_source', label: 'Source', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: DEAL_SOURCE_OPTIONS, defaultVisible: false },
   { key: 'term', label: 'Term (mo)', defaultWidth: 80, format: 'number', defaultVisible: false },
   { key: 'price', label: 'Price', defaultWidth: 100, format: 'currency', defaultVisible: false },
   { key: 'commission_rate', label: 'Commission %', defaultWidth: 100, format: 'number', defaultVisible: false },
   { key: 'net_potential', label: 'Net Potential', defaultWidth: 100, format: 'currency', defaultVisible: false },
   { key: 'important_date', label: 'Important Date', defaultWidth: 100, format: 'date', defaultVisible: false },
-  { key: 'deal_dead_reason', label: 'Dead Reason', defaultWidth: 140, format: 'tags', editType: 'tags', defaultVisible: false },
+  { key: 'deal_dead_reason', label: 'Dead Reason', defaultWidth: 140, format: 'tags', editType: 'multi-select', editOptions: DEAL_DEAD_REASON_OPTIONS, defaultVisible: false },
   { key: 'increases', label: 'Escalation %', defaultWidth: 90, format: 'number', defaultVisible: false },
   { key: 'run_by', label: 'Run By', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: RUN_BY_OPTIONS, defaultVisible: false },
   { key: 'other_broker', label: 'Other Broker', defaultWidth: 120, defaultVisible: false },
@@ -67,6 +82,10 @@ const ALL_COLUMNS = [
   { key: 'escrow_url', label: 'Escrow', defaultWidth: 80, defaultVisible: false },
   { key: 'surveys_brochures_url', label: 'Surveys/Brochures', defaultWidth: 80, defaultVisible: false },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags', defaultVisible: false },
+  // Computed formula columns (from deal_formulas VIEW)
+  { key: 'team_gross_computed', label: 'Team Gross', defaultWidth: 110, format: 'currency', defaultVisible: false },
+  { key: 'jr_gross_computed', label: 'Jr Gross', defaultWidth: 100, format: 'currency', defaultVisible: false },
+  { key: 'jr_net_computed', label: 'Jr Net', defaultWidth: 100, format: 'currency', defaultVisible: false },
   // Linked record columns
   { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false,
     renderCell: (val) => <LinkedChips items={val} type="property" labelKey="property_address" /> },
