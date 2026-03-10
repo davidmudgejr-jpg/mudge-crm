@@ -314,6 +314,57 @@ Commission splits vary by team member (Jr, Sarah, Dave).
 
 ---
 
+## AI Master System Integration
+
+IE CRM serves as the center of truth for a tiered AI fleet that runs 24/7 on local hardware (Mac Mini / Mac Studio). Full architecture and agent specs live in `ai-system/`.
+
+### The Tier Structure
+| Tier | Agent | Role | IE CRM Access |
+|------|-------|------|---------------|
+| 1 | Claude (Opus via API) | Chief of Staff — reviews logs, refines agent instructions, strategic decisions | Read + Write (trusted) |
+| 2 | ChatGPT + Gemini | Operations Managers — validate local model output every 10-15 min | Read + Sandbox Write |
+| 3 | Local Models (Qwen 3.5, MiniMax 2.5) | 24/7 Workers — research, enrichment, matching, logging | Read-only + Sandbox Write |
+
+### How Data Flows
+```
+Local agents (Mac Mini) do research/enrichment 24/7
+        ↓
+Write to Sandbox tables in Neon Postgres (NEVER to production tables)
+        ↓
+Tier 2 (ChatGPT/Gemini) validates every 10-15 min
+        ↓
+Approved data promoted to production tables (contacts, interactions, etc.)
+        ↓
+Claude reviews daily logs, rewrites agent instructions → system improves
+```
+
+### Sandbox Tables (in Neon Postgres)
+- `sandbox_contacts` — researched contacts pending review
+- `sandbox_enrichments` — enrichment data for existing contacts
+- `sandbox_signals` — market intelligence hits
+- `sandbox_outreach` — draft outreach emails
+- `agent_heartbeats` — agent status/health
+- `agent_logs` — structured agent activity logs
+
+All sandbox rows carry: `agent_name`, `confidence_score`, `status` (pending → approved/rejected → promoted), `reviewed_by`, `reviewed_at`, `promoted_at`
+
+### AI API Endpoints
+Scoped routes under `/api/ai/` with API key auth (`X-Agent-Key` header). Each agent gets its own key with tier-appropriate permissions. See `ai-system/ROADMAP.md` Phase 0B for full endpoint list.
+
+### Agent Dashboard
+New IE CRM page ("AI Ops") showing agent status cards, approval queue, log viewer, and system health. Nav position: between Campaigns and Import.
+
+### Key Decision: Sandbox DB Lives in Neon (Not Local)
+The sandbox tables live in the same Neon Postgres instance as production IE CRM tables, just in separate tables. This means:
+- No sync layer between local SQLite and Neon
+- Approval workflow is a status change on a row, not a data migration
+- Agent Dashboard reads from the same DB as the rest of IE CRM
+- Claude (Tier 1) accesses sandbox data through the same API
+
+What lives locally on the Mac Mini: agent.md instruction files, memory folders, daily .md log files. Data flows through IE CRM.
+
+---
+
 ## Key Architectural Decisions
 
 ### Why Hardcoded Postgres Schema (not EAV)
@@ -401,3 +452,7 @@ When photos/PDFs needed: R2 stores files, DB stores URL strings only. Does not r
 | ROADMAP.md | Build phases and feature checklist |
 | ARCHITECTURE.md | This file — tech stack, schema structure, architectural decisions |
 | CLAUDE.md | Claude Code session instructions and conventions |
+| ai-system/ARCHITECTURE.md | AI Master System — tiered agent fleet architecture, agent roster, workflows |
+| ai-system/ROADMAP.md | AI Master System — phased build plan from infrastructure to full fleet |
+| ai-system/BRAINSTORM.md | AI Master System — original brainstorm session with all ideas and context |
+| ai-system/agent-templates/ | Draft instruction files for each local agent (enricher, researcher, matcher, logger) |

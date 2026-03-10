@@ -1,0 +1,800 @@
+# Agent Orchestration & Process Management
+## How Agents Run, Recover, and Stay Alive on macOS
+### IE CRM AI Master System
+
+---
+
+## Overview
+
+Every agent in this system is a **separate OpenClaw instance** — its own process with its own memory, instruction files, and model assignment. They need to:
+
+1. Start automatically when the Mac Mini boots
+2. Stay running 24/7 without babysitting
+3. Recover from crashes without losing work
+4. Not compete for resources on a 32GB machine
+5. Be individually controllable (start, stop, restart one agent without touching others)
+
+This document covers the full stack: from macOS process management to resource allocation to the supervisor that watches everything.
+
+---
+
+## Architecture Layers
+
+```
+┌─────────────────────────────────────────────────────┐
+│  macOS LaunchAgent                                  │
+│  (auto-starts on login, restarts on crash)          │
+│  └── agent-supervisor.py                            │
+│      ├── Enricher (OpenClaw + Qwen 3.5)             │
+│      ├── Researcher (OpenClaw + MiniMax 2.5)        │
+│      ├── Matcher (OpenClaw + Qwen 3.5 or MiniMax)   │
+│      ├── Logger (OpenClaw + lightweight)             │
+│      └── Tier 2 Scheduler (Ralph Loop cron)         │
+├─────────────────────────────────────────────────────┤
+│  Ollama (model server)                              │
+│  (also runs as LaunchAgent, serves models via API)  │
+├─────────────────────────────────────────────────────┤
+│  macOS                                              │
+│  (Mac Mini 32GB → later Mac Studio 512GB)           │
+└─────────────────────────────────────────────────────┘
+```
+
+---
+
+## Layer 1: Ollama (Model Server)
+
+Ollama is the foundation — it serves LLM models via a local HTTP API. It must be running before any agent can work.
+
+### Setup
+```bash
+# Install Ollama
+brew install ollama
+
+# Pull models
+ollama pull qwen3.5:20b       # Enricher + Matcher (coding/structured tasks)
+ollama pull minimax2.5         # Researcher (internet research)
+```
+
+### Ollama as LaunchAgent
+Create a LaunchAgent so Ollama starts automatically on login and stays running.
+
+**File:** `~/Library/LaunchAgents/com.ollama.serve.plist`
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ollama.serve</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/ollama</string>
+    <string>serve</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/tmp/ollama-stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/ollama-stderr.log</string>
+</dict>
+</plist>
+```
+
+```bash
+# Load it
+launchctl load ~/Library/LaunchAgents/com.ollama.serve.plist
+```
+
+### Resource Reality: Mac Mini M4 Pro (48GB Unified Memory)
+
+**Exact specs:** M4 Pro, 12-core CPU, 16-core GPU, 16-core Neural Engine, 48GB unified memory, 1TB SSD, Gigabit Ethernet. Arrives Mar 17-24, 2026.
+
+Apple Silicon unified memory is key — the GPU can access all 48GB directly (no PCIe bus bottleneck). LLM inference on Ollama uses the GPU cores, so the 16-core GPU will push tokens significantly faster than CPU-only inference. M4 Pro memory bandwidth is ~273 GB/s.
+
+| Component | RAM Usage | Notes |
+|-----------|-----------|-------|
+| macOS + system | ~5 GB | Baseline OS overhead |
+| Qwen 3.5 (20B) | ~12-14 GB | Enricher, Matcher, Logger |
+| MiniMax 2.5 | ~6-8 GB | Researcher |
+| OpenClaw instances (x4) | ~1-2 GB total | Lightweight Node.js processes |
+| **Available headroom** | **~19-24 GB** | Room for larger models or experimentation |
+
+**Both models stay loaded simultaneously.** No time-slicing. No model swap delays. All 4 agents run 24/7 at full speed from day one.
+
+### Model Strategy (48GB Mac Mini)
+
+```
+Qwen 3.5 (20B):   Always loaded — serves Enricher, Matcher, and Logger
+MiniMax 2.5:       Always loaded — serves Researcher
+Both models hot:   ~20-22 GB combined
+Remaining RAM:     ~21-23 GB for OS, OpenClaw instances, and headroom
+GPU acceleration:  16-core GPU handles inference — expect 30-50+ tokens/sec on 20B model
+```
+
+The 24GB of headroom also means you could experiment with a third smaller model (e.g., a fast 7B model for the Logger, freeing Qwen for heavier tasks) without any resource pressure.
+
+### Mac Studio M4 Max (128GB Unified Memory) — Scale-Up Machine
+
+**Exact specs:** M4 Max, 16-core CPU, 40-core GPU, 16-core Neural Engine, 128GB unified memory, 2TB SSD, 10Gb Ethernet.
+
+```
+128GB unified memory + 40-core GPU + ~546 GB/s memory bandwidth
+= a completely different class of machine
+```
+
+| Component | RAM Usage | Notes |
+|-----------|-----------|-------|
+| macOS + system | ~5 GB | Baseline OS |
+| Qwen 3.5 full (30B+) | ~20-25 GB | Larger, more capable variant |
+| MiniMax 2.5 full | ~10-15 GB | Larger research model |
+| **Available headroom** | **~83-93 GB** | Massive room for expansion |
+
+What 128GB + 40-core GPU unlocks:
+- **70B+ parameter models** — could run Llama 3 70B or Qwen 72B for dramatically better reasoning
+- **Multiple model copies** — 2x Qwen instances for parallel enrichment (double throughput)
+- **2.5x inference speed** — 40 GPU cores vs 16 = proportionally faster token generation
+- **10Gb Ethernet** — if you network the Mac Mini and Studio together, they can share workloads
+- **2TB SSD** — cache many model variants on disk, swap between them instantly
+- Mac Mini becomes backup/secondary or dedicated to a specific agent role (e.g., always-on Researcher)
+
+---
+
+## Layer 2: The Supervisor (`agent-supervisor.py`)
+
+A Python script that manages all agent processes. It's the single process that macOS keeps alive — everything else is a child of the supervisor.
+
+### Responsibilities
+1. **Start agents** — launch each OpenClaw instance with the right config
+2. **Monitor health** — check heartbeats, detect hangs, detect crashes
+3. **Restart on failure** — if an agent dies, restart it with exponential backoff
+4. **Resource awareness** — don't start all agents simultaneously (stagger startup)
+5. **Graceful shutdown** — on SIGTERM, shut down agents cleanly before exiting
+6. **Status reporting** — expose a simple local API or file for checking system status
+7. **Schedule Tier 2** — trigger the Ralph Loop every 10 minutes
+8. **Schedule Tier 1** — trigger Claude's daily review at 6 AM
+
+### Supervisor Config File
+
+**File:** `/AI-Agents/supervisor-config.json`
+```json
+{
+  "agents": [
+    {
+      "name": "enricher",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/enricher",
+      "model": "qwen3.5:20b",
+      "startup_delay_seconds": 0,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 300,
+        "same_task_threshold_seconds": 1800
+      },
+      "schedule": {
+        "type": "continuous",
+        "active_hours": null
+      }
+    },
+    {
+      "name": "researcher",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/researcher",
+      "model": "minimax2.5",
+      "startup_delay_seconds": 30,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 300,
+        "same_task_threshold_seconds": 3600
+      },
+      "schedule": {
+        "type": "continuous",
+        "active_hours": null
+      }
+    },
+    {
+      "name": "matcher",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/matcher",
+      "model": "qwen3.5:20b",
+      "startup_delay_seconds": 60,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 300,
+        "same_task_threshold_seconds": 1800
+      },
+      "schedule": {
+        "type": "continuous",
+        "active_hours": null
+      }
+    },
+    {
+      "name": "logger",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/logger",
+      "model": "qwen3.5:20b",
+      "startup_delay_seconds": 90,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 600,
+        "same_task_threshold_seconds": 7200
+      },
+      "schedule": {
+        "type": "continuous",
+        "active_hours": null
+      }
+    }
+  ],
+  "tier2": {
+    "enabled": false,
+    "cycle_minutes": 10,
+    "provider": "chatgpt",
+    "notes": "Disabled until Phase 2. David is the manual Ralph Loop in Phase 1."
+  },
+  "tier1": {
+    "enabled": false,
+    "daily_review_time": "06:00",
+    "provider": "claude",
+    "notes": "Disabled until Phase 3. Daily review triggered manually at first."
+  },
+  "global": {
+    "stagger_startup": true,
+    "startup_order": ["enricher", "researcher", "matcher", "logger"],
+    "ollama_health_check_url": "http://localhost:11434/api/tags",
+    "crm_health_check_url": "https://your-railway-app.up.railway.app/api/ai/health",
+    "log_dir": "/AI-Agents/supervisor-logs",
+    "status_file": "/AI-Agents/supervisor-status.json"
+  }
+}
+```
+
+### Supervisor Core Logic (Pseudocode)
+
+```python
+class AgentSupervisor:
+
+    def start(self):
+        """Main entry point — called by LaunchAgent on boot."""
+        self.verify_ollama_running()
+        self.verify_crm_reachable()
+        self.stagger_start_agents()
+        self.run_monitoring_loop()
+
+    def stagger_start_agents(self):
+        """Start agents one at a time with delays to avoid RAM spike."""
+        for agent in config.agents:
+            if agent.enabled:
+                sleep(agent.startup_delay_seconds)
+                self.start_agent(agent)
+
+    def start_agent(self, agent):
+        """Launch one OpenClaw instance as a subprocess."""
+        process = subprocess.Popen(
+            ["openclaw", "--dir", agent.openclaw_dir, "--model", agent.model],
+            stdout=log_file,
+            stderr=log_file
+        )
+        self.processes[agent.name] = {
+            "process": process,
+            "pid": process.pid,
+            "started_at": now(),
+            "restart_count": 0
+        }
+        log(f"Started {agent.name} (PID {process.pid})")
+
+    def run_monitoring_loop(self):
+        """Every 60 seconds, check all agents."""
+        while True:
+            for agent_name, state in self.processes.items():
+                self.check_agent_health(agent_name, state)
+            self.check_tier2_schedule()
+            self.check_tier1_schedule()
+            self.write_status_file()
+            self.expire_old_priorities()
+            sleep(60)
+
+    def check_agent_health(self, name, state):
+        """Detect crashes and hangs."""
+        process = state["process"]
+
+        # 1. Check if process is still alive
+        if process.poll() is not None:
+            log(f"CRASH DETECTED: {name} (exit code {process.returncode})")
+            self.restart_agent(name)
+            return
+
+        # 2. Check heartbeat staleness
+        heartbeat = query_db(
+            "SELECT updated_at, current_task FROM agent_heartbeats WHERE agent_name = %s",
+            name
+        )
+        if heartbeat:
+            age = now() - heartbeat.updated_at
+            config = self.get_agent_config(name)
+
+            # Heartbeat too old = agent is probably hung
+            if age.seconds > config.hang_detection.heartbeat_stale_threshold_seconds:
+                log(f"HANG DETECTED: {name} — no heartbeat for {age.seconds}s")
+                self.kill_and_restart(name)
+                return
+
+            # Same task for too long = agent is stuck
+            if same_task_for(heartbeat, config.hang_detection.same_task_threshold_seconds):
+                log(f"STUCK DETECTED: {name} — same task for too long: {heartbeat.current_task}")
+                self.kill_and_restart(name)
+                return
+
+    def restart_agent(self, name):
+        """Restart with exponential backoff."""
+        state = self.processes[name]
+        config = self.get_agent_config(name)
+
+        if state["restart_count"] >= config.max_restart_attempts:
+            log(f"MAX RESTARTS REACHED: {name} — giving up, alerting David")
+            self.alert_david(name, "Agent has crashed too many times. Manual intervention needed.")
+            return
+
+        backoff = config.restart_backoff_seconds[state["restart_count"]]
+        log(f"Restarting {name} in {backoff}s (attempt {state['restart_count'] + 1})")
+        sleep(backoff)
+        self.start_agent(config)
+        state["restart_count"] += 1
+
+    def kill_and_restart(self, name):
+        """Force kill a hung agent, then restart."""
+        process = self.processes[name]["process"]
+        process.terminate()
+        try:
+            process.wait(timeout=10)
+        except TimeoutExpired:
+            process.kill()
+        self.restart_agent(name)
+
+    def alert_david(self, agent_name, message):
+        """Write an alert that shows up in the Agent Dashboard."""
+        post_to_api("/api/ai/agent/log", {
+            "agent_name": "supervisor",
+            "log_type": "error",
+            "content": f"ALERT: {agent_name} — {message}",
+            "metrics": {"alert": True, "agent": agent_name}
+        })
+        # Future: push notification, SMS, or email
+
+    def expire_old_priorities(self):
+        """Mark expired priority board items (runs every cycle)."""
+        query_db("""
+            UPDATE agent_priority_board
+            SET status = 'expired'
+            WHERE status = 'pending'
+            AND expires_at < NOW()
+        """)
+
+    def write_status_file(self):
+        """Write current system status to a JSON file for quick checking."""
+        status = {
+            "timestamp": now().isoformat(),
+            "ollama": "running" if ollama_healthy() else "down",
+            "crm_api": "reachable" if crm_healthy() else "unreachable",
+            "agents": {}
+        }
+        for name, state in self.processes.items():
+            status["agents"][name] = {
+                "pid": state["pid"],
+                "status": "running" if state["process"].poll() is None else "stopped",
+                "uptime_seconds": (now() - state["started_at"]).seconds,
+                "restart_count": state["restart_count"]
+            }
+        write_json("/AI-Agents/supervisor-status.json", status)
+```
+
+### Supervisor as LaunchAgent
+
+**File:** `~/Library/LaunchAgents/com.iecrm.agent-supervisor.plist`
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.iecrm.agent-supervisor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/python3</string>
+    <string>/AI-Agents/supervisor/agent-supervisor.py</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>WorkingDirectory</key>
+  <string>/AI-Agents</string>
+  <key>StandardOutPath</key>
+  <string>/AI-Agents/supervisor-logs/stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/AI-Agents/supervisor-logs/stderr.log</string>
+  <!-- Wait for network before starting (agents need Neon Postgres) -->
+  <key>Sockets</key>
+  <dict/>
+</dict>
+</plist>
+```
+
+---
+
+## Layer 3: CLI Control Tool
+
+A simple command-line tool for David (or Claude) to manage agents without touching launchctl.
+
+**File:** `/AI-Agents/supervisor/agentctl`
+
+```bash
+Usage:
+  agentctl status                    # Show all agent statuses
+  agentctl start <agent>             # Start a specific agent
+  agentctl stop <agent>              # Gracefully stop an agent
+  agentctl restart <agent>           # Restart an agent
+  agentctl logs <agent> [--tail]     # View agent logs
+  agentctl pause <agent>             # Pause (stop without restart)
+  agentctl resume <agent>            # Resume a paused agent
+  agentctl health                    # Full system health check
+  agentctl config                    # Show current supervisor config
+```
+
+### Example: `agentctl status`
+```
+AI Agent Fleet — Status
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Ollama:       ● Running (2 models loaded)
+CRM API:      ● Reachable (latency: 45ms)
+Supervisor:   ● Running (uptime: 3d 14h 22m)
+
+Agent         Model          Status     Uptime      Restarts  Today
+────────────  ─────────────  ─────────  ──────────  ────────  ─────
+enricher      qwen3.5:20b    ● Running  3d 14h 22m  0         47 items
+researcher    minimax2.5     ● Running  3d 14h 21m  1         156 scans
+matcher       qwen3.5:20b    ● Running  3d 14h 20m  0         12 drafts
+logger        qwen3.5:20b    ● Running  3d 14h 19m  0         —
+
+Priority Board: 3 pending | 12 completed today | 0 expired
+Sandbox Queue:  8 pending review | 34 approved today
+```
+
+---
+
+## Startup Sequence (What Happens When Mac Mini Boots)
+
+```
+1. macOS boots → user auto-login (configure in System Settings)
+     ↓
+2. LaunchAgent starts Ollama
+     ↓ (wait ~10 seconds for Ollama to be ready)
+3. LaunchAgent starts agent-supervisor.py
+     ↓
+4. Supervisor checks: is Ollama responding? (retry up to 30 seconds)
+     ↓
+5. Supervisor checks: is Neon Postgres reachable? (retry up to 60 seconds)
+     ↓ (if unreachable, start agents in "offline mode" — queue to disk)
+6. Supervisor starts agents with staggered delays:
+     t=0s:   enricher starts
+     t=30s:  researcher starts
+     t=60s:  matcher starts
+     t=90s:  logger starts
+     ↓
+7. Each agent: loads its agent.md, connects to Ollama, sends first heartbeat
+     ↓
+8. System is fully operational (~2-3 minutes after boot)
+```
+
+### Auto-Login Configuration
+The Mac Mini should auto-login to a dedicated user account:
+- **System Settings → Users & Groups → Login Options → Automatic Login**
+- Use a dedicated `ai-agent` user account (not David's personal account)
+- This account has access to `/AI-Agents/` and network, nothing else
+- Lock the screen after login if needed (agents don't need the GUI)
+
+---
+
+## Hang Detection Deep Dive
+
+Crashes are easy to detect (process exits). Hangs are harder. The supervisor uses two signals:
+
+### Signal 1: Stale Heartbeat
+Each agent sends a heartbeat every 60 seconds. If no heartbeat for 5 minutes (300 seconds), the agent is probably hung.
+
+**But:** An agent might be doing a legitimate long-running task (large file download, complex research). So we don't kill immediately — we check Signal 2 first.
+
+### Signal 2: Stuck Task
+If the heartbeat's `current_task` field hasn't changed in 30 minutes (1800 seconds for most agents), the agent is stuck in a loop.
+
+**Combined logic:**
+```
+IF heartbeat is stale (>5 min) AND last known task hasn't changed (>30 min):
+    → Kill and restart
+ELIF heartbeat is stale (>5 min) BUT task was recently different:
+    → Wait one more cycle, then restart if still stale
+ELIF heartbeat is fresh BUT task hasn't changed (>60 min):
+    → Log a warning but don't restart yet (might be a long task)
+    → If same task for >2 hours, restart
+```
+
+### Agent Crash Restart Backoff
+When an agent crashes, don't immediately restart — it might crash again in a loop:
+
+```
+Attempt 1: wait 10 seconds, restart
+Attempt 2: wait 30 seconds, restart
+Attempt 3: wait 60 seconds, restart
+Attempt 4: wait 2 minutes, restart
+Attempt 5: wait 5 minutes, restart
+Attempt 6: GIVE UP — alert David via Agent Dashboard
+```
+
+Reset the restart counter when an agent runs successfully for >10 minutes.
+
+---
+
+## Graceful Shutdown Protocol
+
+When the Mac Mini is shutting down (or David runs `agentctl stop`):
+
+```
+1. Supervisor receives SIGTERM
+     ↓
+2. Supervisor sends SIGTERM to all agent processes
+     ↓
+3. Each agent: finish current task (or checkpoint), send final heartbeat with status "offline"
+     ↓
+4. Wait up to 30 seconds for agents to exit cleanly
+     ↓
+5. If any agent hasn't exited: SIGKILL
+     ↓
+6. Supervisor writes final status file and exits
+```
+
+Agents should be designed to handle SIGTERM gracefully:
+- If mid-task: save progress to a checkpoint file
+- On restart: check for checkpoint file and resume instead of starting over
+- Send heartbeat with status "offline" so the Dashboard shows correct state
+
+---
+
+## Offline Mode (Network Loss)
+
+If the CRM API (Neon Postgres) becomes unreachable:
+
+### Detection
+- Supervisor health check fails for CRM API
+- Agents' API calls start returning connection errors
+
+### Behavior
+1. **Researcher:** Continues gathering signals, writes to local disk buffer (`/AI-Agents/offline-buffer/signals/`)
+2. **Enricher:** Pauses — can't read from CRM to know what to enrich. Logs idle state.
+3. **Matcher:** Pauses — can't query CRM for matches. Logs idle state.
+4. **Logger:** Continues logging to local `.md` files (doesn't need the API)
+
+### Recovery
+When network returns:
+1. Supervisor detects CRM API is reachable again
+2. Flush offline buffer: push buffered signals/logs to the API
+3. Resume paused agents
+4. Log the outage duration and any buffered items
+
+### Local Buffer Format
+```
+/AI-Agents/offline-buffer/
+  signals/
+    2026-03-15T14:30:00Z_researcher.json
+    2026-03-15T14:35:00Z_researcher.json
+  logs/
+    2026-03-15T14:30:00Z_enricher.json
+  heartbeats/
+    (don't buffer — just resume when back online)
+```
+
+---
+
+## Tier 2 Scheduling (Ralph Loop)
+
+The Tier 2 validator runs on a 10-minute cycle. It's NOT a persistent OpenClaw instance — it's an API call that runs and completes.
+
+### Phase 1 (No Tier 2 — David is the Ralph Loop)
+- Supervisor has `tier2.enabled = false`
+- David manually reviews the sandbox queue in the Agent Dashboard
+- This is intentional — David needs to understand what good/bad agent output looks like before automating the check
+
+### Phase 2 (Automated Ralph Loop)
+- Supervisor spawns a Tier 2 review every 10 minutes
+- Implementation: API call to ChatGPT (via OAuth) with:
+  - The Tier 2 validator instructions (from `tier2-validator.md`)
+  - The current pending sandbox queue
+  - Recent heartbeats
+- ChatGPT processes the queue and posts approve/reject/escalate decisions
+- Results written to sandbox tables and agent_logs
+
+### Tier 2 Cron (Inside Supervisor)
+```python
+def check_tier2_schedule(self):
+    if not config.tier2.enabled:
+        return
+    if minutes_since_last_tier2_run() >= config.tier2.cycle_minutes:
+        self.run_tier2_cycle()
+
+def run_tier2_cycle(self):
+    pending = fetch("/api/ai/queue/pending")
+    if not pending:
+        return  # nothing to review, skip this cycle
+
+    # Build the prompt with tier2-validator.md instructions + pending items
+    prompt = build_tier2_prompt(pending)
+
+    # Call ChatGPT via OAuth
+    response = chatgpt_api.complete(prompt)
+
+    # Parse and apply decisions
+    apply_tier2_decisions(response)
+```
+
+---
+
+## Tier 1 Scheduling (Claude Daily Review)
+
+### Phase 1-2 (Manual)
+- David triggers Claude review manually when ready
+- Can be done through IE CRM's Claude panel or a dedicated script
+
+### Phase 3+ (Automated)
+- Supervisor triggers at 6 AM daily
+- Implementation: API call to Claude (Anthropic API) with:
+  - The chief-of-staff instructions
+  - Yesterday's daily log (from Logger)
+  - Pending escalations
+  - Current agent instruction versions
+- Claude processes and returns:
+  - Morning briefing for David
+  - Any instruction file updates
+  - Escalation decisions
+
+---
+
+## Folder Structure on Mac Mini
+
+```
+/AI-Agents/
+├── supervisor/
+│   ├── agent-supervisor.py        # Main supervisor script
+│   ├── agentctl                   # CLI control tool
+│   └── requirements.txt          # Python dependencies
+├── supervisor-config.json         # Agent configuration
+├── supervisor-status.json         # Current status (written every 60s)
+├── supervisor-logs/               # Supervisor's own logs
+│   ├── stdout.log
+│   ├── stderr.log
+│   └── restarts.log
+├── enricher/
+│   ├── agent.md                   # Instructions (from repo)
+│   ├── memory/                    # Agent's persistent memory
+│   ├── logs/                      # Per-agent daily logs
+│   ├── versions/                  # Backed-up previous agent.md versions
+│   └── checkpoint.json            # Resume state after crash (if applicable)
+├── researcher/
+│   ├── agent.md
+│   ├── memory/
+│   ├── logs/
+│   ├── versions/
+│   └── checkpoint.json
+├── matcher/
+│   ├── agent.md
+│   ├── memory/
+│   ├── logs/
+│   └── versions/
+├── logger/
+│   ├── agent.md
+│   ├── memory/
+│   └── logs/
+├── daily-logs/                    # Logger writes daily summaries here
+│   ├── 2026-03-10.md
+│   ├── 2026-03-11.md
+│   └── ...
+├── offline-buffer/                # Buffered data during network outages
+│   ├── signals/
+│   └── logs/
+└── launchagents/                  # LaunchAgent plist files (symlinked)
+    ├── com.ollama.serve.plist
+    └── com.iecrm.agent-supervisor.plist
+```
+
+---
+
+## What Gets Pulled from GitHub vs. Created Locally
+
+| From GitHub (pull on Mac Mini) | Created Locally (not in repo) |
+|-------------------------------|-------------------------------|
+| `agent-templates/*.md` → copy to `/AI-Agents/*/agent.md` | `/AI-Agents/*/memory/` (agent memory files) |
+| `supervisor/agent-supervisor.py` | `supervisor-status.json` (runtime state) |
+| `supervisor/agentctl` | `supervisor-logs/` (runtime logs) |
+| `supervisor-config.json` (template) | `*/logs/` (agent daily logs) |
+| `ORCHESTRATION.md` (this doc) | `offline-buffer/` (network outage buffer) |
+| `COORDINATION.md` | `*/checkpoint.json` (crash recovery state) |
+| `ARCHITECTURE.md` | `*/versions/` (backed up old agent.md files) |
+| LaunchAgent plist templates | API keys, connection strings (in env vars) |
+
+---
+
+## Day One Setup Script
+
+A single script that sets up everything on a fresh Mac Mini:
+
+```bash
+#!/bin/bash
+# setup-ai-agents.sh — Run this once on the Mac Mini
+
+echo "=== IE CRM AI Agent Fleet — Day One Setup ==="
+
+# 1. Install dependencies
+echo "Installing Ollama..."
+brew install ollama
+
+echo "Installing Python dependencies..."
+pip3 install -r /AI-Agents/supervisor/requirements.txt
+
+# 2. Pull models
+echo "Pulling Qwen 3.5 (this will take a while)..."
+ollama pull qwen3.5:20b
+
+echo "Pulling MiniMax 2.5..."
+ollama pull minimax2.5
+
+# 3. Create folder structure
+echo "Creating folder structure..."
+mkdir -p /AI-Agents/{enricher,researcher,matcher,logger}/{memory,logs,versions}
+mkdir -p /AI-Agents/{daily-logs,offline-buffer/{signals,logs},supervisor-logs}
+
+# 4. Copy agent templates from repo
+echo "Deploying agent instruction files..."
+cp ai-system/agent-templates/enricher.md /AI-Agents/enricher/agent.md
+cp ai-system/agent-templates/researcher.md /AI-Agents/researcher/agent.md
+cp ai-system/agent-templates/matcher.md /AI-Agents/matcher/agent.md
+cp ai-system/agent-templates/logger.md /AI-Agents/logger/agent.md
+
+# 5. Install LaunchAgents
+echo "Installing LaunchAgents..."
+cp ai-system/launchagents/*.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.ollama.serve.plist
+launchctl load ~/Library/LaunchAgents/com.iecrm.agent-supervisor.plist
+
+# 6. Verify
+echo "Verifying setup..."
+sleep 5
+agentctl health
+
+echo "=== Setup complete! ==="
+```
+
+---
+
+## Monitoring from IE CRM (Remote)
+
+David isn't sitting at the Mac Mini. He's on his laptop or phone. The Agent Dashboard in IE CRM shows:
+
+- Agent status (from heartbeats table — written by agents to Neon Postgres)
+- Supervisor status (supervisor writes to agent_logs table periodically)
+- If the Mac Mini goes completely offline, heartbeats go stale → Dashboard shows "offline"
+
+**The Mac Mini doesn't need a monitor, keyboard, or mouse after setup.** It's a headless server. Everything is observable through the IE CRM web interface or SSH.
+
+---
+
+*Created: March 2026*
+*For: IE CRM AI Master System — Process Management & Orchestration*

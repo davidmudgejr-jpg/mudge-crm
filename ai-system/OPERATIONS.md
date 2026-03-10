@@ -1,0 +1,538 @@
+# System Operations
+## Escalation, Testing, Versioning, Data Retention & Cost Tracking
+### IE CRM AI Master System
+
+---
+
+## #6 — Escalation Protocol (Consolidated)
+
+Escalation rules are defined in `tier2-validator.md` and `chief-of-staff.md`. This section consolidates the full picture so there's one reference for how information flows up.
+
+### Escalation Chain
+
+```
+Tier 3 (Local Agent) has a problem it can't solve
+        ↓
+Writes to agent_logs (log_type: 'error') — visible in Dashboard
+        ↓
+If it's a data quality issue → sandbox item gets submitted with low confidence
+        ↓ (normal Tier 2 review catches it)
+
+Tier 2 (Ralph Loop) finds something it can't decide on
+        ↓
+Writes to agent_escalations table:
+  - sandbox_table + sandbox_id (what item)
+  - urgency: normal / high / critical
+  - reason + recommendation
+        ↓
+Normal: waits for Claude's daily review (6 AM)
+High: Claude responds within 1 hour
+Critical: Claude responds immediately
+        ↓
+
+Claude (Tier 1) can't decide or it's too important
+        ↓
+Claude writes to David's morning briefing:
+  - decision: "defer_to_david"
+  - Creates action_item in IE CRM with high priority
+        ↓
+David sees it in the Dashboard or on his phone
+```
+
+### What Triggers Each Urgency Level
+
+| Urgency | Examples | Response Time |
+|---------|----------|--------------|
+| **Normal** | Borderline confidence score, ambiguous data, minor pattern drift | Daily review (6 AM) |
+| **High** | High-value deal opportunity (>$1M), possible portfolio owner, agent quality degrading fast | Within 1 hour |
+| **Critical** | Agent malfunction (stuck/crash loop), auth failure (account blocked), spam complaint, data integrity issue | Immediate |
+
+### Escalation Endpoints (API)
+
+```
+POST /api/ai/queue/escalate              — Tier 2 escalates to Tier 1
+GET  /api/ai/queue/escalations           — List pending escalations
+GET  /api/ai/queue/escalations?urgency=critical  — Filter by urgency
+POST /api/ai/queue/escalation-response   — Tier 1 responds to escalation
+```
+
+### David's Notification Path (Future)
+
+For now, David checks the Dashboard. Future enhancements:
+- Push notification on phone when critical escalation fires
+- SMS via Twilio for true emergencies (agent fleet down, spam complaint)
+- Daily morning briefing emailed at 6:30 AM (after Claude's review runs at 6 AM)
+
+---
+
+## #7 — Testing & Dry Run Mode
+
+Before letting agents loose on real data and real services, you need a way to test the full pipeline without consequences.
+
+### Dry Run Flag
+
+Every agent supports a `--dry-run` flag (set in supervisor-config.json):
+
+```json
+{
+  "name": "enricher",
+  "enabled": true,
+  "dry_run": true,
+  ...
+}
+```
+
+**When dry_run is true:**
+- Agent runs its full workflow (reads instructions, checks priority board, processes items)
+- API calls to external services (White Pages, BeenVerified, etc.) are **skipped**
+- Instead, the agent uses **mock responses** from local test fixtures
+- Writes to sandbox tables are **tagged**: `agent_name = 'enricher_dry_run'`
+- Heartbeats still fire (so you can see it in the Dashboard)
+- Logs still write (so you can review what it *would* have done)
+- Priority board posts are tagged as dry_run and auto-expire in 1 hour
+
+**When dry_run is false:**
+- Normal operation — real API calls, real sandbox writes
+
+### Test Fixtures
+
+Pre-built mock data for testing each agent without hitting real services:
+
+```
+/AI-Agents/test-fixtures/
+├── enricher/
+│   ├── sample-llcs.json              # 10 test LLCs to process
+│   ├── mock-open-corporates.json     # Mock API responses
+│   ├── mock-white-pages.json         # Mock API responses
+│   ├── mock-been-verified.json       # Mock API responses
+│   └── mock-neverbounce.json         # Mock API responses
+├── researcher/
+│   ├── mock-news-feed.json           # Mock CRE news articles
+│   ├── mock-x-tweets.json            # Mock X signal tweets
+│   └── mock-crm-companies.json       # Mock CRM company list for matching
+├── matcher/
+│   ├── sample-air-reports/           # 3-5 sample AIR report PDFs
+│   ├── mock-crm-contacts.json        # Mock contacts for matching
+│   └── expected-outreach.json        # Expected output for validation
+└── integration/
+    └── end-to-end-scenario.json      # Full scenario: LLC → enrichment → signal → outreach
+```
+
+### Test Levels
+
+**Level 1: Unit Test (per agent, mock everything)**
+```
+Agent reads from test fixtures instead of real APIs
+Validates: does the agent follow its instructions correctly?
+Run: agentctl test enricher --fixtures /AI-Agents/test-fixtures/enricher/
+```
+
+**Level 2: Integration Test (agents talk to real sandbox, mock external APIs)**
+```
+Agents read/write to a test schema in Neon (separate from production)
+Validates: does the sandbox pipeline work? Do heartbeats appear? Do logs write?
+Run: agentctl test integration --schema ai_test
+```
+
+**Level 3: Smoke Test (one real item, real services, real sandbox)**
+```
+Process exactly ONE real LLC through the full Enricher pipeline
+Validates: do API keys work? Do services respond? Does the data look right?
+Run manually — David watches the Dashboard while one item processes
+```
+
+**Level 4: Burn-In (24-hour dry run)**
+```
+Run all agents in dry_run mode for 24 hours
+Validates: stability, memory leaks, log rotation, heartbeat consistency
+Check: no crashes, no runaway loops, logs look sane, Dashboard shows all green
+```
+
+### First-Day Testing Sequence
+
+```
+Day 1 on Mac Mini:
+  1. Install everything (setup script)
+  2. Run Level 1: unit tests for Enricher (30 minutes)
+  3. Run Level 1: unit tests for Researcher (30 minutes)
+  4. Fix any issues found
+  5. Run Level 2: integration test (1 hour)
+  6. Run Level 3: smoke test — one real LLC through Enricher (watch carefully)
+  7. If smoke test passes: start Level 4 burn-in overnight
+
+Day 2:
+  8. Review burn-in results
+  9. If clean: disable dry_run for Enricher, start real processing
+  10. Keep other agents in dry_run until individually validated
+```
+
+---
+
+## #8 — Agent Instruction Versioning
+
+When Claude (Tier 1) rewrites an agent.md, the old version must be preserved. If performance drops, you need to rollback.
+
+### Version Metadata
+
+Every agent.md starts with a version block:
+
+```markdown
+<!-- INSTRUCTION VERSION -->
+<!-- version: 1.3 -->
+<!-- updated_by: chief_of_staff -->
+<!-- updated_at: 2026-03-25T06:00:00Z -->
+<!-- change: Tightened address matching for common names (ZIP-level, not city-level) -->
+<!-- reason: 15% false positive rate on names with >5 White Pages matches -->
+<!-- previous_version: /AI-Agents/enricher/versions/agent-v1.2.md -->
+```
+
+### Version History (Local Files)
+
+```
+/AI-Agents/enricher/
+├── agent.md                        # Current live version (always latest)
+├── versions/
+│   ├── agent-v1.0.md              # Original (from GitHub template)
+│   ├── agent-v1.1.md              # First Claude update
+│   ├── agent-v1.2.md              # Second Claude update
+│   └── agent-v1.3.md              # Third Claude update (copied here when v1.4 is written)
+└── version-log.json               # Structured history
+```
+
+### Version Log (Structured)
+
+```json
+{
+  "agent": "enricher",
+  "current_version": "1.3",
+  "history": [
+    {
+      "version": "1.0",
+      "date": "2026-03-17",
+      "author": "david",
+      "change": "Initial deployment from GitHub template",
+      "file": "versions/agent-v1.0.md"
+    },
+    {
+      "version": "1.1",
+      "date": "2026-03-20",
+      "author": "chief_of_staff",
+      "change": "Added handling for registered agent services (CSC, CT Corp, etc.)",
+      "reason": "Agent was scoring high confidence on contacts that were actually registered agent services",
+      "impact": "False positive rate dropped from 12% to 4%",
+      "file": "versions/agent-v1.1.md"
+    },
+    {
+      "version": "1.2",
+      "date": "2026-03-22",
+      "author": "chief_of_staff",
+      "change": "Lowered confidence threshold for NeverBounce from 70 to 60",
+      "reason": "Good contacts being missed because email verification wasn't triggering",
+      "impact": "Email verification volume up 35%, valid email rate stayed at 92%",
+      "file": "versions/agent-v1.2.md"
+    }
+  ]
+}
+```
+
+### Rollback Protocol
+
+If Claude updates an agent.md and performance drops:
+
+```
+1. Claude detects regression in daily review:
+   "Enricher approval rate dropped from 82% to 61% after v1.3 update"
+
+2. Claude rolls back:
+   - Copy current agent.md to versions/agent-v1.3.md
+   - Copy versions/agent-v1.2.md to agent.md
+   - Update version metadata to show rollback
+   - Log the rollback in version-log.json
+
+3. Agent picks up the old instructions on its next cycle
+   (OpenClaw re-reads agent.md periodically or on restart)
+
+4. Claude notes in daily log:
+   "Rolled back Enricher from v1.3 to v1.2. V1.3 change caused regression."
+
+5. Claude analyzes WHY v1.3 failed before attempting a revised update
+```
+
+### Dashboard: Version View
+
+In the Agent Dashboard, each agent card shows:
+- Current instruction version (e.g., "v1.3")
+- Last updated date and author
+- Link to view version history
+- "Rollback" button (triggers Claude to revert to previous version)
+
+---
+
+## #9 — Data Retention & Cleanup
+
+Data piles up. Logs grow. Heartbeats fire every 60 seconds. Without cleanup, the database bloats and the Dashboard slows down.
+
+### Retention Policies
+
+| Data Type | Retention | Cleanup Method |
+|-----------|-----------|---------------|
+| **agent_heartbeats** | Latest only | UPSERT — only 1 row per agent (already designed this way) |
+| **agent_logs** | 90 days | Delete logs older than 90 days, weekly cleanup job |
+| **agent_logs (daily_summary)** | 1 year | Daily summaries are valuable — keep longer |
+| **sandbox_contacts (pending)** | 30 days | Auto-reject if pending >30 days (stale data) |
+| **sandbox_contacts (approved/promoted)** | Permanent | This is production-path data |
+| **sandbox_contacts (rejected)** | 60 days | Keep for pattern analysis, then purge |
+| **sandbox_enrichments** | Same as contacts | Follows same retention rules |
+| **sandbox_signals** | 90 days | Signals older than 90 days are stale market data |
+| **sandbox_outreach (pending)** | 14 days | Auto-cancel if not reviewed in 2 weeks |
+| **sandbox_outreach (approved/sent)** | 1 year | Need for compliance and performance analysis |
+| **sandbox_outreach (rejected)** | 60 days | Keep for tone/quality analysis |
+| **agent_priority_board** | 30 days | Expired and completed items older than 30 days |
+| **agent_escalations** | 1 year | Decision history is valuable for system learning |
+| **outbound_email_queue** | 1 year | Email compliance requires keeping send records |
+| **Daily log .md files (local)** | 6 months | Archive to compressed folder, then delete |
+| **Agent memory files (local)** | Permanent | These ARE the agent's learned knowledge |
+
+### Cleanup Jobs
+
+A weekly cleanup job runs on the CRM backend (Sunday 3 AM):
+
+```sql
+-- Purge old activity logs (keep daily summaries longer)
+DELETE FROM agent_logs
+WHERE log_type != 'daily_summary'
+AND created_at < NOW() - INTERVAL '90 days';
+
+-- Purge old daily summaries
+DELETE FROM agent_logs
+WHERE log_type = 'daily_summary'
+AND created_at < NOW() - INTERVAL '1 year';
+
+-- Auto-reject stale pending sandbox items
+UPDATE sandbox_contacts SET status = 'rejected', review_notes = 'Auto-rejected: pending >30 days'
+WHERE status = 'pending' AND created_at < NOW() - INTERVAL '30 days';
+
+UPDATE sandbox_outreach SET status = 'rejected', review_notes = 'Auto-cancelled: pending >14 days'
+WHERE status = 'pending' AND created_at < NOW() - INTERVAL '14 days';
+
+-- Purge old rejected sandbox items
+DELETE FROM sandbox_contacts WHERE status = 'rejected' AND updated_at < NOW() - INTERVAL '60 days';
+DELETE FROM sandbox_enrichments WHERE status = 'rejected' AND updated_at < NOW() - INTERVAL '60 days';
+DELETE FROM sandbox_outreach WHERE status = 'rejected' AND updated_at < NOW() - INTERVAL '60 days';
+
+-- Purge expired/completed priority board items
+DELETE FROM agent_priority_board
+WHERE status IN ('expired', 'completed', 'skipped')
+AND created_at < NOW() - INTERVAL '30 days';
+
+-- Purge old signal data
+DELETE FROM sandbox_signals WHERE created_at < NOW() - INTERVAL '90 days';
+```
+
+### Local File Cleanup (Mac Mini)
+
+The supervisor runs monthly:
+
+```bash
+# Compress daily logs older than 30 days
+find /AI-Agents/daily-logs/ -name "*.md" -mtime +30 -exec gzip {} \;
+
+# Delete compressed logs older than 6 months
+find /AI-Agents/daily-logs/ -name "*.md.gz" -mtime +180 -delete
+
+# Delete offline buffer files older than 7 days (already flushed)
+find /AI-Agents/offline-buffer/ -type f -mtime +7 -delete
+
+# Keep supervisor logs trimmed
+find /AI-Agents/supervisor-logs/ -name "*.log" -size +100M -exec truncate -s 10M {} \;
+```
+
+### Database Size Monitoring
+
+Add to the Agent Dashboard "System Health" panel:
+- Total rows per sandbox table
+- Database size (Neon Postgres provides this)
+- Growth rate (rows added per day)
+- Alert if any table exceeds 100K rows (probably needs cleanup or archival)
+
+---
+
+## #10 — Cost & Usage Tracking
+
+Running this system has real costs. Tracking them helps optimize spending and prove ROI.
+
+### Cost Categories
+
+| Category | Service | Pricing Model | Estimated Monthly |
+|----------|---------|--------------|-------------------|
+| **Claude API** | Anthropic | Per token (input/output) | $20-100 depending on daily review depth |
+| **ChatGPT OAuth** | OpenAI | $250/mo flat | $250 (fixed) |
+| **Gemini** | Google | Per token or free tier | $0-50 |
+| **NeverBounce** | NeverBounce | Per verification (~$0.008/ea) | $20-50 (2,500-6,000 verifications) |
+| **White Pages** | WhitePages Premium | Monthly subscription | ~$30-50/mo |
+| **BeenVerified** | BeenVerified | Monthly subscription | ~$30-50/mo |
+| **Postmark** | Postmark | $15/mo for 10K emails | $15 |
+| **Open Corporates** | Open Corporates | Free tier or API plan | $0-50 |
+| **Neon Postgres** | Neon | Based on compute + storage | ~$20-50 |
+| **Railway** | Railway | Based on usage | ~$5-20 |
+| **Hardware** | Mac Mini (one-time) | Amortized over 3 years | ~$60/mo |
+| **Hardware** | Mac Studio (one-time) | Amortized over 3 years | ~$115/mo |
+| **Electricity** | Mac Mini 24/7 | ~15-30W typical | ~$5/mo |
+| **Total estimated** | | | **$470-860/mo** |
+
+### Usage Tracking Table
+
+```sql
+CREATE TABLE IF NOT EXISTS ai_usage_tracking (
+  id SERIAL PRIMARY KEY,
+  -- What was used
+  service TEXT NOT NULL,            -- 'claude_api', 'chatgpt', 'neverbounce', 'white_pages', etc.
+  agent_name TEXT,                  -- which agent triggered the usage
+  -- Usage details
+  usage_type TEXT NOT NULL,         -- 'api_call', 'token', 'verification', 'email_send'
+  quantity INTEGER DEFAULT 1,       -- number of units used
+  unit_cost_cents INTEGER,          -- cost per unit in cents (if known)
+  total_cost_cents INTEGER,         -- total cost for this usage entry in cents
+  -- Context
+  metadata JSONB DEFAULT '{}',     -- flexible: token counts, endpoint called, etc.
+  -- Timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_usage_tracking_service ON ai_usage_tracking(service);
+CREATE INDEX idx_usage_tracking_agent ON ai_usage_tracking(agent_name);
+CREATE INDEX idx_usage_tracking_created ON ai_usage_tracking(created_at);
+CREATE INDEX idx_usage_tracking_date ON ai_usage_tracking(DATE(created_at));
+```
+
+### How Each Service Gets Tracked
+
+**Claude API (Tier 1):**
+```json
+{
+  "service": "claude_api",
+  "agent_name": "chief_of_staff",
+  "usage_type": "token",
+  "quantity": 15000,
+  "metadata": {
+    "input_tokens": 12000,
+    "output_tokens": 3000,
+    "model": "claude-opus-4-6",
+    "purpose": "daily_review"
+  }
+}
+```
+
+**NeverBounce (Enricher):**
+```json
+{
+  "service": "neverbounce",
+  "agent_name": "enricher",
+  "usage_type": "verification",
+  "quantity": 1,
+  "unit_cost_cents": 1,
+  "total_cost_cents": 1,
+  "metadata": {
+    "email": "john@company.com",
+    "result": "valid"
+  }
+}
+```
+
+**Postmark (Email sends):**
+```json
+{
+  "service": "postmark",
+  "agent_name": "system",
+  "usage_type": "email_send",
+  "quantity": 1,
+  "unit_cost_cents": 0,
+  "total_cost_cents": 0,
+  "metadata": {
+    "outbound_email_id": 456,
+    "to": "john@company.com"
+  }
+}
+```
+
+### ROI Metrics
+
+The real question isn't "what does this cost?" — it's "what's it worth?"
+
+Track these to prove ROI:
+
+```
+COST SIDE:
+  Total monthly spend (from usage tracking table)
+  Cost per verified contact
+  Cost per outreach email sent
+  Cost per reply received
+
+VALUE SIDE:
+  Contacts verified this month
+  Outreach emails sent
+  Replies received (warm leads)
+  Deals sourced from AI outreach
+  Time saved (estimate: contacts verified per hour manually vs. AI)
+```
+
+### Dashboard: "Cost & ROI" Panel
+
+```
+This Month's Costs
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Claude API:      $45.20  (daily reviews)
+ChatGPT:         $250.00 (flat — Ralph Loop)
+NeverBounce:     $18.40  (2,300 verifications)
+White Pages:     $29.99  (subscription)
+BeenVerified:    $29.99  (subscription)
+Postmark:        $15.00  (email sends)
+Neon + Railway:  $35.00  (infrastructure)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total:           $423.58
+
+This Month's Output
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Contacts verified:  847
+Outreach sent:      134
+Replies received:   18
+Signals found:      52
+
+Unit Economics
+━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Cost per verified contact:  $0.50
+Cost per outreach email:    $3.16
+Cost per warm lead (reply): $23.53
+```
+
+If even ONE of those 18 replies turns into a deal, the system pays for itself for years.
+
+---
+
+## Summary: Files Created This Session
+
+| # | Topic | File | Status |
+|---|-------|------|--------|
+| 1 | Tier 1 + Tier 2 Instructions | `agent-templates/chief-of-staff.md` | Done |
+| 1 | Tier 2 Validator | `agent-templates/tier2-validator.md` | Done |
+| 2 | Inter-Agent Coordination | `COORDINATION.md` | Done |
+| 3 | Orchestration & Process Mgmt | `ORCHESTRATION.md` | Done |
+| 4 | Error Handling & Recovery | `ERROR-HANDLING.md` | Done |
+| 5 | Email Infrastructure | `EMAIL-INFRASTRUCTURE.md` | Done |
+| 6-10 | Operations (this file) | `OPERATIONS.md` | Done |
+
+### Migration 007 now includes:
+- Sandbox tables (contacts, enrichments, signals, outreach)
+- Agent infrastructure (heartbeats, logs, API keys)
+- Priority board (inter-agent coordination)
+- Escalation queue (Tier 2 → Tier 1)
+- Outbound email queue (with engagement tracking)
+- Do-not-email support on contacts table
+
+### Still needed (add to migration 007 or a separate migration):
+- `ai_usage_tracking` table (cost tracking — see above)
+
+---
+
+*Created: March 2026*
+*For: IE CRM AI Master System — System Operations*

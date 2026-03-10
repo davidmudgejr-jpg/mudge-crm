@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-08
-> Previous session: "Phantom columns fix + Deals consolidation (1B) + Comps manual entry form (1D)"
-> Next task: **Load real data** (Properties/Contacts/Companies/Deals) → test everything → Phase 1E TPE
+> Updated: 2026-03-09
+> Previous session: "Full system test protocol (all phases) — all features verified, bugs found & documented"
+> Next task: **Fix bugs → TPE readiness gaps → TPE SQL VIEW** — (1) fix duplicate column labels in Properties.jsx ALL_COLUMNS, (2) migration for missing TPE tables/columns, (3) build `property_tpe_scores` VIEW
 
 ---
 
@@ -75,7 +75,9 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 ### Phase 1E — TPE ⬜
 - [x] Full spec documented (5 models, all weights, tpe_config table)
 - [x] Supporting tables created (loan_maturities, property_distress, tenant_growth)
-- [ ] SQL VIEW `property_tpe_scores` not built
+- [ ] **Missing DB tables**: `debt_stress`, `tpe_config` not yet created
+- [ ] **Missing properties columns**: `owner_entity_type`, `owner_age_est`, `has_lien_or_delinquency`, `owner_call_status`, `tenant_call_status` (note: `holding_period_years` exists but spec calls it `hold_duration_years`)
+- [ ] SQL VIEW `property_tpe_scores` not built (only `deal_formulas` view exists in DB)
 - [ ] TPE UI not built
 
 ### Phase 1F — Interaction Types ✅
@@ -106,6 +108,15 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **ActivityCellPreview component** — Compact cell renderer: 3 most recent activities with colored type icon circles, truncated text, actual dates (formatDateCompact). "+N more" link. Click opens ActivityModal. `e.stopPropagation()` prevents row click.
 - [x] **ActivityModal component** — Full modal with quick note input (creates Note-type interaction linked to entity), full interaction list with type icons/dates/notes preview. For deals: shows aggregated activities from linked entities with "via [name]" provenance. Click any activity → InteractionDetail slide-over.
 - [x] **Activity column added to all 4 table views** — Properties, Contacts, Deals, Companies. Column key: `linked_interactions`. Default visible. Uses `useMemo` to create `allColumnsWithActivity` closing over `setActivityModal`. Existing users need "Reset" in Column menu to see it (localStorage column preferences).
+
+### Full System Test ✅ (2026-03-09)
+- [x] **All tabs render** — Properties (3), Contacts (4), Companies (2), Deals (5), Activity (10+), Campaigns (2), Tasks (2), Comps (lease+sale)
+- [x] **Activity column** — shows chips + "+N more" on all 4 tables, empty cell opens ActivityModal (not detail panel), quick note from modal saves, count updates live
+- [x] **Inline cell editing** — text/select/multi-select confirmed working on Properties, Contacts, Companies, Deals; Escape cancels, Enter/blur saves
+- [x] **Role-specific sections in PropertyDetail** — all 5 sections render (Owner Contact, Broker Contact, Company Tenants, Company Owner, Leasing Company)
+- [x] **Zero console errors** throughout full test session
+- [x] **Stale Vite bundle issue identified** — `git commit` during session doesn't trigger HMR for `const` arrays outside components; fix: restart Vite dev server after pulling commits
+- **BUG: Duplicate column labels** — `owner_contact` (text field) and `linked_owner_contacts` (linked records virtual) both labeled "Owner Contact" in Properties column toggle. Same for `broker_contact`/`linked_broker_contacts`. UX ambiguity — rename one pair (e.g. text fields → "Owner Name", "Broker Name")
 
 ### Inline Cell Editing ✅
 - [x] **InlineTableCellEditor component** — New shared component (`src/components/shared/InlineTableCellEditor.jsx`). Handles all edit types: text, number, date, email, tel, url, select, multi-select (checkbox dropdown), tags (comma-separated freeform), boolean (toggle immediately). Infers edit type from column `editType` override or `format` field. All inputs: blur/Enter saves, Escape cancels.
@@ -1208,9 +1219,11 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 13. ~~**Build action_items page + 4 junction tables**~~ ✅ DONE
 14. ~~**Build comps page**~~ ✅ DONE — Lease/Sale toggle, CSV import (comps-only), property/company linking
 15. ~~**Build CSV Import Engine**~~ ✅ DONE — address normalizer, composite matcher, batch INSERT, dedicated Import tab
-16. **UI Polish & Fix List** — tab review ✅ DONE, now fix the issues below before TPE build
-17. **Build formula computation** — SQL VIEWs for Deals formulas + TPE scoring + commission splits
-18. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
+16. **Fix bugs (from full system test)** — (a) rename `owner_contact` → "Owner Name" and `broker_contact` → "Broker Name" in `Properties.jsx` ALL_COLUMNS to fix collision with linked-record virtual columns `linked_owner_contacts`/`linked_broker_contacts`; (b) add note to dev workflow: restart Vite dev server after pulling commits (HMR doesn't pick up `const` arrays defined outside components)
+17. **Fix TPE readiness gaps (migration)** — create missing `debt_stress` + `tpe_config` tables; add 5 missing properties columns: `owner_entity_type`, `owner_age_est`, `has_lien_or_delinquency`, `owner_call_status`, `tenant_call_status`
+18. **Build `property_tpe_scores` SQL VIEW** — all 5 TPE models + Action Intelligence + commission courtesy flag, using the full spec in this file; surface TPE score columns in Properties table view
+19. **Build formula computation (deals)** — SQL VIEWs for Deals formulas + commission splits
+20. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
 
 ---
 

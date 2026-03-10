@@ -181,6 +181,38 @@ Last updated: March 2026
 - [ ] Verify cross-links, deduplication, and data integrity
 - [ ] Retire Airtable as source of truth
 
+### 1J — AI Operations Module (Sandbox + Agent Dashboard)
+*Infrastructure for the AI Master System — lets local AI agents on Mac Mini write to IE CRM safely*
+*Full architecture and agent specs: `ai-system/ARCHITECTURE.md` and `ai-system/ROADMAP.md`*
+
+**Sandbox Tables (migration 007):**
+- [ ] `sandbox_contacts` — researched contacts pending review
+- [ ] `sandbox_enrichments` — enrichment data for existing contacts
+- [ ] `sandbox_signals` — market intelligence hits
+- [ ] `sandbox_outreach` — draft outreach emails
+- [ ] `agent_heartbeats` — agent status/health reporting
+- [ ] `agent_logs` — structured log entries from all agents
+- [ ] All sandbox tables: agent_name, confidence_score, status (pending/approved/rejected/promoted), reviewed_by, reviewed_at
+
+**AI API Endpoints (scoped, key-authenticated):**
+- [ ] Read-only endpoints for local agents: contacts, properties, companies, comps search
+- [ ] Sandbox write endpoints: submit contacts, enrichments, signals, outreach
+- [ ] Operations endpoints: heartbeat, log, approval queue (pending/approve/reject)
+- [ ] API key auth with per-agent scoping and rate limiting
+
+**Agent Dashboard (new IE CRM page — "AI Ops"):**
+- [ ] Agent Status Cards — per-agent health, current task, throughput
+- [ ] Approval Queue — review and approve/reject sandbox items
+- [ ] Log Viewer — filterable agent activity stream
+- [ ] System Health — Mac Mini connection status, error rates
+- [ ] Nav placement: between Campaigns and Import
+
+**Sandbox-to-Production Promotion:**
+- [ ] Approved contacts → INSERT into contacts table
+- [ ] Approved enrichments → UPDATE existing contact rows
+- [ ] Approved signals → create interaction/action item records
+- [ ] All promotions logged in undo_log
+
 ---
 
 ## Phase 2 — Smart Filters
@@ -220,8 +252,9 @@ Last updated: March 2026
 
 ---
 
-## Phase 5 — Houston AI Teammate
-*Goal: AI that runs the CRM, scores properties, and catches what falls through the cracks*
+## Phase 5 — Houston AI Teammate + AI Master System Integration
+*Goal: AI that runs the CRM, scores properties, catches what falls through the cracks — AND connects to the external AI fleet*
+*The AI Master System (local models on Mac Mini/Studio) feeds data through the Sandbox tables built in Phase 1J. Houston is the in-app interface; the AI fleet is the 24/7 backend workforce.*
 
 ### 5A — TPE Auto-Generation
 - [ ] Houston scans TPE score changes overnight
