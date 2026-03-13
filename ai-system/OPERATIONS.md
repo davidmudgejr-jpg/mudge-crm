@@ -648,6 +648,8 @@ Any agent that reads external content (web scraping, email parsing, API response
 - **Log suspicious patterns** (e.g., prompt injection attempts in email subjects)
 - **Strip HTML/scripts** from all ingested content before processing
 
+- **Run the injection sanitizer** on all external content before LLM processing — see `ai-system/INJECTION-DEFENSE.md` for the full deterministic sanitization layer and `ai-system/security/injection-rules.json` for pattern definitions
+
 This applies to: Researcher (web scraping), Matcher (email parsing), Enricher (API response parsing).
 
 ---
@@ -674,6 +676,13 @@ Machine-readable, append-only log of every agent decision. Separate from the Log
 | `signal_found` | Researcher | Market signal identified |
 | `escalation` | Any agent | Issue escalated to higher tier |
 | `council_phase` | Houston | Council briefing phase completed |
+| `injection_detected` | Enricher, Researcher, Matcher, Scout | Prompt injection pattern detected in external data |
+| `injection_blocked` | Enricher, Researcher, Matcher, Scout | Record auto-rejected due to 3+ injection flags |
+| `security_audit` | Scout | Nightly security audit finding |
+| `security_audit_offensive` | Scout | Security audit — offensive perspective result |
+| `security_audit_defensive` | Scout | Security audit — defensive perspective result |
+| `security_audit_privacy` | Scout | Security audit — data privacy perspective result |
+| `security_audit_operational` | Scout | Security audit — operational realism perspective result |
 | `error` | All agents | Error occurred |
 
 ### JSONL Retention Policy
