@@ -7,29 +7,29 @@
    Automatically switches based on macOS appearance setting.
    ============================================================ */
 :root {
-  /* Dark theme (default) */
-  --crm-bg: #0f1117;
-  --crm-sidebar: #1a1d27;
-  --crm-card: #1e2130;
-  --crm-accent: #f97316;
-  --crm-accent-hover: #ea580c;
-  --crm-text: #e2e8f0;
-  --crm-muted: #64748b;
-  --crm-success: #22c55e;
-  --crm-border: #2d3748;
-  --crm-hover: #262a3d;
+  /* Dark theme — Apple macOS Sonoma-inspired */
+  --crm-bg: #000000;
+  --crm-sidebar: rgba(44,44,46,0.80);
+  --crm-card: #1c1c1e;
+  --crm-accent: #007AFF;
+  --crm-accent-hover: #0056CC;
+  --crm-text: #f5f5f7;
+  --crm-muted: #8e8e93;
+  --crm-success: #30D158;
+  --crm-border: rgba(255,255,255,0.08);
+  --crm-hover: rgba(255,255,255,0.06);
 
   /* Surfaces & overlays */
-  --crm-deep: #0d0f14;
-  --crm-overlay: rgba(0, 0, 0, 0.4);
-  --crm-tooltip: #111827;
+  --crm-deep: #000000;
+  --crm-overlay: rgba(0, 0, 0, 0.3);
+  --crm-tooltip: #1c1c1e;
 
   /* Scrollbar */
-  --crm-scroll-track: #1a1d27;
-  --crm-scroll-thumb: #2d3748;
-  --crm-scroll-thumb-hover: #4a5568;
+  --crm-scroll-track: transparent;
+  --crm-scroll-thumb: rgba(255,255,255,0.15);
+  --crm-scroll-thumb-hover: rgba(255,255,255,0.25);
 
-  /* SQL syntax */
+  /* SQL syntax (keep existing) */
   --crm-sql-keyword: #c084fc;
   --crm-sql-string: #34d399;
   --crm-sql-number: #fbbf24;
@@ -38,24 +38,24 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --crm-bg: #f8fafc;
-    --crm-sidebar: #f1f5f9;
+    --crm-bg: #f5f5f7;
+    --crm-sidebar: rgba(255,255,255,0.70);
     --crm-card: #ffffff;
-    --crm-accent: #ea580c;
-    --crm-accent-hover: #dc2626;
-    --crm-text: #1e293b;
-    --crm-muted: #64748b;
-    --crm-success: #16a34a;
-    --crm-border: #e2e8f0;
-    --crm-hover: #f1f5f9;
+    --crm-accent: #007AFF;
+    --crm-accent-hover: #0056CC;
+    --crm-text: #1d1d1f;
+    --crm-muted: #8e8e93;
+    --crm-success: #34C759;
+    --crm-border: rgba(0,0,0,0.06);
+    --crm-hover: rgba(0,0,0,0.04);
 
-    --crm-deep: #f1f5f9;
-    --crm-overlay: rgba(0, 0, 0, 0.3);
-    --crm-tooltip: #1e293b;
+    --crm-deep: #ececee;
+    --crm-overlay: rgba(0, 0, 0, 0.2);
+    --crm-tooltip: #1c1c1e;
 
-    --crm-scroll-track: #f1f5f9;
-    --crm-scroll-thumb: #cbd5e1;
-    --crm-scroll-thumb-hover: #94a3b8;
+    --crm-scroll-track: transparent;
+    --crm-scroll-thumb: rgba(0,0,0,0.15);
+    --crm-scroll-thumb-hover: rgba(0,0,0,0.25);
 
     --crm-sql-keyword: #7c3aed;
     --crm-sql-string: #059669;
@@ -119,6 +119,34 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: var(--crm-scroll-thumb-hover);
+}
+
+/* Apple system font stack */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Frosted glass utility classes */
+.glass-sidebar {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+.glass-panel {
+  backdrop-filter: blur(30px) saturate(150%);
+  -webkit-backdrop-filter: blur(30px) saturate(150%);
+}
+
+.glass-modal {
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
+
+.glass-toast {
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
 }
 
 /* Drag region for titlebar */

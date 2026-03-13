@@ -688,7 +688,15 @@ export async function getCampaignContacts(campaignId) {
 // CAMPAIGNS
 // ============================================================
 export async function getCampaigns({ limit = 200, offset = 0 } = {}) {
-  return query('SELECT * FROM campaigns ORDER BY modified DESC LIMIT $1 OFFSET $2', [limit, offset]);
+  return query(
+    `SELECT c.*, COUNT(cc.contact_id)::int AS contact_count
+     FROM campaigns c
+     LEFT JOIN campaign_contacts cc ON c.campaign_id = cc.campaign_id
+     GROUP BY c.campaign_id
+     ORDER BY c.modified DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
 }
 
 export async function getCampaign(id) {

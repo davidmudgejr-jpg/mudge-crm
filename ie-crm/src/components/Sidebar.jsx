@@ -39,7 +39,7 @@ export default function Sidebar({ onTableChange }) {
   };
 
   return (
-    <aside className="w-16 bg-crm-sidebar border-r border-crm-border flex flex-col items-center pt-10 pb-4 z-10 flex-shrink-0">
+    <aside className="w-16 bg-crm-sidebar glass-sidebar flex flex-col items-center pt-10 pb-4 z-10 flex-shrink-0 border-r border-crm-border/50">
       {/* Logo */}
       <img src={mcIcon} alt="MC" className="mb-6 w-10 h-10 rounded-lg object-cover" />
 
@@ -51,23 +51,20 @@ export default function Sidebar({ onTableChange }) {
             <button
               key={item.path}
               onClick={() => handleClick(item)}
-              className={`no-drag relative group flex flex-col items-center justify-center py-2.5 rounded-lg transition-colors ${
+              className={`no-drag relative group flex flex-col items-center justify-center py-3 rounded-xl transition-all duration-200 ${
                 isActive
-                  ? 'bg-crm-accent/20 text-crm-accent'
+                  ? 'bg-crm-accent/15 text-crm-accent'
                   : 'text-crm-muted hover:text-crm-text hover:bg-crm-hover'
               }`}
               title={item.label}
             >
-              {isActive && (
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-crm-accent rounded-r" />
-              )}
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={item.icon} />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.25} d={item.icon} />
               </svg>
               <span className="text-[9px] mt-0.5 leading-none">{item.label}</span>
 
               {/* Tooltip */}
-              <div className="absolute left-full ml-2 px-2 py-1 bg-crm-tooltip text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50">
+              <div className="absolute left-full ml-2 px-2.5 py-1 bg-crm-card/95 glass-toast text-crm-text text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-lg border border-crm-border">
                 {item.label}
               </div>
             </button>

@@ -386,10 +386,10 @@ export default function CrmTable({
   return (
     <div className="relative w-full h-full overflow-auto">
       <table className="text-sm border-collapse" style={{ tableLayout: 'fixed', minWidth: 'max-content' }}>
-        <thead className="sticky top-0 bg-crm-sidebar z-10">
+        <thead className="sticky top-0 bg-crm-bg/95 glass-sidebar z-10">
           <tr className="border-b border-crm-border">
             {/* Checkbox column */}
-            <th className="px-3 py-2 w-10 sticky left-0 bg-crm-sidebar z-20">
+            <th className="px-3 py-2.5 w-10 sticky left-0 bg-crm-bg/95 z-20">
               <input
                 type="checkbox"
                 checked={allSelected}
@@ -494,8 +494,8 @@ export default function CrmTable({
               <tr
                 key={id}
                 onClick={() => onRowClick(row)}
-                className={`border-b border-crm-border/50 cursor-pointer transition-colors animate-row-appear ${
-                  isSelected ? 'bg-crm-accent/5' : 'hover:bg-crm-hover/50'
+                className={`border-b border-crm-border/30 cursor-pointer transition-colors duration-150 animate-row-appear ${
+                  isSelected ? 'bg-crm-accent/10' : 'hover:bg-crm-hover'
                 } ${extraClass}`}
               >
                 <td

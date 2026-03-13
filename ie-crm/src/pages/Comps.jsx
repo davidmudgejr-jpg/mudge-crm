@@ -295,7 +295,7 @@ export default function Comps({ onCountChange }) {
             <input
               type="text" value={search} onChange={(e) => setSearch(e.target.value)}
               placeholder={activeTab === 'lease' ? 'Search tenant, rep, type...' : 'Search buyer, seller, type...'}
-              className="w-full bg-crm-card border border-crm-border rounded-lg pl-8 pr-3 py-1.5 text-sm text-crm-text placeholder-crm-muted focus:outline-none focus:border-crm-accent/50"
+              className="w-full bg-crm-hover border-0 rounded-[10px] pl-9 pr-3 py-2.5 text-sm text-crm-text placeholder-crm-muted focus:outline-none focus:ring-2 focus:ring-crm-accent/30"
             />
           </div>
           <select value={filterType} onChange={(e) => setFilterType(e.target.value)}
