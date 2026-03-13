@@ -1,4 +1,5 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { importApi } from '../api/bridge';
 import { useToast } from '../components/shared/Toast';
 
@@ -8,13 +9,26 @@ import { useToast } from '../components/shared/Toast';
 function SearchableSelect({ value, onChange, options, linkOptions, matchOptions, placeholder = '-- Skip --' }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const [dropPos, setDropPos] = useState({ top: 0, left: 0 });
   const ref = useRef(null);
   const inputRef = useRef(null);
+  const dropRef = useRef(null);
 
-  // Close on outside click
+  // Position the portal dropdown below the button
+  useEffect(() => {
+    if (!open || !ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    setDropPos({ top: rect.bottom + 4, left: rect.left });
+  }, [open]);
+
+  // Close on outside click (check both button and portal dropdown)
   useEffect(() => {
     if (!open) return;
-    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    const handler = (e) => {
+      if (ref.current?.contains(e.target)) return;
+      if (dropRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
@@ -59,8 +73,12 @@ function SearchableSelect({ value, onChange, options, linkOptions, matchOptions,
         {selectedLabel || placeholder}
       </button>
 
-      {open && (
-        <div className="absolute z-50 top-full left-0 mt-1 w-64 bg-crm-sidebar border border-crm-border rounded-lg shadow-xl overflow-hidden">
+      {open && createPortal(
+        <div
+          ref={dropRef}
+          className="fixed z-[100] w-64 bg-crm-sidebar border border-crm-border rounded-lg shadow-xl overflow-hidden"
+          style={{ top: dropPos.top, left: dropPos.left }}
+        >
           {/* Search input */}
           <div className="p-1.5 border-b border-crm-border/50">
             <input
@@ -149,7 +167,8 @@ function SearchableSelect({ value, onChange, options, linkOptions, matchOptions,
               <div className="px-3 py-3 text-xs text-crm-muted text-center">No matches</div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

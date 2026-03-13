@@ -32,13 +32,17 @@ function matchProperty(row, properties, opts = {}) {
   const rowCity = (row[cityField] || parsed.city || '').toLowerCase().trim();
   const rowZip = (row[zipField] || parsed.zip || '').trim();
 
+  // Helper: get the normalized address for a property row, falling back to
+  // normalizing property_address on the fly when the DB column is missing.
+  const pNorm = (p) => p.normalized_address || normalizeAddress(p.property_address || '') || '';
+
   // Find all properties with matching normalized address
-  const addressMatches = properties.filter(p => p.normalized_address === normalized);
+  const addressMatches = properties.filter(p => pNorm(p) === normalized);
 
   if (addressMatches.length === 0) {
     // Try fuzzy match
     const fuzzyMatches = properties
-      .map(p => ({ ...p, sim: similarity(p.normalized_address, normalized) }))
+      .map(p => ({ ...p, sim: similarity(pNorm(p), normalized) }))
       .filter(p => p.sim >= 0.85)
       .sort((a, b) => b.sim - a.sim)
       .slice(0, 5);

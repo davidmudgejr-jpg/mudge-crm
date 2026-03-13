@@ -36,12 +36,17 @@ export function useColumnResize(tableKey, columns) {
   }, [columns]);
 
   const dragRef = useRef(null);
+  const saveTimer = useRef(null);
 
-  // Persist to localStorage on change
+  // Persist to localStorage on change — debounced to avoid writes on every pixel
   useEffect(() => {
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(widths));
-    } catch {}
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(widths));
+      } catch {}
+    }, 300);
+    return () => clearTimeout(saveTimer.current);
   }, [widths, storageKey]);
 
   const onResizeStart = useCallback((colKey, e) => {

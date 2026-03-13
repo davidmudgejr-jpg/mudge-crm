@@ -21,10 +21,10 @@ function displayText(int, typeInfo) {
 export default function ActivityCellPreview({ interactions, onExpand }) {
   if (!interactions || interactions.length === 0) {
     return (
-      <span
-        className="text-crm-muted cursor-pointer hover:text-crm-text transition-colors"
+      <div
+        className="text-crm-muted cursor-pointer hover:text-crm-text transition-colors w-full h-full min-h-[24px] flex items-center"
         onClick={(e) => { e.stopPropagation(); onExpand(); }}
-      >--</span>
+      >--</div>
     );
   }
 
