@@ -63,8 +63,8 @@ export default function LinkPickerModal({ entityType, onLink, onClose }) {
 
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/50" />
-      <div className="relative bg-crm-card/95 border border-crm-border/50 rounded-2xl shadow-2xl glass-modal w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+      <div className="absolute inset-0 bg-black/20 animate-fade-in" />
+      <div className="relative bg-crm-card/95 border border-crm-border/50 rounded-2xl shadow-2xl glass-modal w-full max-w-md animate-sheet-down" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="px-4 py-3 border-b border-crm-border">
           <h3 className="text-sm font-semibold">Link {meta?.label || entityType}</h3>

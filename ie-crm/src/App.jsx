@@ -18,10 +18,12 @@ import ActionItems from './pages/ActionItems';
 import Comps from './pages/Comps';
 import Import from './pages/Import';
 import Settings from './pages/Settings';
+import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
 import { DevModeProvider, useDevMode } from './components/shared/DevModeContext';
 import SlideOver, { SlideOverHeader } from './components/shared/SlideOver';
+import CommandPalette from './components/shared/CommandPalette';
 import PropertyDetail from './pages/PropertyDetail';
 import ContactDetail from './pages/ContactDetail';
 import CompanyDetail from './pages/CompanyDetail';
@@ -65,6 +67,15 @@ function AppShell() {
   const { devMode } = useDevMode();
   const { hasAnyPanel } = useSlideOver();
 
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  useKeyboardShortcuts({
+    onNewRecord: () => { /* wired in Task 7 */ },
+    onFocusSearch: () => { /* wired in Task 7 */ },
+    onOpenCommandPalette: () => setCommandPaletteOpen(prev => !prev),
+    onDeleteSelected: () => { /* wired in Task 7 */ },
+  });
+
   return (
     <div className={`flex h-screen bg-crm-bg text-crm-text overflow-hidden ${devMode ? 'dev-mode' : ''}`}>
       {/* Titlebar drag region */}
@@ -101,6 +112,9 @@ function AppShell() {
 
       {/* Nested SlideOver panels */}
       <SlideOverRenderer />
+
+      {/* Command Palette */}
+      <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
 
       {/* Toggle button when panel is closed — rendered AFTER SlideOver so it sits on top */}
       {!claudeOpen && (

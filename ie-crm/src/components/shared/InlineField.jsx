@@ -215,7 +215,7 @@ export default function InlineField({
           }}
           onBlur={cancel}
           onKeyDown={handleKeyDown}
-          className="w-full bg-crm-card border border-crm-accent/50 rounded px-2 py-1.5 text-sm text-crm-text focus:outline-none"
+          className="w-full bg-crm-card border border-crm-border rounded-md px-2 py-1.5 text-sm text-crm-text shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] focus:ring-2 focus:ring-crm-accent/40 focus:border-crm-accent/50 focus:outline-none"
         >
           <option value="">—</option>
           {opts.map((o) => (
@@ -269,7 +269,7 @@ export default function InlineField({
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); save(); }
           }}
           rows={3}
-          className="w-full bg-crm-card border border-crm-accent/50 rounded px-2 py-1.5 text-sm text-crm-text focus:outline-none resize-none"
+          className="w-full bg-crm-card border border-crm-border rounded-md px-2 py-1.5 text-sm text-crm-text shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] focus:ring-2 focus:ring-crm-accent/40 focus:border-crm-accent/50 focus:outline-none resize-none"
         />
       </div>
     );
@@ -291,7 +291,7 @@ export default function InlineField({
         onChange={(e) => setDraft(e.target.value)}
         onBlur={save}
         onKeyDown={handleKeyDown}
-        className="w-full bg-crm-card border border-crm-accent/50 rounded px-2 py-1.5 text-sm text-crm-text focus:outline-none"
+        className="w-full bg-crm-card border border-crm-border rounded-md px-2 py-1.5 text-sm text-crm-text shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] focus:ring-2 focus:ring-crm-accent/40 focus:border-crm-accent/50 focus:outline-none"
       />
     </div>
   );
