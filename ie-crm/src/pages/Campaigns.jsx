@@ -313,6 +313,30 @@ export default function Campaigns({ onCountChange }) {
     });
   };
 
+  const selectOnly = (id) => setSelected(new Set([id]));
+
+  const shiftSelect = (id) => {
+    if (selected.size === 0) { setSelected(new Set([id])); return; }
+    const lastId = [...selected].pop();
+    const ids = rows.map(r => r.campaign_id);
+    const a = ids.indexOf(lastId), b = ids.indexOf(id);
+    if (a === -1 || b === -1) { setSelected(new Set([id])); return; }
+    const [start, end] = a < b ? [a, b] : [b, a];
+    setSelected(new Set(ids.slice(start, end + 1)));
+  };
+
+  const deleteRow = async (id) => {
+    if (!window.confirm('Delete this record? This cannot be undone.')) return;
+    try {
+      await bulkOps.delete('campaigns', [id]);
+      setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
+      fetchData();
+      addToast('Deleted', 'success');
+    } catch (err) {
+      addToast(`Delete failed: ${err.message}`, 'error');
+    }
+  };
+
   const toggleAll = () => {
     if (selected.size === rows.length) {
       setSelected(new Set());
@@ -446,6 +470,9 @@ export default function Campaigns({ onCountChange }) {
           onRenameField={(id, name) => updateField(id, { name })}
           onDeleteField={removeField}
           onHideCustomField={hideField}
+          onSelectOnly={selectOnly}
+          onShiftSelect={shiftSelect}
+          onDeleteRow={deleteRow}
         />
       </div>
 

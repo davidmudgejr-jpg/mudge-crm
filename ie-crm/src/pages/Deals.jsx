@@ -173,6 +173,30 @@ export default function Deals({ onCountChange }) {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
   };
 
+  const selectOnly = (id) => setSelected(new Set([id]));
+
+  const shiftSelect = (id) => {
+    if (selected.size === 0) { setSelected(new Set([id])); return; }
+    const lastId = [...selected].pop();
+    const ids = augmentedRows.map(r => r.deal_id);
+    const a = ids.indexOf(lastId), b = ids.indexOf(id);
+    if (a === -1 || b === -1) { setSelected(new Set([id])); return; }
+    const [start, end] = a < b ? [a, b] : [b, a];
+    setSelected(new Set(ids.slice(start, end + 1)));
+  };
+
+  const deleteRow = async (id) => {
+    if (!window.confirm('Delete this record? This cannot be undone.')) return;
+    try {
+      await bulkOps.delete('deals', [id]);
+      setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
+      fetchData();
+      addToast('Deleted', 'success');
+    } catch (err) {
+      addToast(`Delete failed: ${err.message}`, 'error');
+    }
+  };
+
   const toggleAll = () => {
     selected.size === rows.length ? setSelected(new Set()) : setSelected(new Set(rows.map((r) => r.deal_id)));
   };
@@ -295,6 +319,9 @@ export default function Deals({ onCountChange }) {
           onDeleteField={removeField}
           onHideCustomField={hideField}
           onCellSave={handleCellSave}
+          onSelectOnly={selectOnly}
+          onShiftSelect={shiftSelect}
+          onDeleteRow={deleteRow}
         />
       </div>
 

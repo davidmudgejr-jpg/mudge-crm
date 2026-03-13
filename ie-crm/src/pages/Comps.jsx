@@ -219,6 +219,31 @@ export default function Comps({ onCountChange }) {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
   };
 
+  const selectOnly = (id) => setSelected(new Set([id]));
+
+  const shiftSelect = (id) => {
+    if (selected.size === 0) { setSelected(new Set([id])); return; }
+    const lastId = [...selected].pop();
+    const ids = rows.map(r => r.id);
+    const a = ids.indexOf(lastId), b = ids.indexOf(id);
+    if (a === -1 || b === -1) { setSelected(new Set([id])); return; }
+    const [start, end] = a < b ? [a, b] : [b, a];
+    setSelected(new Set(ids.slice(start, end + 1)));
+  };
+
+  const deleteRow = async (id) => {
+    if (!window.confirm('Delete this record? This cannot be undone.')) return;
+    const table = activeTab === 'lease' ? 'lease_comps' : 'sale_comps';
+    try {
+      await bulkOps.delete(table, [id]);
+      setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
+      fetchData();
+      addToast('Deleted', 'success');
+    } catch (err) {
+      addToast(`Delete failed: ${err.message}`, 'error');
+    }
+  };
+
   const toggleAll = () => {
     selected.size === rows.length ? setSelected(new Set()) : setSelected(new Set(rows.map((r) => r.id)));
   };
@@ -344,6 +369,9 @@ export default function Comps({ onCountChange }) {
           onRenameField={(id, name) => custom.updateField(id, { name })}
           onDeleteField={custom.removeField}
           onHideCustomField={custom.hideField}
+          onSelectOnly={selectOnly}
+          onShiftSelect={shiftSelect}
+          onDeleteRow={deleteRow}
         />
       </div>
 
