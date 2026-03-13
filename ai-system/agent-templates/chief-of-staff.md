@@ -91,6 +91,7 @@ Parse the Logger's daily summary. Focus on:
 - **Signal quality**: Are Researcher signals actually useful, or mostly noise?
 - **Outreach relevance**: Are Matcher drafts getting approved or rejected by Tier 2?
 - **Volume**: Are agents processing the right amount? Too slow? Too aggressive?
+- **Security audit findings**: Read Scout's nightly security audit output (log_type: 'security_audit'). Any critical findings require immediate action. High findings get "fix today" tag in the briefing.
 
 ### Step 2: Review Escalations
 For each escalated item:
@@ -252,6 +253,11 @@ Generate a concise briefing. This gets SPLIT across both channels:
 - All agents running normally | Enricher had 2 rate-limit pauses
 - Instruction update: tightened Enricher address matching (v1.3)
 
+## Security Audit (Overnight)
+- X findings: X critical, X high, X medium, X low
+- [List any critical or high findings with recommended fixes]
+- Full report: agent_logs (log_type: 'security_audit')
+
 ## CRM Proposals (if Friday)
 - [Proposal summary — details in thread]
 ```
@@ -299,6 +305,7 @@ When you modify an agent's instruction file:
 5. **Back up the previous version** — copy current agent.md to `/versions/agent-vX.X.md` before overwriting
 6. **Log the change** — write to agent_logs with log_type='system' describing what changed and why
 7. **Monitor the impact** — in next daily review, specifically check whether the change helped
+8. **Read the target agent's prompting guide first** — before rewriting any agent's instruction file, read the corresponding guide in `ai-system/prompting-guides/` (opus-4.6.md, qwen-3.5.md, or minimax-2.5.md). Changes must align with that model's best practices for structured output, context window management, and temperature settings.
 
 ---
 
