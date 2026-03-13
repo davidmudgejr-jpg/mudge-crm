@@ -1,7 +1,7 @@
 # AI System Enhancements — Cost Tracking, Council Briefing, Smart Filtering, Audit Logging
 
 **Date:** 2026-03-13
-**Status:** Draft
+**Status:** Reviewed
 **Source:** Patterns adapted from Matthew Berman's OpenClaw use cases, tailored for CRE AI system
 
 ---
@@ -35,7 +35,7 @@ Track every LLM/API call at the individual request level — model, token counts
 
 ```jsonl
 {
-  "timestamp": "2026-03-25T06:01:23Z",
+  "ts": "2026-03-25T06:01:23Z",
   "agent": "enricher",
   "model": "qwen-3.5-20b",
   "provider": "ollama_local",
@@ -91,6 +91,15 @@ Reports can be triggered on-demand or run weekly. Support filters: `--days N`, `
 - Local Ollama calls are logged with `cost_estimate: 0.00` — complete visibility into system activity, not just spend
 - Pricing table is updated by the Scout agent when new model pricing is announced
 - Cost tracker function is synchronous — must not slow down agent operations. Writes are append-only to JSONL (fast I/O)
+- `cost_estimate` in each log entry is a snapshot at write time (useful for quick `grep` analysis). The cost report utility recomputes from the current pricing table for accurate reports — this handles retroactive pricing changes.
+
+### Relationship to Existing `ai_usage_tracking` Table
+
+OPERATIONS.md defines an `ai_usage_tracking` Postgres table for service-level cost tracking and Dashboard display. The JSONL audit log is the **local source of truth** on the Mac — it captures every individual call in real-time with zero network dependency. A daily sync process (run during the 3:00-5:30 AM maintenance window) pushes aggregated daily totals to the Postgres `ai_usage_tracking` table, which powers the Dashboard cost panels. JSONL = granular per-call data. Postgres = aggregated daily data for visualization.
+
+### Scout Agent Pricing Responsibility
+
+The Scout agent's responsibilities (see ARCHITECTURE.md) should be updated to include: "Monitor model pricing changes from Anthropic, OpenAI, Google, and update the pricing table in `supervisor-config.json` when changes are announced."
 
 ---
 
@@ -271,13 +280,50 @@ Full council trace stored in `/AI-Agents/logs/council/YYYY-MM-DD.json`:
 
 This lets Houston review past council sessions during self-improvement — "Did the MarketSkeptic's warning about that Fontana signal turn out to be right? Adjust weighting accordingly."
 
+### Implementation Details
+
+The council reviewers are **not** new agents or OpenClaw instances. They are 3 parallel Anthropic API calls made by the supervisor during the 6 AM Tier 1 schedule, using Python `asyncio.gather()`:
+
+```python
+# Simplified — in supervisor's tier1_daily_review()
+phase1_draft = await call_opus(lead_analyst_prompt, overnight_data)
+
+# Phase 2: 3 parallel Sonnet calls
+deal_hunter, revenue_guardian, market_skeptic = await asyncio.gather(
+    call_sonnet(deal_hunter_prompt, phase1_draft, overnight_data),
+    call_sonnet(revenue_guardian_prompt, phase1_draft, overnight_data),
+    call_sonnet(market_skeptic_prompt, phase1_draft, overnight_data),
+)
+
+phase3_final = await call_opus(reconciliation_prompt, phase1_draft, reviews)
+```
+
+Each reviewer's system prompt is stored as a markdown file in `/AI-Agents/chief-of-staff/council/`:
+```
+/AI-Agents/chief-of-staff/council/
+├── deal-hunter.md
+├── revenue-guardian.md
+└── market-skeptic.md
+```
+
+These prompt files follow the same versioning protocol as agent instruction files — Houston can tune them during self-improvement.
+
+### Failure Modes
+
+| Failure | Behavior |
+|---------|----------|
+| One reviewer times out or returns malformed JSON | Retry once. If still failing, proceed with the other 2 reviews. Log the failure. |
+| Two or more reviewers fail | Abort council. Fall back to single-pass briefing (current behavior). Log the failure and alert via Telegram. |
+| Phase 1 (Lead Analyst) fails | Fall back to single-pass briefing entirely. This is the existing behavior — no regression. |
+| Phase 3 (Reconciliation) fails | Send Phase 1 draft as the briefing with a note: "Council review unavailable today — this is an unreviewed draft." |
+
 ---
 
 ## 3. Two-Stage Enrichment Filtering
 
 ### Purpose
 
-Add a **Stage 0 pre-filter** to the Enricher agent that uses Qwen locally (free) to eliminate records that shouldn't be enriched before any paid API calls are made.
+Add a **Stage 0 pre-filter** to the Enricher agent that eliminates records that shouldn't be enriched before any paid API calls are made. The pre-filter is **rule-based** (evaluated from JSON config), not LLM inference — it runs instantly at zero cost.
 
 ### Current Enricher Flow
 
@@ -292,7 +338,7 @@ Every record hits paid APIs regardless of quality.
 ```
 LLC record
     ↓
-Stage 0: Local Pre-Filter (Qwen — FREE)
+Stage 0: Local Pre-Filter (rule-based, instant, FREE)
     ├── PASS → Continue to enrichment pipeline
     └── SKIP → Log reason, move to next record
     ↓
@@ -472,6 +518,8 @@ def audit(agent: str, action: str, entity: str = None, **details):
 | `council_phase` | 1 year | Self-improvement fuel |
 | `pre_filter_skip`, `pre_filter_pass` | 90 days | Compressed, 6 months |
 
+**Note:** This table covers local JSONL file retention only. For Postgres-side retention policies (agent_logs, sandbox tables, etc.), see OPERATIONS.md Section #9.
+
 ### Performance Requirements
 
 - Audit function must be **non-blocking** — append to file, no network I/O
@@ -518,6 +566,7 @@ These additions require updates to:
 4. **Enricher agent template** — Add Stage 0 pre-filter step before external API calls
 5. **Logger agent template** — Add cost report generation from audit log data
 6. **Chief of Staff template** — Add council briefing protocol; add pre-filter rule tuning to self-improvement responsibilities
+7. **Scout agent template** — Add pricing table maintenance to responsibilities (monitor model pricing changes, update `supervisor-config.json`)
 
 ---
 

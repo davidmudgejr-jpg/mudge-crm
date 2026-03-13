@@ -11,7 +11,7 @@ Every agent in this system is a **separate OpenClaw instance** — its own proce
 1. Start automatically when the Mac Mini boots
 2. Stay running 24/7 without babysitting
 3. Recover from crashes without losing work
-4. Not compete for resources on a 32GB machine
+4. Not compete for resources on a 48GB machine
 5. Be individually controllable (start, stop, restart one agent without touching others)
 
 This document covers the full stack: from macOS process management to resource allocation to the supervisor that watches everything.
@@ -28,6 +28,7 @@ This document covers the full stack: from macOS process management to resource a
 │      ├── Enricher (OpenClaw + Qwen 3.5)             │
 │      ├── Researcher (OpenClaw + MiniMax 2.5)        │
 │      ├── Matcher (OpenClaw + Qwen 3.5 or MiniMax)   │
+│      ├── Scout (OpenClaw + MiniMax 2.5)             │
 │      ├── Logger (OpenClaw + lightweight)             │
 │      └── Tier 2 Scheduler (Ralph Loop cron)         │
 ├─────────────────────────────────────────────────────┤
@@ -35,7 +36,7 @@ This document covers the full stack: from macOS process management to resource a
 │  (also runs as LaunchAgent, serves models via API)  │
 ├─────────────────────────────────────────────────────┤
 │  macOS                                              │
-│  (Mac Mini 32GB → later Mac Studio 512GB)           │
+│  (Mac Mini 48GB → later Mac Studio 128GB)            │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -100,7 +101,7 @@ Apple Silicon unified memory is key — the GPU can access all 48GB directly (no
 | macOS + system | ~5 GB | Baseline OS overhead |
 | Qwen 3.5 (20B) | ~12-14 GB | Enricher, Matcher, Logger |
 | MiniMax 2.5 | ~6-8 GB | Researcher |
-| OpenClaw instances (x4) | ~1-2 GB total | Lightweight Node.js processes |
+| OpenClaw instances (x5) | ~1-2 GB total | Lightweight Node.js processes |
 | **Available headroom** | **~19-24 GB** | Room for larger models or experimentation |
 
 **Both models stay loaded simultaneously.** No time-slicing. No model swap delays. All 4 agents run 24/7 at full speed from day one.
@@ -218,11 +219,29 @@ A Python script that manages all agent processes. It's the single process that m
       }
     },
     {
+      "name": "scout",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/scout",
+      "model": "minimax2.5",
+      "startup_delay_seconds": 90,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 600,
+        "same_task_threshold_seconds": 3600
+      },
+      "schedule": {
+        "type": "continuous",
+        "active_hours": null
+      }
+    },
+    {
       "name": "logger",
       "enabled": true,
       "openclaw_dir": "/AI-Agents/logger",
       "model": "qwen3.5:20b",
-      "startup_delay_seconds": 90,
+      "startup_delay_seconds": 120,
       "restart_policy": "always",
       "max_restart_attempts": 5,
       "restart_backoff_seconds": [10, 30, 60, 120, 300],
@@ -250,7 +269,7 @@ A Python script that manages all agent processes. It's the single process that m
   },
   "global": {
     "stagger_startup": true,
-    "startup_order": ["enricher", "researcher", "matcher", "logger"],
+    "startup_order": ["enricher", "researcher", "matcher", "scout", "logger"],
     "ollama_health_check_url": "http://localhost:11434/api/tags",
     "crm_health_check_url": "https://your-railway-app.up.railway.app/api/ai/health",
     "log_dir": "/AI-Agents/supervisor-logs",
@@ -699,6 +718,11 @@ def run_tier2_cycle(self):
 │   ├── memory/
 │   ├── logs/
 │   └── versions/
+├── scout/
+│   ├── agent.md
+│   ├── memory/
+│   ├── logs/
+│   └── versions/
 ├── logger/
 │   ├── agent.md
 │   ├── memory/
@@ -831,6 +855,7 @@ Mac Studio (128GB M4 Max) — "The Precision Machine"
 Mac Mini (48GB M4 Pro) — "The Volume Machine"
 ├── Ollama serving: MiniMax 2.5 + Qwen 3.5 (20B)
 ├── OpenClaw: Researcher (MiniMax 2.5) — volume scanning, speed over precision
+├── OpenClaw: Scout (MiniMax 2.5) — AI/tech intelligence, shares model with Researcher
 ├── OpenClaw: Logger (Qwen 3.5 20B) — lightweight, doesn't need 72B intelligence
 ├── Supervisor instance (secondary — reports to primary)
 └── Headroom: ~24GB — can add more Researcher instances for parallel scanning
@@ -894,6 +919,130 @@ Either machine can run the full fleet solo at reduced performance. The superviso
 
 ---
 
+## Parallel Sub-Agent Spawning (Research Pattern)
+
+When the Researcher agent needs to investigate a topic, company, or market signal, it should **spawn parallel sub-searches** across multiple sources instead of searching sequentially. This dramatically reduces research time and improves coverage.
+
+### Pattern: Fan-Out / Fan-In
+
+```
+Researcher receives task: "Research [Company X] growth signals"
+        ↓
+SPAWN IN PARALLEL (via sub-agent threads or async tasks):
+  ├── Sub-agent 1: County records / Open Corporates (LLC filings, recent registrations)
+  ├── Sub-agent 2: Commercial listings (LoopNet, CoStar mentions, CREXi)
+  ├── Sub-agent 3: News / press releases (Google News, industry publications)
+  ├── Sub-agent 4: Social signals (X/Twitter, LinkedIn job postings)
+  └── Sub-agent 5: CRM cross-reference (existing contacts, properties, past interactions)
+        ↓
+WAIT for all to complete (timeout: 5 minutes per sub-search)
+        ↓
+MERGE results into a single research report:
+  - Executive summary
+  - Key findings per source (with confidence + freshness)
+  - Signals that corroborate across sources (higher confidence)
+  - Gaps / sources that returned nothing
+  - Recommended follow-up actions
+        ↓
+Write to sandbox_signals with combined confidence score
+```
+
+### Implementation Options
+
+**Option A: OpenClaw Sub-Agents (Preferred)**
+Each sub-search runs as a lightweight OpenClaw sub-agent within the Researcher's context. OpenClaw supports spawning child tasks that share the parent's memory but run independently.
+
+**Option B: Python Async Tasks**
+If sub-agents aren't practical, the supervisor can spawn parallel Python async tasks:
+```python
+import asyncio
+
+async def research_company(company_name):
+    tasks = [
+        search_county_records(company_name),
+        search_commercial_listings(company_name),
+        search_news(company_name),
+        search_social(company_name),
+        search_crm(company_name),
+    ]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    return merge_research_results(results)
+```
+
+**Option C: Priority Board Coordination**
+The Researcher posts 5 priority items (one per source) to the priority board. If multiple Researcher instances exist (Mac Studio era), they can each pick up a sub-search. Results merge when all complete.
+
+### Timeout & Fallback Rules
+
+- Each sub-search has a 5-minute timeout
+- If a source times out, mark it as "unavailable" in the report — don't block the whole research
+- If 3+ sources return data, generate the report even if some failed
+- If only 1 source returns data, flag as "low coverage — needs manual follow-up"
+
+### When to Use Parallel Search
+
+| Trigger | Sources to Spawn |
+|---------|-----------------|
+| New company added to CRM | All 5 sources |
+| AIR report received | Listings + CRM cross-ref + News |
+| Growth signal detected | Social + News + CRM cross-ref |
+| Contact verification request | County records + White Pages + BeenVerified |
+| Nightly coverage scan | CRM gaps + News + Social |
+
+---
+
+## Nightly Self-Maintenance Cron
+
+Inspired by battle-tested autonomous agent deployments. A nightly cron handles system hygiene automatically.
+
+### Schedule
+
+```
+3:00 AM  — Rebuild embedding/search indexes (when semantic search is active)
+3:30 AM  — Run data retention cleanup (see OPERATIONS.md #9)
+4:00 AM  — Check for Ollama model updates (pull latest if available)
+4:15 AM  — Restart Ollama to clear memory fragmentation
+4:30 AM  — Backup configs to private Git repo (sanitized — see OPERATIONS.md #11)
+5:00 AM  — Generate overnight performance report:
+             - Items processed per agent
+             - Error rate per agent
+             - Average confidence scores
+             - API call counts per service
+5:30 AM  — Write performance report to agent_logs (available for Claude's 6 AM review)
+```
+
+### Supervisor Cron Implementation
+
+```python
+def check_nightly_schedule(self):
+    """Run nightly maintenance tasks based on time."""
+    hour = datetime.now().hour
+    minute = datetime.now().minute
+
+    if hour == 3 and minute == 0 and not self.ran_today('rebuild_indexes'):
+        self.rebuild_search_indexes()
+        self.mark_ran_today('rebuild_indexes')
+
+    if hour == 3 and minute == 30 and not self.ran_today('data_cleanup'):
+        self.run_data_retention_cleanup()
+        self.mark_ran_today('data_cleanup')
+
+    if hour == 4 and minute == 0 and not self.ran_today('model_update'):
+        self.check_model_updates()
+        self.mark_ran_today('model_update')
+
+    if hour == 4 and minute == 30 and not self.ran_today('config_backup'):
+        self.backup_configs_to_git()
+        self.mark_ran_today('config_backup')
+
+    if hour == 5 and minute == 0 and not self.ran_today('perf_report'):
+        self.generate_overnight_report()
+        self.mark_ran_today('perf_report')
+```
+
+---
+
 *Created: March 2026*
 *Updated: March 2026 — Added fleet split strategy for Mac Mini + Mac Studio*
+*Updated: March 2026 — Added parallel sub-agent spawning, nightly self-maintenance cron*
 *For: IE CRM AI Master System — Process Management & Orchestration*
