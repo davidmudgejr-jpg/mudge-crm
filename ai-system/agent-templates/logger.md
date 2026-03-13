@@ -70,6 +70,11 @@ Generate `/AI-Agents/daily-logs/YYYY-MM-DD.md` with:
 ## Errors & Issues
 - [List any errors, failures, or anomalies]
 
+## Security Audit Summary
+- Findings: X critical, X high, X medium, X low
+- Notable: [list any critical or high findings from Scout's nightly audit]
+- Source: agent_logs (log_type: 'security_audit')
+
 ## Patterns & Recommendations
 - [What's working well]
 - [What's not working]
@@ -147,6 +152,7 @@ Report status every 60 seconds via `POST /api/ai/agent/heartbeat`:
 4. Include both successes and failures — Claude needs the full picture
 5. If an agent is down or unresponsive, flag it prominently
 6. Keep daily logs under 500 lines — be comprehensive but not verbose
+7. REFERENCE your model's prompting guide (`ai-system/prompting-guides/minimax-2.5.md` or `ai-system/prompting-guides/qwen-3.5.md` depending on assigned model) when formatting log summaries
 
 ---
 
