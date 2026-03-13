@@ -18,6 +18,7 @@ export default {
           deep: 'var(--crm-deep)',
           overlay: 'var(--crm-overlay)',
           tooltip: 'var(--crm-tooltip)',
+          panel: 'var(--crm-panel)',
         },
       },
       keyframes: {

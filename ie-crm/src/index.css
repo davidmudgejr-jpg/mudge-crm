@@ -22,6 +22,7 @@
   /* Surfaces & overlays */
   --crm-deep: #000000;
   --crm-overlay: rgba(0, 0, 0, 0.3);
+  --crm-panel: rgba(36,36,38,0.97);
   --crm-tooltip: #1c1c1e;
 
   /* Scrollbar */
@@ -52,6 +53,7 @@
     --crm-deep: #ececee;
     --crm-overlay: rgba(0, 0, 0, 0.2);
     --crm-tooltip: #1c1c1e;
+    --crm-panel: rgba(255,255,255,0.97);
 
     --crm-scroll-track: transparent;
     --crm-scroll-thumb: rgba(0,0,0,0.15);
@@ -84,6 +86,7 @@
   --crm-deep: #1b1b1b;
   --crm-overlay: rgba(0, 0, 0, 0.55);
   --crm-tooltip: #252526;
+  --crm-panel: #2d2d30;
 
   --crm-scroll-track: #1e1e1e;
   --crm-scroll-thumb: #424242;

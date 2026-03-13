@@ -66,7 +66,7 @@ export default function CampaignDetail({ campaignId, id, onClose, onSave, onRefr
     return (
       <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
         <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-        <div className="w-[500px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+        <div className="w-[500px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
           <DetailSkeleton />
         </div>
       </div>
@@ -84,7 +84,7 @@ export default function CampaignDetail({ campaignId, id, onClose, onSave, onRefr
     return (
       <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
         <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-        <div className="w-[500px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+        <div className="w-[500px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
           {errorContent}
         </div>
       </div>
@@ -136,7 +136,7 @@ export default function CampaignDetail({ campaignId, id, onClose, onSave, onRefr
   return (
     <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-      <div className="relative w-[500px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-[500px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
         {content}
       </div>
     </div>

@@ -508,10 +508,9 @@ export default function CrmTable({
                   } else if (e.shiftKey && onShiftSelect) {
                     onShiftSelect(id);
                   } else {
-                    onSelectOnly ? onSelectOnly(id) : onToggleSelect(id);
+                    onRowClick(row);
                   }
                 }}
-                onDoubleClick={() => onRowClick(row)}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   setContextMenu({ x: e.clientX, y: e.clientY, row });
@@ -550,7 +549,7 @@ export default function CrmTable({
                         minWidth: widths[col.key] || col.defaultWidth || 150,
                         maxWidth: widths[col.key] || col.defaultWidth || 150,
                       }}
-                      onClick={isEditable ? (e) => {
+                      onDoubleClick={isEditable ? (e) => {
                         e.stopPropagation();
                         if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
                       } : undefined}
@@ -590,7 +589,7 @@ export default function CrmTable({
                         minWidth: widths[col.key] || col.defaultWidth || 150,
                         maxWidth: widths[col.key] || col.defaultWidth || 150,
                       }}
-                      onClick={(e) => {
+                      onDoubleClick={(e) => {
                         e.stopPropagation();
                         if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
                       }}
