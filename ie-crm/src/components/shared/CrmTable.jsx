@@ -4,6 +4,7 @@ import defaultFormatCell from './formatCell';
 import AddFieldPanel from './AddFieldPanel';
 import { FIELD_TYPE_MAP } from '../../config/fieldTypes';
 import InlineTableCellEditor from './InlineTableCellEditor';
+import ContextMenu from './ContextMenu';
 
 /* ── Inline cell editor for custom fields ───────────────────────────── */
 
@@ -52,7 +53,7 @@ function InlineCellEditor({ value, fieldDef, typeDef, onSave, onCancel }) {
           if (e.key === 'Enter') { onSave(draft || null); }
           if (e.key === 'Escape') onCancel();
         }}
-        className="w-full bg-crm-card border border-crm-accent/50 rounded px-1.5 py-0.5 text-sm text-crm-text focus:outline-none"
+        className="w-full bg-crm-card border border-crm-border rounded-md shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] focus:ring-2 focus:ring-crm-accent/40 focus:border-crm-accent/50 px-1.5 py-0.5 text-sm text-crm-text focus:outline-none"
       >
         <option value="">—</option>
         {options.map((o) => (
@@ -80,7 +81,7 @@ function InlineCellEditor({ value, fieldDef, typeDef, onSave, onCancel }) {
           if (e.key === 'Escape') onCancel();
           if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); commit(); }
         }}
-        className={`w-full bg-crm-card border ${valid ? 'border-crm-accent/50' : 'border-red-500'} rounded px-1.5 py-0.5 text-sm text-crm-text focus:outline-none resize-none overflow-hidden`}
+        className={`w-full bg-crm-card border ${valid ? 'border-crm-border' : 'border-red-500'} rounded-md shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] focus:ring-2 focus:ring-crm-accent/40 focus:border-crm-accent/50 px-1.5 py-0.5 text-sm text-crm-text focus:outline-none resize-none overflow-hidden`}
       />
     );
   }
@@ -99,7 +100,7 @@ function InlineCellEditor({ value, fieldDef, typeDef, onSave, onCancel }) {
         if (e.key === 'Enter') commit();
         if (e.key === 'Escape') onCancel();
       }}
-      className={`w-full bg-crm-card border ${valid ? 'border-crm-accent/50' : 'border-red-500'} rounded px-1.5 py-0.5 text-sm text-crm-text focus:outline-none`}
+      className={`w-full bg-crm-card border ${valid ? 'border-crm-border' : 'border-red-500'} rounded-md shadow-[inset_0_1px_2px_rgba(0,0,0,0.06)] focus:ring-2 focus:ring-crm-accent/40 focus:border-crm-accent/50 px-1.5 py-0.5 text-sm text-crm-text focus:outline-none`}
     />
   );
 }
@@ -156,7 +157,9 @@ function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide,
         >
           <span className="truncate">{col.label}</span>
           {orderBy === col.key && (
-            <span className="text-crm-accent ml-1">{order === 'ASC' ? '↑' : '↓'}</span>
+            <svg className="w-3 h-3 text-crm-accent ml-1 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d={order === 'ASC' ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} />
+            </svg>
           )}
         </div>
         <button
@@ -293,6 +296,11 @@ export default function CrmTable({
   onHideCustomField,
   // Inline cell editing for native (DB) columns
   onCellSave,
+  // Finder-style selection
+  onSelectOnly,
+  onShiftSelect,
+  // Context menu
+  onDeleteRow,
 }) {
   /* ── Column order: drag-to-reorder with localStorage persistence ─── */
   const colOrderKey = `crm_column_order_${tableKey}`;
@@ -355,6 +363,7 @@ export default function CrmTable({
 
   const [addFieldOpen, setAddFieldOpen] = useState(false);
   const [editingCell, setEditingCell] = useState(null); // { rowId, colKey }
+  const [contextMenu, setContextMenu] = useState(null); // { x, y, row }
   const addBtnRef = useRef(null);
 
   const allSelected = selected.size === rows.length && rows.length > 0;
@@ -387,7 +396,7 @@ export default function CrmTable({
     <div className="relative w-full h-full overflow-auto">
       <table className="text-sm border-collapse" style={{ tableLayout: 'fixed', minWidth: 'max-content' }}>
         <thead className="sticky top-0 bg-crm-bg/95 glass-sidebar z-10">
-          <tr className="border-b border-crm-border">
+          <tr className="border-b border-crm-border/30">
             {/* Checkbox column */}
             <th className="px-3 py-2.5 w-10 sticky left-0 bg-crm-bg/95 z-20">
               <input
@@ -486,20 +495,34 @@ export default function CrmTable({
         </thead>
         <tbody>
           {emptyBody}
-          {!noColumnsVisible && rows.map((row) => {
+          {!noColumnsVisible && rows.map((row, idx) => {
             const id = row[idField];
             const isSelected = selected.has(id);
             const extraClass = rowClassName ? rowClassName(row) : '';
             return (
               <tr
                 key={id}
-                onClick={() => onRowClick(row)}
+                onClick={(e) => {
+                  if (e.metaKey) {
+                    onToggleSelect(id);
+                  } else if (e.shiftKey && onShiftSelect) {
+                    onShiftSelect(id);
+                  } else {
+                    onSelectOnly ? onSelectOnly(id) : onToggleSelect(id);
+                  }
+                }}
+                onDoubleClick={() => onRowClick(row)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  setContextMenu({ x: e.clientX, y: e.clientY, row });
+                }}
                 className={`border-b border-crm-border/30 cursor-pointer transition-colors duration-150 animate-row-appear ${
-                  isSelected ? 'bg-crm-accent/10' : 'hover:bg-crm-hover'
+                  isSelected ? 'bg-crm-accent/15' : 'hover:bg-crm-hover'
                 } ${extraClass}`}
+                style={idx % 2 === 1 ? { backgroundColor: 'rgba(255,255,255,0.02)' } : undefined}
               >
                 <td
-                  className="px-3 py-3.5 sticky left-0 bg-crm-bg z-[5]"
+                  className="px-3 py-2.5 sticky left-0 bg-crm-bg z-[5]"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <input
@@ -521,7 +544,7 @@ export default function CrmTable({
                   return (
                     <td
                       key={col.key}
-                      className={`px-3 py-3.5 overflow-hidden text-ellipsis whitespace-nowrap${isEditable && !isEditing ? ' cursor-cell' : ''}`}
+                      className={`px-3 py-2.5 overflow-hidden text-ellipsis whitespace-nowrap${isEditable && !isEditing ? ' cursor-cell' : ''}`}
                       style={{
                         width: widths[col.key] || col.defaultWidth || 150,
                         minWidth: widths[col.key] || col.defaultWidth || 150,
@@ -561,7 +584,7 @@ export default function CrmTable({
                   return (
                     <td
                       key={col.key}
-                      className="px-3 py-3.5 overflow-hidden text-ellipsis whitespace-nowrap"
+                      className="px-3 py-2.5 overflow-hidden text-ellipsis whitespace-nowrap"
                       style={{
                         width: widths[col.key] || col.defaultWidth || 150,
                         minWidth: widths[col.key] || col.defaultWidth || 150,
@@ -619,12 +642,30 @@ export default function CrmTable({
                 })}
 
                 {/* Empty cell for add-field column */}
-                {onAddField && <td className="px-2 py-3.5 w-10" />}
+                {onAddField && <td className="px-2 py-2.5 w-10" />}
               </tr>
             );
           })}
         </tbody>
       </table>
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={[
+            { label: 'Open', onClick: () => { onRowClick(contextMenu.row); setContextMenu(null); } },
+            { label: 'Copy Name', onClick: () => {
+              const firstCol = orderedColumns[0];
+              const val = firstCol ? contextMenu.row[firstCol.key] : '';
+              navigator.clipboard.writeText(String(val || ''));
+              setContextMenu(null);
+            }},
+            { separator: true },
+            { label: 'Delete', danger: true, onClick: () => { onDeleteRow?.(contextMenu.row[idField]); setContextMenu(null); } },
+          ]}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }
