@@ -255,6 +255,16 @@ A Python script that manages all agent processes. It's the single process that m
       }
     }
   ],
+  "cron_jobs": [
+    {
+      "job_name": "security_audit",
+      "agent": "scout",
+      "schedule": "15 3 * * *",
+      "timeout_minutes": 30,
+      "priority": "high",
+      "description": "4-perspective security audit of entire system"
+    }
+  ],
   "tier2": {
     "enabled": false,
     "cycle_minutes": 10,
@@ -768,6 +778,12 @@ Council reviewer prompts stored in `/AI-Agents/chief-of-staff/council/`:
 │   ├── 2026-03-10.md
 │   ├── 2026-03-11.md
 │   └── ...
+├── security/
+│   └── injection-rules.json        # Deterministic injection sanitizer patterns
+├── prompting-guides/
+│   ├── opus-4.6.md                 # Prompting guide for Claude Opus 4.6 (Tier 1)
+│   ├── qwen-3.5.md                 # Prompting guide for Qwen 3.5 (Tier 3)
+│   └── minimax-2.5.md              # Prompting guide for MiniMax 2.5 (Tier 3)
 ├── shared/                       # Shared utilities used by all agents
 │   ├── cost-tracker.py           # Per-call LLM cost tracking
 │   └── audit-log.py              # Structured JSONL audit logging
@@ -802,6 +818,10 @@ Council reviewer prompts stored in `/AI-Agents/chief-of-staff/council/`:
 | `shared/cost-tracker.py` and `shared/audit-log.py` | `logs/audit/` (JSONL audit log files) |
 | `enricher/pre-filter-rules.json` (template) | `logs/council/` (council briefing traces) |
 | `chief-of-staff/council/*.md` (reviewer prompts) | API keys, connection strings (in env vars) |
+| `security/injection-rules.json` | GitHub → Mac Mini | Injection sanitizer pattern definitions |
+| `prompting-guides/*.md` | GitHub → Mac Mini | Model-specific prompting best practices |
+| `SECURITY-AUDIT.md` | GitHub only (reference) | Security audit process documentation |
+| `INJECTION-DEFENSE.md` | GitHub only (reference) | Injection defense layer documentation |
 | LaunchAgent plist templates | |
 
 ---
@@ -850,6 +870,12 @@ cp ai-system/shared/cost-tracker.py /AI-Agents/shared/cost-tracker.py
 cp ai-system/shared/audit-log.py /AI-Agents/shared/audit-log.py
 cp ai-system/enricher/pre-filter-rules.json /AI-Agents/enricher/pre-filter-rules.json
 cp ai-system/chief-of-staff/council/*.md /AI-Agents/chief-of-staff/council/
+
+# Deploy security and prompting guide files
+mkdir -p /AI-Agents/security
+cp ai-system/security/injection-rules.json /AI-Agents/security/injection-rules.json
+mkdir -p /AI-Agents/prompting-guides
+cp ai-system/prompting-guides/*.md /AI-Agents/prompting-guides/
 
 # 5. Install LaunchAgents
 echo "Installing LaunchAgents..."
@@ -1058,6 +1084,7 @@ Inspired by battle-tested autonomous agent deployments. A nightly cron handles s
 
 ```
 3:00 AM  — Rebuild embedding/search indexes (when semantic search is active)
+3:15 AM  — Scout: Run 4-perspective security audit (see SECURITY-AUDIT.md). Timeout: 3:45 AM.
 3:30 AM  — Run data retention cleanup (see OPERATIONS.md #9)
 4:00 AM  — Check for Ollama model updates (pull latest if available)
 4:15 AM  — Restart Ollama to clear memory fragmentation
