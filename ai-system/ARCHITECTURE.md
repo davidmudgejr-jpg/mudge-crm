@@ -93,6 +93,8 @@ The AI system speaks through **two channels** — one for the team, one for Davi
 - **Reverse prompting:** Proactively recommends opportunities, strategies, and workflow improvements
 - **CRM proposals:** Weekly suggestions for new CRM features based on patterns observed
 - **Dual-channel output:** Posts team intel to Houston (CRM Messaging) and ops updates to Telegram
+- **Council briefing:** Runs a 3-phase adversarial review each morning — Lead Analyst draft (Opus), 3 Council reviewers in parallel (Sonnet: DealHunter, RevenueGuardian, MarketSkeptic), then reconciliation (Opus). See spec: `docs/superpowers/specs/2026-03-13-ai-system-enhancements-design.md`
+- **Pre-filter rule tuning:** Reviews Enricher pre-filter effectiveness weekly and adjusts rules in `pre-filter-rules.json`
 
 **Access:** Read + Write to IE CRM (trusted tier)
 **Cost model:** API, token-efficient — only invoked when worth it
@@ -146,6 +148,7 @@ The AI system speaks through **two channels** — one for the team, one for Davi
 ### Agent 2: "The Enricher" (Qwen)
 **Primary job:** Contact verification & database enrichment
 - When new LLC/company added to IE CRM → trigger enrichment workflow
+- **Stage 0 Pre-Filter:** Before any paid API calls, evaluate record against rule-based filters (`pre-filter-rules.json`): required fields, property type relevance, geography, duplicate detection, junk entity detection. Records that fail are skipped and logged. See full spec in design doc.
 - Hit Open Corporates → extract registered person name
 - Cross-reference White Pages + BeenVerified → match addresses, phones, emails
 - Score confidence: "If address matches AND two email sources agree = high confidence"
@@ -160,7 +163,28 @@ The AI system speaks through **two channels** — one for the team, one for Davi
 - Draft personalized outreach emails
 - Queue drafts for Tier 2 review before any email sends
 
-### Agent 4: "The Logger" (either model)
+### Agent 4: "The Scout" (MiniMax — AI & Tech Intelligence)
+**Primary job:** Scan AI/tech news across multiple platforms and recommend system improvements
+- Monitor AI news sources: Hacker News, Reddit (r/LocalLLaMA, r/MachineLearning, r/OpenClaw), X/Twitter (AI influencers, open-source model releases), ArXiv summaries
+- Track new model releases (Ollama model registry, HuggingFace trending)
+- Watch for new tools, MCP servers, OpenClaw skills, and integrations relevant to CRE or agent orchestration
+- Monitor competitor approaches (other CRE tech, proptech AI products)
+- Search for CRE-specific AI use cases (automated underwriting, lease abstraction, market forecasting)
+- **Output: Weekly "Evolution Report"** written to agent_logs with type `evolution_report`:
+  - New models worth testing (with benchmarks vs current models)
+  - New tools/integrations that could improve our workflows
+  - Techniques spotted in the wild that we could adopt
+  - Competitor intelligence (who's building what in CRE AI)
+  - Specific, actionable recommendations ranked by effort vs impact
+- **Output: Immediate alerts** for high-impact discoveries:
+  - Major model release that significantly outperforms our current models
+  - Security vulnerability in a tool we use
+  - New free/cheap API that replaces a paid service
+- **Idle-cycle behavior:** When no priority scans queued, deep-dive into one topic from the backlog (e.g., "How are other teams doing lease abstraction with local models?")
+- **Pricing table maintenance:** Monitor model pricing changes from Anthropic, OpenAI, Google, and update the pricing table in `supervisor-config.json` when changes are announced
+- **Full spec:** `agent-templates/scout.md`
+
+### Agent 5: "The Logger" (either model)
 **Primary job:** Daily activity documentation
 - Write detailed .md log files every day summarizing:
   - What each agent did
@@ -168,6 +192,8 @@ The AI system speaks through **two channels** — one for the team, one for Davi
   - What signals were found
   - What outreach was queued
   - What failed or went off track
+- Generate cost reports from JSONL audit log data (by model, by task type, by agent, routing suggestions)
+- Read from `/AI-Agents/logs/audit/` to produce both daily `.md` summaries AND cost analysis reports
 - These logs are what Claude reads to improve the system
 
 ---
@@ -194,6 +220,19 @@ The AI system speaks through **two channels** — one for the team, one for Davi
     agent.md
     memory/
     logs/
+  /shared/                     ← Shared utilities used by all agents
+    cost-tracker.py
+    audit-log.py
+  /logs/
+    /audit/                    ← JSONL structured audit logs (daily files)
+    /council/                  ← Council briefing traces (daily JSON)
+  /chief-of-staff/
+    council/                   ← Council reviewer prompts
+      deal-hunter.md
+      revenue-guardian.md
+      market-skeptic.md
+  /enricher/
+    pre-filter-rules.json      ← Stage 0 filter configuration
   /sandbox-db/                 ← Local agent write zone (NOT IE CRM)
   /daily-logs/                 ← What Claude reads each morning
 ```
@@ -211,22 +250,60 @@ The AI system speaks through **two channels** — one for the team, one for Davi
 ## 🔄 THE SELF-IMPROVEMENT LOOP
 
 ```
-Local agents work 24/7
-        ↓
-Write detailed logs (.md files)
-        ↓
-Tier 2 (Ralph Loop) checks every 10-15 min
-        ↓
-Daily summary pushed to Claude
-        ↓
-Claude reviews: what worked? what failed? what patterns?
-        ↓
-Claude rewrites agent instruction files (.md)
-        ↓
-Local agents run with improved instructions
-        ↓
-Repeat → system gets smarter over time
+TWO FEEDBACK STREAMS INTO CLAUDE:
+
+STREAM 1: Internal Performance (daily)          STREAM 2: External Intelligence (weekly)
+─────────────────────────────────                ────────────────────────────────────────
+Local agents work 24/7                           Scout scans AI news, model releases,
+        ↓                                        tools, CRE tech, competitor activity
+Write detailed logs (.md files)                          ↓
+        ↓                                        Weekly "Evolution Report" posted to
+Tier 2 (Ralph Loop) checks every 10-15 min      agent_logs (type: evolution_report)
+        ↓                                                ↓
+Daily summary pushed to Claude                   ─────────┐
+        ↓                                                 │
+        └────────── MERGE ──────────────────────────────┘
+                         ↓
+              Claude reviews BOTH streams:
+              • What worked? What failed? What patterns? (internal)
+              • What's new? What should we try? What's cheaper/better? (external)
+                         ↓
+              Claude produces TWO outputs:
+              1. Agent instruction rewrites (.md files) — based on performance data
+              2. "System Evolution Proposals" — based on Scout discoveries
+                 (new model to test, new tool to integrate, workflow change)
+                         ↓
+              Instruction rewrites → agents run with improved instructions
+              Evolution proposals → David reviews in morning briefing
+                         ↓
+              Repeat → system gets smarter AND stays current with AI advances
 ```
+
+### Evolution Proposal Format
+
+When Claude identifies an actionable improvement from the Scout's report:
+
+```json
+{
+  "type": "evolution_proposal",
+  "title": "Switch Enricher from Qwen 3.5 (20B) to Qwen 4 (25B)",
+  "source": "Scout weekly report — 2026-03-20",
+  "category": "model_upgrade",
+  "effort": "low",
+  "impact": "medium",
+  "rationale": "Qwen 4 (25B) released March 18. Benchmarks show 12% improvement on structured data extraction tasks. Same RAM footprint as current model. Ollama pull available.",
+  "action_plan": [
+    "Pull qwen4:25b via Ollama on Mac Mini",
+    "Run Level 1 unit tests with new model",
+    "Compare enrichment accuracy: 50 items with Qwen 3.5 vs Qwen 4",
+    "If accuracy improves: update supervisor-config.json"
+  ],
+  "risk": "Low — can always rollback to Qwen 3.5",
+  "decision": "defer_to_david"
+}
+```
+
+Categories: `model_upgrade`, `new_tool`, `workflow_change`, `cost_optimization`, `security_patch`, `competitor_intel`, `new_data_source`
 
 ---
 
@@ -236,7 +313,11 @@ Repeat → system gets smarter over time
 |-------|--------|------------|----------|-------|
 | Claude (Tier 1) | Read + Write | Read | No | Approve only |
 | ChatGPT/Gemini (Tier 2) | Read | Read + Write | No | Review only |
-| Local Models (Tier 3) | Read only | Read + Write | Yes | No |
+| Researcher (Tier 3) | Read only | Read + Write | Yes | No |
+| Enricher (Tier 3) | Read only | Read + Write | Yes (APIs only) | No |
+| Matcher (Tier 3) | Read only | Read + Write | No | Read (inbox) |
+| Scout (Tier 3) | Read only | Write (logs only) | Yes | No |
+| Logger (Tier 3) | Read only | Read + Write | No | No |
 
 **Dedicated accounts for local models:**
 - Separate White Pages account
@@ -278,6 +359,10 @@ Email goes out (deduplication check first)
 ```
 New LLC added to IE CRM (or batch run nightly)
         ↓
+Stage 0: Pre-Filter (rule-based, instant, free)
+  - Required fields present? Property type relevant? Geography in target? Not a duplicate? Not junk entity?
+  - SKIP → log reason to audit log, move to next
+  - PASS ↓
 Open Corporates → extract registered person name + address
         ↓
 White Pages + BeenVerified → look up name

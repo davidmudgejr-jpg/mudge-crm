@@ -274,6 +274,17 @@ A Python script that manages all agent processes. It's the single process that m
     "crm_health_check_url": "https://your-railway-app.up.railway.app/api/ai/health",
     "log_dir": "/AI-Agents/supervisor-logs",
     "status_file": "/AI-Agents/supervisor-status.json"
+  },
+  "pricing": {
+    "anthropic/opus-4.6":    { "input_per_1m": 15.00, "output_per_1m": 75.00 },
+    "anthropic/sonnet-4.6":  { "input_per_1m": 3.00,  "output_per_1m": 15.00 },
+    "anthropic/haiku-4.5":   { "input_per_1m": 0.80,  "output_per_1m": 4.00 },
+    "openai/gpt-4o":         { "input_per_1m": 2.50,  "output_per_1m": 10.00 },
+    "openai/gpt-4o-mini":    { "input_per_1m": 0.15,  "output_per_1m": 0.60 },
+    "google/gemini-flash":   { "input_per_1m": 0.30,  "output_per_1m": 1.20 },
+    "google/gemini-pro":     { "input_per_1m": 1.25,  "output_per_1m": 5.00 },
+    "ollama/*":              { "input_per_1m": 0.00,  "output_per_1m": 0.00 },
+    "_default":              { "input_per_1m": 1.00,  "output_per_1m": 3.00 }
   }
 }
 ```
@@ -673,17 +684,36 @@ def run_tier2_cycle(self):
 - David triggers Claude review manually when ready
 - Can be done through IE CRM's Claude panel or a dedicated script
 
-### Phase 3+ (Automated)
+### Phase 3+ (Automated — Council Briefing)
 - Supervisor triggers at 6 AM daily
-- Implementation: API call to Claude (Anthropic API) with:
-  - The chief-of-staff instructions
-  - Yesterday's daily log (from Logger)
-  - Pending escalations
-  - Current agent instruction versions
-- Claude processes and returns:
-  - Morning briefing for David
-  - Any instruction file updates
-  - Escalation decisions
+- Implementation: **3-phase council briefing** via Anthropic API:
+
+**Phase 1 — Lead Analyst (Opus):**
+  - Reads daily logs, escalations, agent instruction versions, system health
+  - Produces draft briefing with scored recommendations (impact, confidence, effort)
+
+**Phase 2 — Council Review (3× Sonnet, parallel via `asyncio.gather()`):**
+  - DealHunter: "What opportunities are we missing?"
+  - RevenueGuardian: "What actually closes this month?"
+  - MarketSkeptic: "What's wrong with this data?"
+  - Each reviews draft, outputs: support/revise/reject per recommendation + up to 2 new recommendations
+
+**Phase 3 — Reconciliation (Opus):**
+  - Merges all reviews, produces final ranked briefing
+  - Ranking: `priority = (impact × 0.4) + (confidence × 0.35) + ((100 - effort) × 0.25)`
+  - Disagreements noted in output
+
+**Failure modes:** Retry once per reviewer; if 2+ fail, fall back to single-pass briefing.
+**Cost:** ~$0.20-0.40/day ($6-12/month)
+**Full spec:** `docs/superpowers/specs/2026-03-13-ai-system-enhancements-design.md`
+
+Council reviewer prompts stored in `/AI-Agents/chief-of-staff/council/`:
+```
+/AI-Agents/chief-of-staff/council/
+├── deal-hunter.md
+├── revenue-guardian.md
+└── market-skeptic.md
+```
 
 ---
 
@@ -703,6 +733,7 @@ def run_tier2_cycle(self):
 │   └── restarts.log
 ├── enricher/
 │   ├── agent.md                   # Instructions (from repo)
+│   ├── pre-filter-rules.json     # Stage 0 filter configuration
 │   ├── memory/                    # Agent's persistent memory
 │   ├── logs/                      # Per-agent daily logs
 │   ├── versions/                  # Backed-up previous agent.md versions
@@ -727,10 +758,26 @@ def run_tier2_cycle(self):
 │   ├── agent.md
 │   ├── memory/
 │   └── logs/
+├── chief-of-staff/
+│   ├── council/                  # Council reviewer prompts
+│   │   ├── deal-hunter.md
+│   │   ├── revenue-guardian.md
+│   │   └── market-skeptic.md
+│   └── ...
 ├── daily-logs/                    # Logger writes daily summaries here
 │   ├── 2026-03-10.md
 │   ├── 2026-03-11.md
 │   └── ...
+├── shared/                       # Shared utilities used by all agents
+│   ├── cost-tracker.py           # Per-call LLM cost tracking
+│   └── audit-log.py              # Structured JSONL audit logging
+├── logs/
+│   ├── audit/                    # JSONL audit logs (one file per day)
+│   │   ├── 2026-03-25.jsonl
+│   │   └── ...
+│   └── council/                  # Council briefing traces
+│       ├── 2026-03-25.json
+│       └── ...
 ├── offline-buffer/                # Buffered data during network outages
 │   ├── signals/
 │   └── logs/
@@ -752,7 +799,10 @@ def run_tier2_cycle(self):
 | `ORCHESTRATION.md` (this doc) | `offline-buffer/` (network outage buffer) |
 | `COORDINATION.md` | `*/checkpoint.json` (crash recovery state) |
 | `ARCHITECTURE.md` | `*/versions/` (backed up old agent.md files) |
-| LaunchAgent plist templates | API keys, connection strings (in env vars) |
+| `shared/cost-tracker.py` and `shared/audit-log.py` | `logs/audit/` (JSONL audit log files) |
+| `enricher/pre-filter-rules.json` (template) | `logs/council/` (council briefing traces) |
+| `chief-of-staff/council/*.md` (reviewer prompts) | API keys, connection strings (in env vars) |
+| LaunchAgent plist templates | |
 
 ---
 
@@ -784,6 +834,8 @@ ollama pull minimax2.5
 echo "Creating folder structure..."
 mkdir -p /AI-Agents/{enricher,researcher,matcher,logger}/{memory,logs,versions}
 mkdir -p /AI-Agents/{daily-logs,offline-buffer/{signals,logs},supervisor-logs}
+mkdir -p /AI-Agents/{shared,logs/{audit,council}}
+mkdir -p /AI-Agents/chief-of-staff/council
 
 # 4. Copy agent templates from repo
 echo "Deploying agent instruction files..."
@@ -791,6 +843,13 @@ cp ai-system/agent-templates/enricher.md /AI-Agents/enricher/agent.md
 cp ai-system/agent-templates/researcher.md /AI-Agents/researcher/agent.md
 cp ai-system/agent-templates/matcher.md /AI-Agents/matcher/agent.md
 cp ai-system/agent-templates/logger.md /AI-Agents/logger/agent.md
+
+# 4b. Deploy shared utilities
+echo "Deploying shared utilities..."
+cp ai-system/shared/cost-tracker.py /AI-Agents/shared/cost-tracker.py
+cp ai-system/shared/audit-log.py /AI-Agents/shared/audit-log.py
+cp ai-system/enricher/pre-filter-rules.json /AI-Agents/enricher/pre-filter-rules.json
+cp ai-system/chief-of-staff/council/*.md /AI-Agents/chief-of-staff/council/
 
 # 5. Install LaunchAgents
 echo "Installing LaunchAgents..."
@@ -1008,6 +1067,7 @@ Inspired by battle-tested autonomous agent deployments. A nightly cron handles s
              - Error rate per agent
              - Average confidence scores
              - API call counts per service
+5:15 AM  — Sync daily cost aggregates from JSONL audit log to Postgres ai_usage_tracking table
 5:30 AM  — Write performance report to agent_logs (available for Claude's 6 AM review)
 ```
 
@@ -1045,4 +1105,5 @@ def check_nightly_schedule(self):
 *Created: March 2026*
 *Updated: March 2026 — Added fleet split strategy for Mac Mini + Mac Studio*
 *Updated: March 2026 — Added parallel sub-agent spawning, nightly self-maintenance cron*
+*Updated: March 2026 — Added council briefing, cost tracking, audit logging, pre-filter config*
 *For: IE CRM AI Master System — Process Management & Orchestration*

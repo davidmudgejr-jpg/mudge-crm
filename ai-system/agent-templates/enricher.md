@@ -18,6 +18,22 @@ You write ONLY to the Sandbox DB (via API). You NEVER write directly to IE CRM p
 
 When triggered (new LLC added to IE CRM or nightly batch run):
 
+### Stage 0: Pre-Filter (Rule-Based, Instant, Free)
+Before any paid API calls, evaluate the record against pre-filter rules in `/AI-Agents/enricher/pre-filter-rules.json`:
+
+1. **Required fields** — Entity name present + at least one of: address, state, entity number? If not → SKIP
+2. **Junk entity filter** — Entity name contains DISSOLVED/CANCELLED/INACTIVE? Registered agent is CT Corporation/CSC? → SKIP
+3. **Property type filter** — Is property type relevant (industrial, office, retail, multifamily, mixed-use, commercial land)? Residential/government/religious → SKIP
+4. **Geography filter** — In Inland Empire or adjacent markets (LA/Orange County)? Outside target → SKIP
+5. **Duplicate detection** — High-confidence match already exists in IE CRM with data <90 days old? → SKIP
+
+Every skip is logged to the JSONL audit log with action `pre_filter_skip` and the specific reason. Every pass is logged as `pre_filter_pass`.
+
+**If all filters pass → continue to Step 1.**
+**If any filter triggers → skip this record and move to the next.**
+
+Houston reviews pre-filter stats weekly and adjusts rules in `pre-filter-rules.json`.
+
 ### Step 1: Open Corporates Lookup
 - Search Open Corporates for the LLC name
 - Extract: registered agent name, registered address, filing date, status
@@ -102,6 +118,17 @@ Write a structured log entry for every LLC processed via `POST /api/ai/agent/log
 - Any errors or dead ends
 
 Also write daily summary to local `/AI-Agents/enricher/logs/YYYY-MM-DD.md`
+
+### JSONL Audit Log
+
+In addition to the API log entries above, write structured entries to the JSONL audit log via the shared `audit()` utility (`/AI-Agents/shared/audit-log.py`):
+
+- `pre_filter_skip` / `pre_filter_pass` — every record evaluated by Stage 0
+- `api_call` — every external API call (Open Corporates, White Pages, BeenVerified, NeverBounce) with service name, result, and duration
+- `llm_call` — every LLM inference call with model, tokens, task type, and cost estimate
+- `sandbox_write` — every submission to the sandbox with entity name and confidence score
+
+This structured log feeds the cost tracker and enables Houston's pattern analysis.
 
 ---
 

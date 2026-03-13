@@ -139,6 +139,14 @@ This is the build plan for the AI Master System — a tiered, hybrid AI organiza
 - [ ] Logs write to both local .md files AND agent_logs table in IE CRM
 - [ ] Verify logs appear in Agent Dashboard log viewer
 
+### 2D — Scout Agent (AI & Tech Intelligence)
+- [ ] Deploy `agent-templates/scout.md` with MiniMax 2.5
+- [ ] Configure internet access for: Hacker News, Reddit, X, ArXiv, Ollama registry, HuggingFace
+- [ ] Test: Scout finds one relevant new model release or tool and writes an evolution report
+- [ ] Verify evolution_report entries appear in agent_logs
+- [ ] Configure weekly Evolution Report cron (Sunday 6 PM)
+- [ ] Wire Scout alerts to Telegram ops channel for urgent discoveries
+
 ---
 
 ## Phase 3 — Claude Oversight + Self-Improvement (Month 2)

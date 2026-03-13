@@ -20,6 +20,8 @@ You are the memory of the system. Without your logs, the self-improvement loop d
 - Read agent_logs table: `GET /api/ai/agent/logs?since=1h`
 - Read agent_heartbeats: current status of all agents
 - Aggregate counts: items processed, errors, signals found, outreach drafted
+- Read JSONL audit log entries since last collection: `/AI-Agents/logs/audit/YYYY-MM-DD.jsonl`
+- Aggregate from audit log: LLM calls by model, API calls by service, pre-filter skip/pass counts, sandbox writes
 
 ### End of Day (11:59 PM): Write Daily Summary
 Generate `/AI-Agents/daily-logs/YYYY-MM-DD.md` with:
@@ -73,6 +75,23 @@ Generate `/AI-Agents/daily-logs/YYYY-MM-DD.md` with:
 - [What's not working]
 - [Suggestions for instruction changes]
 ```
+
+### Cost Reports (Weekly + On-Demand)
+
+Generate cost analysis reports from the JSONL audit log (`/AI-Agents/logs/audit/`).
+
+**Data source:** Read `action: llm_call` entries from audit log files. Cross-reference with pricing table in `supervisor-config.json`.
+
+**Weekly report (written to daily-logs as `cost-report-YYYY-WNN.md`):**
+- **Overall summary:** Total spend, total calls, average cost per call
+- **By model:** Which models consume the most budget
+- **By task type:** Which operations cost the most (enrichment vs research vs council briefing)
+- **By agent:** Per-agent spend breakdown
+- **Daily trend:** Last 7 days with moving average
+- **Routing suggestions:** Flag when expensive models (Opus) are used on simple tasks that Haiku or local Qwen could handle
+- **Pre-filter savings:** Estimated API costs avoided by Stage 0 filtering
+
+**On-demand reports:** Support filters `--days N`, `--model X`, `--task-type Y`, `--agent Z` when triggered by Houston or David.
 
 ### Also Write to IE CRM
 Submit summary via `POST /api/ai/agent/log` with:

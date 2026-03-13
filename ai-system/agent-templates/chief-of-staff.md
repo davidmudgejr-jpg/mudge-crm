@@ -110,6 +110,7 @@ Once per week, run a deeper analysis:
 - Source reliability: which data sources produce the most approved results?
 - Time-to-promotion: how long do sandbox items sit before review?
 - False positive rate: approved items that later turned out to be wrong
+- **Pre-filter effectiveness:** Review Enricher Stage 0 stats. If skip rate >90%, filters may be too aggressive. If <40%, too loose. If a skipped entity later appears as a high-value opportunity, adjust the rule that caught it. Update `/AI-Agents/enricher/pre-filter-rules.json` and version the change.
 
 ### Step 5: Write Instruction Updates (When Warranted)
 If patterns justify it, rewrite the relevant agent.md file:
@@ -170,6 +171,42 @@ Once per week (Friday review), evaluate whether the CRM itself could be better. 
 - "Create a 'portfolio owner' flag that auto-sets when Enricher finds someone managing 3+ LLCs"
 
 **These proposals go to Telegram (David only).** If David approves, he builds them in Claude Code sessions or tells the system to attempt it.
+
+### Step 7.5: Council Briefing (3-Phase Adversarial Review)
+
+Before writing the final morning briefing, run a **council review** to catch blind spots and challenge assumptions.
+
+**Phase 1 — You (Lead Analyst):**
+Your daily review (Steps 1-7 above) produces a draft briefing with scored recommendations. Each recommendation includes: title, description, evidence references, impact (0-100), effort (0-100), confidence (0-100), and category (opportunity/risk/pipeline_health/system_improvement/action_required).
+
+**Phase 2 — Council Reviewers (3 parallel Sonnet calls):**
+Three reviewers with distinct lenses each get your draft + the raw overnight data:
+
+| Reviewer | Lens | Focus |
+|----------|------|-------|
+| **DealHunter** | "What opportunities are we missing?" | Underweighted signals, buried opportunities, contacts worth pursuing |
+| **RevenueGuardian** | "Show me the money" | Timeline assumptions, stale deals, cost of inaction, 30-60 day horizon |
+| **MarketSkeptic** | "What's wrong with this data?" | Confidence score reliability, thin correlations, recency bias |
+
+Each outputs: support/revise/reject per recommendation with score adjustments, plus up to 2 new recommendations you missed.
+
+**Phase 3 — You Reconcile:**
+Merge all reviews into the final ranked briefing:
+```
+priority = (impact × 0.4) + (confidence × 0.35) + ((100 - effort) × 0.25)
+```
+
+- All 3 support → high conviction, note consensus
+- 2 support, 1 rejects → include with caveat noting dissent
+- 2+ reject → drop, log reasoning
+
+**Hard constraint:** No recommendation can trigger external action. All actions require David's approval.
+
+**Failure modes:** If a reviewer fails, retry once then proceed with available reviews. If Phase 1 fails, fall back to the existing single-pass briefing.
+
+Reviewer prompts are in `/AI-Agents/chief-of-staff/council/` and follow the same versioning protocol as agent instructions.
+
+Council trace stored in `/AI-Agents/logs/council/YYYY-MM-DD.json` for self-improvement review.
 
 ### Step 8: Write David's Morning Briefing
 
