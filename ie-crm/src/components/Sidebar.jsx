@@ -39,7 +39,7 @@ export default function Sidebar({ onTableChange }) {
   };
 
   return (
-    <aside className="w-16 bg-crm-sidebar glass-sidebar flex flex-col items-center pt-10 pb-4 z-10 flex-shrink-0 border-r border-crm-border/50">
+    <aside className="relative w-16 bg-crm-sidebar glass-sidebar flex flex-col items-center pt-10 pb-4 z-10 flex-shrink-0 border-r border-crm-border/50">
       {/* Logo */}
       <img src={mcIcon} alt="MC" className="mb-6 w-10 h-10 rounded-lg object-cover" />
 
@@ -63,10 +63,6 @@ export default function Sidebar({ onTableChange }) {
               </svg>
               <span className="text-[9px] mt-0.5 leading-none">{item.label}</span>
 
-              {/* Tooltip */}
-              <div className="absolute left-full ml-2 px-2.5 py-1 bg-crm-card/95 glass-toast text-crm-text text-xs rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap z-50 shadow-lg border border-crm-border">
-                {item.label}
-              </div>
             </button>
           );
         })}
