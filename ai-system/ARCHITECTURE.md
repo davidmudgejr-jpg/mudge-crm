@@ -8,13 +8,81 @@
 
 A tiered, self-improving AI organization that runs 24/7 — handling research, data enrichment, market intelligence, and outreach — so David can focus on closing deals while the system feeds him better information than any competitor has access to.
 
+The system doesn't just execute tasks — it **advises**. Through reverse prompting, it proposes opportunities, questions its own workflows, and recommends improvements. It gets smarter every day.
+
+---
+
+## 📱 COMMUNICATION ARCHITECTURE
+
+The AI system speaks through **two channels** — one for the team, one for David's private operations.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                      DAVID'S DEVICES                         │
+│                                                              │
+│  CRM Messaging App (iOS + Web)      Telegram (David only)   │
+│  ┌────────────────────┐             ┌──────────────────┐    │
+│  │     HOUSTON         │             │   OPS CHANNEL    │    │
+│  │                     │             │                  │    │
+│  │ Team sees:          │             │ David only:      │    │
+│  │ • Deal intel        │             │ • Fleet status   │    │
+│  │ • Market briefings  │             │ • Quick approvals│    │
+│  │ • Opportunity alerts│             │ • System alerts  │    │
+│  │ • Action items      │             │ • Reverse prompts│    │
+│  │                     │             │ • CRM proposals  │    │
+│  │ David, Dad, Sister, │             │ • Morning brief  │    │
+│  │ and team can see    │             │   (full ops ver) │    │
+│  └─────────┬───────────┘             └────────┬─────────┘    │
+│            │                                  │              │
+└────────────┼──────────────────────────────────┼──────────────┘
+             │                                  │
+             └────────────┬─────────────────────┘
+                          ▼
+            ┌──────────────────────────┐
+            │   CHIEF OF STAFF         │
+            │   (Claude Opus — "Houston") │
+            │                          │
+            │   ONE brain, TWO mouths  │
+            │   • Reviews & evaluates  │
+            │   • Reverse prompting    │
+            │   • CRM proposals        │
+            │   • Instruction rewrites │
+            └────────────┬─────────────┘
+                         │
+              ┌──────────┼──────────┐
+              ▼                     ▼
+        ┌───────────┐        ┌───────────┐
+        │  ChatGPT  │        │  Gemini   │
+        │  (Ralph)  │        │ (Ralph 2) │
+        │ QA every  │        │ Cross-    │
+        │ 10 min    │        │ validates │
+        └─────┬─────┘        └─────┬─────┘
+              │                    │
+              └────────┬───────────┘
+                       ▼
+        ┌──────────────────────────────┐
+        │    LOCAL MODELS (OpenClaw)    │
+        │    Mac Mini / Mac Studio     │
+        │                              │
+        │  Enricher  (Qwen 3.5)       │
+        │  Researcher (MiniMax 2.5)   │
+        │  Matcher   (Qwen 3.5)       │
+        │  Logger    (Qwen 3.5)       │
+        └──────────────────────────────┘
+```
+
+**Channel routing rule:** Is this team-actionable intelligence? → Houston. Is this operations/approvals/system? → Telegram. Is this not worth sending? → Log internally and skip.
+
+**See:** `MESSAGING-INTERFACE.md` for full Telegram bot spec and Houston integration details.
+
 ---
 
 ## 🏗️ SYSTEM ARCHITECTURE
 
-### Tier 1 — Chief of Staff (Strategic Brain)
+### Tier 1 — Chief of Staff / Houston (Strategic Brain + Proactive Advisor)
 **Agent:** Claude (Opus 4.6 via API)
-**Role:** Architect, quality controller, and decision-maker
+**Identity:** Houston — the team's AI team member
+**Role:** Architect, quality controller, decision-maker, and **proactive advisor**
 **Responsibilities:**
 - Reviews daily logs and markdown summaries from lower tiers
 - Refines agent instructions and workflows based on results
@@ -22,9 +90,13 @@ A tiered, self-improving AI organization that runs 24/7 — handling research, d
 - Approves outreach before it goes out (at least initially)
 - Rewrites agent `.md` memory/instruction files to improve performance
 - Acts as the self-improvement loop — sees what's working, changes what isn't
+- **Reverse prompting:** Proactively recommends opportunities, strategies, and workflow improvements
+- **CRM proposals:** Weekly suggestions for new CRM features based on patterns observed
+- **Dual-channel output:** Posts team intel to Houston (CRM Messaging) and ops updates to Telegram
 
 **Access:** Read + Write to IE CRM (trusted tier)
 **Cost model:** API, token-efficient — only invoked when worth it
+**Full spec:** `agent-templates/chief-of-staff.md`
 
 ---
 
@@ -62,12 +134,14 @@ A tiered, self-improving AI organization that runs 24/7 — handling research, d
 ## 🤖 AGENT ROSTER (Tier 3 — Local Models)
 
 ### Agent 1: "The Researcher" (MiniMax)
-**Primary job:** Constant internet intelligence gathering
+**Primary job:** Constant internet intelligence gathering + proactive opportunity discovery
 - Monitor commercial real estate news, Inland Empire market activity
 - Follow top CRE accounts on X, surface high-signal tweets
 - Scan for company growth signals (hiring, funding, expansion, relocation)
 - Read and parse AIR reports forwarded via email
 - Write findings to Sandbox DB with confidence score + timestamp
+- **Proactive (idle-cycle):** When no priority tasks, actively seek coverage gaps, stale contacts, emerging submarkets, competitor activity, lease expiry intel, and new data sources
+- **Full spec:** `agent-templates/researcher.md`
 
 ### Agent 2: "The Enricher" (Qwen)
 **Primary job:** Contact verification & database enrichment
@@ -326,6 +400,10 @@ Both models stay loaded. No swapping. All agents run in true parallel from day o
 - **Start narrow** — One workflow working perfectly beats ten half-baked ones
 - **Your process is your moat** — Teaching the system your contact research logic is not replicable by competitors
 - **Markdown is memory** — Back it up, protect it, it's the soul of your agents
+- **Reverse prompt everything** — The system should propose, not just execute. Ask it "what should we do?" more than telling it what to do
+- **One brain, two mouths** — Houston speaks to the team; Telegram speaks to David. Same intelligence, different audiences
+- **Idle cycles are gold** — When agents have nothing assigned, they should look for things nobody asked about. That's where competitive advantage lives
+- **The system should improve itself** — Not just agent instructions, but propose CRM features, workflow changes, and new data sources
 
 ---
 

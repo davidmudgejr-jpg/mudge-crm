@@ -408,8 +408,13 @@ app.post('/api/import/preview', async (req, res) => {
     // Load reference data for matching
     let properties = [], companies = [], contacts = [];
     if (matchProperties) {
-      const pRes = await pool.query('SELECT property_id, property_address, normalized_address, city, zip FROM properties');
-      properties = pRes.rows;
+      try {
+        const pRes = await pool.query('SELECT property_id, property_address, normalized_address, city, zip FROM properties');
+        properties = pRes.rows;
+      } catch {
+        const pRes = await pool.query('SELECT property_id, property_address, city, zip FROM properties');
+        properties = pRes.rows;
+      }
     }
     if (matchCompanies) {
       const cRes = await pool.query('SELECT company_id, company_name, city FROM companies');
@@ -510,34 +515,6 @@ app.post('/api/import/batch', async (req, res) => {
       return isNaN(n) ? null : n;
     }
 
-    // Load reference data for matching
-    // Determine which reference data we need to pre-load
-    const linkConfig = LINK_CONFIGS[target] || {};
-    const linkTypes = new Set(Object.values(linkConfig).map(c => c.type));
-
-    let properties = [], companies = [], contacts = [];
-    if (matchProperties || (doLinkRecords && linkTypes.has('property'))) {
-      const pRes = await pool.query('SELECT property_id, property_address, normalized_address, city, zip FROM properties');
-      properties = pRes.rows;
-    }
-    if (matchCompanies || (doLinkRecords && linkTypes.has('company'))) {
-      const cRes = await pool.query('SELECT company_id, company_name, city FROM companies');
-      companies = cRes.rows;
-    }
-    if (doLinkRecords && linkTypes.has('contact')) {
-      const ctRes = await pool.query('SELECT contact_id, full_name, email, email_2, email_3 FROM contacts');
-      contacts = ctRes.rows;
-    }
-    let deals = [];
-    if (doLinkRecords && linkTypes.has('deal')) {
-      const dRes = await pool.query('SELECT deal_id, deal_name FROM deals');
-      deals = dRes.rows;
-    }
-
-    // Track newly created records during this import (name → id) to reuse across rows
-    const createdContacts = new Map(); // lowercase name → contact_id
-    const createdCompanies = new Map(); // lowercase name → company_id
-
     // Link field configs per target table
     // { junction, col1 (source FK), col2 (linked FK), role (if junction has role col), type: 'contact'|'company'|'property', textCol (optional static text column) }
     const LINK_CONFIGS = {
@@ -549,7 +526,10 @@ app.post('/api/import/batch', async (req, res) => {
         _link_leasing_company:{ junction: 'property_companies', col1: 'property_id', col2: 'company_id', role: 'leasing', type: 'company', textCol: 'leasing_company' },
       },
       contacts: {
-        _link_company: { junction: 'contact_companies', col1: 'contact_id', col2: 'company_id', role: null, type: 'company', textCol: null },
+        _link_company:        { junction: 'contact_companies',  col1: 'contact_id', col2: 'company_id',  role: null,     type: 'company',  textCol: null },
+        _link_campaign:       { junction: 'campaign_contacts',  col1: 'contact_id', col2: 'campaign_id', role: null,     type: 'campaign', textCol: null },
+        _link_owner_property: { junction: 'property_contacts',  col1: 'contact_id', col2: 'property_id', role: 'owner',  type: 'property', textCol: null },
+        _link_broker_property:{ junction: 'property_contacts',  col1: 'contact_id', col2: 'property_id', role: 'broker', type: 'property', textCol: null },
       },
       companies: {
         _link_contact: { junction: 'contact_companies', col1: 'company_id', col2: 'contact_id', role: null, type: 'contact', textCol: null },
@@ -570,6 +550,45 @@ app.post('/api/import/batch', async (req, res) => {
       },
     };
     const LINK_FIELD_CONFIG = LINK_CONFIGS[target] || {};
+
+    // Load reference data for matching
+    const linkConfig = LINK_CONFIGS[target] || {};
+    const linkTypes = new Set(Object.values(linkConfig).map(c => c.type));
+
+    let properties = [], companies = [], contacts = [];
+    if (matchProperties || (doLinkRecords && linkTypes.has('property'))) {
+      try {
+        const pRes = await pool.query('SELECT property_id, property_address, normalized_address, city, zip FROM properties');
+        properties = pRes.rows;
+      } catch {
+        // Fallback if normalized_address column doesn't exist yet (migration 002)
+        const pRes = await pool.query('SELECT property_id, property_address, city, zip FROM properties');
+        properties = pRes.rows;
+      }
+    }
+    if (matchCompanies || (doLinkRecords && linkTypes.has('company'))) {
+      const cRes = await pool.query('SELECT company_id, company_name, city FROM companies');
+      companies = cRes.rows;
+    }
+    if (doLinkRecords && linkTypes.has('contact')) {
+      const ctRes = await pool.query('SELECT contact_id, full_name, email, email_2, email_3 FROM contacts');
+      contacts = ctRes.rows;
+    }
+    let deals = [];
+    if (doLinkRecords && linkTypes.has('deal')) {
+      const dRes = await pool.query('SELECT deal_id, deal_name FROM deals');
+      deals = dRes.rows;
+    }
+    let campaigns = [];
+    if (doLinkRecords && linkTypes.has('campaign')) {
+      const campRes = await pool.query('SELECT campaign_id, name FROM campaigns');
+      campaigns = campRes.rows;
+    }
+
+    // Track newly created records during this import (name → id) to reuse across rows
+    const createdContacts = new Map(); // lowercase name → contact_id
+    const createdCompanies = new Map(); // lowercase name → company_id
+    const createdCampaigns = new Map(); // lowercase name → campaign_id
 
     let inserted = 0, skipped = 0, updated = 0, errors = 0, linked = 0;
     const flaggedRows = [];
@@ -726,6 +745,26 @@ app.post('/api/import/batch', async (req, res) => {
                   const found = deals.find(d => d.deal_name && d.deal_name.toLowerCase() === nameLower);
                   if (found) linkedId = found.deal_id;
                   // Don't auto-create deals — need deal type, status, etc.
+                } else if (config.type === 'campaign') {
+                  // Find or create campaign by name
+                  if (createdCampaigns.has(nameLower)) {
+                    linkedId = createdCampaigns.get(nameLower);
+                  } else {
+                    const found = campaigns.find(c => c.name && c.name.toLowerCase() === nameLower);
+                    if (found) {
+                      linkedId = found.campaign_id;
+                    } else {
+                      // Auto-create new campaign with just a name
+                      const newId = crypto.randomUUID();
+                      await client.query(
+                        'INSERT INTO campaigns (campaign_id, name) VALUES ($1, $2)',
+                        [newId, singleName]
+                      );
+                      linkedId = newId;
+                      campaigns.push({ campaign_id: newId, name: singleName });
+                    }
+                    createdCampaigns.set(nameLower, linkedId);
+                  }
                 }
 
                 // Create the junction table link

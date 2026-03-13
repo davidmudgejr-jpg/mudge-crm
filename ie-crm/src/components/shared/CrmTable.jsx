@@ -385,7 +385,7 @@ export default function CrmTable({
 
   return (
     <div className="relative w-full h-full overflow-auto">
-      <table className="w-full text-sm border-collapse" style={{ minWidth: 'max-content' }}>
+      <table className="text-sm border-collapse" style={{ tableLayout: 'fixed', minWidth: 'max-content' }}>
         <thead className="sticky top-0 bg-crm-sidebar z-10">
           <tr className="border-b border-crm-border">
             {/* Checkbox column */}
@@ -413,6 +413,8 @@ export default function CrmTable({
                 } ${dragOverCol === col.key && dragCol !== col.key ? 'bg-crm-accent/10' : ''}`}
                 style={{
                   width: widths[col.key] || col.defaultWidth || 150,
+                  minWidth: widths[col.key] || col.defaultWidth || 150,
+                  maxWidth: widths[col.key] || col.defaultWidth || 150,
                   overflow: 'visible',
                   ...(dragOverCol === col.key && dragCol !== col.key
                     ? { boxShadow: 'inset 3px 0 0 0 #818cf8' }
@@ -437,7 +439,12 @@ export default function CrmTable({
               <th
                 key={col.key}
                 className="group relative px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider select-none"
-                style={{ width: widths[col.key] || col.defaultWidth || 150, overflow: 'visible' }}
+                style={{
+                  width: widths[col.key] || col.defaultWidth || 150,
+                  minWidth: widths[col.key] || col.defaultWidth || 150,
+                  maxWidth: widths[col.key] || col.defaultWidth || 150,
+                  overflow: 'visible',
+                }}
               >
                 <ColumnHeader
                   col={col}
@@ -514,8 +521,12 @@ export default function CrmTable({
                   return (
                     <td
                       key={col.key}
-                      className={`px-3 py-3.5${isEditable && !isEditing ? ' cursor-cell' : ''}`}
-                      style={{ width: widths[col.key] || col.defaultWidth || 150 }}
+                      className={`px-3 py-3.5 overflow-hidden text-ellipsis whitespace-nowrap${isEditable && !isEditing ? ' cursor-cell' : ''}`}
+                      style={{
+                        width: widths[col.key] || col.defaultWidth || 150,
+                        minWidth: widths[col.key] || col.defaultWidth || 150,
+                        maxWidth: widths[col.key] || col.defaultWidth || 150,
+                      }}
                       onClick={isEditable ? (e) => {
                         e.stopPropagation();
                         if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
@@ -550,8 +561,12 @@ export default function CrmTable({
                   return (
                     <td
                       key={col.key}
-                      className="px-3 py-3.5"
-                      style={{ width: widths[col.key] || col.defaultWidth || 150 }}
+                      className="px-3 py-3.5 overflow-hidden text-ellipsis whitespace-nowrap"
+                      style={{
+                        width: widths[col.key] || col.defaultWidth || 150,
+                        minWidth: widths[col.key] || col.defaultWidth || 150,
+                        maxWidth: widths[col.key] || col.defaultWidth || 150,
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });

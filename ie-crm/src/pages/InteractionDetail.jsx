@@ -3,7 +3,7 @@ import {
   getInteraction, updateInteraction,
   getInteractionContacts, getInteractionProperties, getInteractionDeals,
 } from '../api/database';
-import TYPE_ICONS, { INTERACTION_TYPES, EMAIL_TYPES } from '../config/typeIcons';
+import TYPE_ICONS, { INTERACTION_TYPES, EMAIL_TYPES, getTypeInfo } from '../config/typeIcons';
 import Section from '../components/shared/Section';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import { SlideOverHeader } from '../components/shared/SlideOver';
@@ -109,7 +109,7 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
     );
   }
 
-  const typeInfo = TYPE_ICONS[interaction.type] || TYPE_ICONS.Other;
+  const typeInfo = getTypeInfo(interaction.type);
 
   const content = (
     <>
@@ -121,14 +121,14 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d={typeInfo.icon} />
               </svg>
             </span>
-            {interaction.type || 'Interaction'}
+            {typeInfo.displayName || 'Interaction'}
           </span>
         }
         subtitle={`${formatDate(interaction.date) || ''}${formatTime(interaction.date) ? ` at ${formatTime(interaction.date)}` : ''}`}
         onClose={onClose}
       />
 
-      {EMAIL_TYPES.includes(interaction.type) && (
+      {EMAIL_TYPES.some(t => t.toLowerCase() === (interaction.type || '').toLowerCase()) && (
         <Section title="Email">
           <InlineField label="Subject" value={interaction.email_heading} field="email_heading" onSave={saveField} />
           <InlineField label="Body" value={interaction.email_body} field="email_body" type="textarea" onSave={saveField} placeholder="No email body" />

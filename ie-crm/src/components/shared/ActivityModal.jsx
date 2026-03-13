@@ -4,7 +4,7 @@ import {
   getContactInteractions, getPropertyInteractions, getDealInteractions, getCompanyInteractions,
   getDealAggregatedInteractions,
 } from '../../api/database';
-import TYPE_ICONS from '../../config/typeIcons';
+import { getTypeInfo } from '../../config/typeIcons';
 import { todayPacific, formatDateCompact } from '../../utils/timezone';
 import InteractionDetail from '../../pages/InteractionDetail';
 
@@ -147,7 +147,7 @@ export default function ActivityModal({ entityType, entityId, entityLabel, onClo
             ) : (
               <div className="space-y-0.5">
                 {interactions.map((int) => {
-                  const typeInfo = TYPE_ICONS[int.type] || TYPE_ICONS.Other;
+                  const typeInfo = getTypeInfo(int.type);
                   return (
                     <button
                       key={int.interaction_id}
@@ -161,11 +161,9 @@ export default function ActivityModal({ entityType, entityId, entityLabel, onClo
                       </div>
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-medium">
-                          {int.type === 'Note' && int.notes
-                            ? (() => { const clean = int.notes.split(/\n\n---\s/)[0].trim(); return clean.length > 80 ? clean.slice(0, 80) + '...' : clean; })()
-                            : <>{int.type}{int.email_heading ? ` — ${int.email_heading}` : (int.subject ? ` — ${int.subject}` : '')}</>}
+                          {typeInfo.displayName}{int.email_heading ? ` — ${int.email_heading}` : (int.subject ? ` — ${int.subject}` : '')}
                         </div>
-                        {int.type !== 'Note' && int.notes && (
+                        {int.notes && (
                           <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes.split(/\n\n---\s/)[0].trim()}</div>
                         )}
                         <div className="flex items-center gap-2 mt-0.5">

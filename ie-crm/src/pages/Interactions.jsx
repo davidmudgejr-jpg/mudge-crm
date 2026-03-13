@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { getInteractions } from '../api/database';
-import TYPE_ICONS, { INTERACTION_TYPES } from '../config/typeIcons';
+import TYPE_ICONS, { INTERACTION_TYPES, getTypeInfo } from '../config/typeIcons';
 import InteractionDetail, { formatDate, formatTime } from './InteractionDetail';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
 import { useToast } from '../components/shared/Toast';
@@ -130,7 +130,7 @@ export default function Interactions({ onCountChange }) {
               <div className="absolute left-[15px] top-2 bottom-2 w-px bg-crm-border" />
               <div className="space-y-1">
                 {rows.map((row) => {
-                  const typeInfo = TYPE_ICONS[row.type] || TYPE_ICONS.Other;
+                  const typeInfo = getTypeInfo(row.type);
                   const todayStr = todayPacific();
                   const hasFollowUp = row.follow_up && row.follow_up.slice(0, 10) >= todayStr;
                   const isOverdue = row.follow_up && row.follow_up.slice(0, 10) < todayStr;
@@ -151,7 +151,7 @@ export default function Interactions({ onCountChange }) {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-0.5">
                             <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded ${typeInfo.color}`}>
-                              {row.type || 'Other'}
+                              {typeInfo.displayName || 'Other'}
                             </span>
                             {row.team_member && (
                               <span className="text-[10px] text-crm-muted">by {row.team_member}</span>

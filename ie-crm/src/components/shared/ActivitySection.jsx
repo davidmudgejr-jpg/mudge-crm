@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Section from './Section';
-import TYPE_ICONS from '../../config/typeIcons';
+import { getTypeInfo } from '../../config/typeIcons';
 import { formatDateCompact } from '../../utils/timezone';
 
 const INITIAL_SHOW = 5;
@@ -27,7 +27,7 @@ export default function ActivitySection({ interactions, onNewInteraction, onSele
       ) : (
         <div className="space-y-1">
           {shown.map((int) => {
-            const typeInfo = TYPE_ICONS[int.type] || TYPE_ICONS.Other;
+            const typeInfo = getTypeInfo(int.type);
             return (
               <button
                 key={int.interaction_id}
@@ -41,11 +41,9 @@ export default function ActivitySection({ interactions, onNewInteraction, onSele
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium">
-                    {int.type === 'Note' && int.notes
-                      ? (() => { const clean = int.notes.split(/\n\n---\s/)[0].trim(); return clean.length > 60 ? clean.slice(0, 60) + '...' : clean; })()
-                      : <>{int.type}{int.email_heading ? ` — ${int.email_heading}` : ''}</>}
+                    {typeInfo.displayName}{int.email_heading ? ` — ${int.email_heading}` : ''}
                   </div>
-                  {int.type !== 'Note' && int.notes && (
+                  {int.notes && (
                     <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes.split(/\n\n---\s/)[0].trim()}</div>
                   )}
                   <div className="text-[10px] text-crm-muted mt-0.5">{formatDateCompact(int.date) || ''}</div>

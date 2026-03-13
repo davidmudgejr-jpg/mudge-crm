@@ -85,7 +85,7 @@ const TYPE_ICONS = {
     color: 'text-blue-400 bg-blue-400/15',
   },
   Note: {
-    icon: 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z',
+    icon: 'M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z',
     color: 'text-yellow-400 bg-yellow-400/15',
   },
   LinkedIn: {
@@ -97,6 +97,23 @@ const TYPE_ICONS = {
     color: 'text-gray-400 bg-gray-400/15',
   },
 };
+
+// Case-insensitive lookup map — handles DB data stored as "note", "phone call", etc.
+const TYPE_ICONS_LOWER = Object.fromEntries(
+  Object.entries(TYPE_ICONS).map(([k, v]) => [k.toLowerCase(), { ...v, displayName: k }])
+);
+
+/**
+ * Case-insensitive type lookup. Returns { icon, color, displayName }.
+ * displayName is the canonical Title Case form (e.g. "Note", "Phone Call").
+ */
+export function getTypeInfo(type) {
+  if (!type) return { ...TYPE_ICONS.Other, displayName: 'Other' };
+  if (TYPE_ICONS[type]) return { ...TYPE_ICONS[type], displayName: type };
+  const lower = type.toLowerCase();
+  if (TYPE_ICONS_LOWER[lower]) return TYPE_ICONS_LOWER[lower];
+  return { ...TYPE_ICONS.Other, displayName: type };
+}
 
 // The 17 active interaction types (used in dropdowns/filters)
 export const INTERACTION_TYPES = [

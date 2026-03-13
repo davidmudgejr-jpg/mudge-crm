@@ -22,6 +22,19 @@ export function useColumnResize(tableKey, columns) {
     return defaults;
   });
 
+  // Ensure any new columns that appear after initial load get default widths
+  useEffect(() => {
+    let needsUpdate = false;
+    const patch = {};
+    columns.forEach((col) => {
+      if (widths[col.key] === undefined) {
+        patch[col.key] = col.defaultWidth || 150;
+        needsUpdate = true;
+      }
+    });
+    if (needsUpdate) setWidths((prev) => ({ ...prev, ...patch }));
+  }, [columns]);
+
   const dragRef = useRef(null);
 
   // Persist to localStorage on change

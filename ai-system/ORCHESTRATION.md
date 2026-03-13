@@ -796,5 +796,104 @@ David isn't sitting at the Mac Mini. He's on his laptop or phone. The Agent Dash
 
 ---
 
+## Fleet Split Strategy (Mac Mini + Mac Studio)
+
+When the Mac Studio arrives, the fleet should be split across both machines for maximum performance. Each machine has a clear role.
+
+### Phase 1: Mac Mini Only (Day One — Weeks 1-8+)
+
+```
+Mac Mini (48GB M4 Pro)
+├── Ollama serving: Qwen 3.5 (20B) + MiniMax 2.5
+├── OpenClaw: Enricher (Qwen)
+├── OpenClaw: Researcher (MiniMax)
+├── OpenClaw: Matcher (Qwen)
+├── OpenClaw: Logger (Qwen)
+└── Supervisor process
+```
+
+All 4 agents, both models, one machine. Both models stay loaded in memory simultaneously. No swapping needed — 48GB handles this comfortably with ~24GB headroom.
+
+### Phase 2: Mac Studio Arrives — Recommended Split
+
+**Strategy: Studio = Precision, Mini = Volume**
+
+The Mac Studio's 128GB and 40-core GPU unlocks dramatically smarter models. Use that horsepower where accuracy matters most — contact verification and outreach matching. The Mac Mini handles volume work where speed matters more than raw intelligence.
+
+```
+Mac Studio (128GB M4 Max) — "The Precision Machine"
+├── Ollama serving: Qwen 72B (~45GB) — dramatically smarter than 20B
+├── OpenClaw: Enricher (Qwen 72B) — contact verification needs highest accuracy
+├── OpenClaw: Matcher (Qwen 72B) — outreach matching needs nuance and judgment
+├── Supervisor instance (primary)
+└── Headroom: ~70GB free — room for experimentation, larger models, parallel instances
+
+Mac Mini (48GB M4 Pro) — "The Volume Machine"
+├── Ollama serving: MiniMax 2.5 + Qwen 3.5 (20B)
+├── OpenClaw: Researcher (MiniMax 2.5) — volume scanning, speed over precision
+├── OpenClaw: Logger (Qwen 3.5 20B) — lightweight, doesn't need 72B intelligence
+├── Supervisor instance (secondary — reports to primary)
+└── Headroom: ~24GB — can add more Researcher instances for parallel scanning
+```
+
+### Why This Split
+
+| Factor | Mac Studio | Mac Mini |
+|--------|-----------|----------|
+| **Model size** | Qwen 72B (~45GB) — 3.6x more parameters = dramatically better reasoning | Qwen 20B + MiniMax 2.5 — good enough for scanning and logging |
+| **GPU cores** | 40 — faster inference on large models | 16 — fine for smaller models |
+| **Memory bandwidth** | ~546 GB/s — fast token generation even on 72B | ~273 GB/s — half the speed |
+| **Critical tasks** | Enrichment (accuracy = money) + Matching (judgment = deal quality) | Research (volume = coverage) + Logging (lightweight) |
+| **Inference speed** | Qwen 72B at ~15-25 tok/s (still fast enough for enrichment) | MiniMax at ~40-60 tok/s (speed matters for scanning) |
+
+### Cross-Machine Communication
+
+Both machines talk to the same backend:
+
+```
+Mac Studio ──┐
+             ├──→ Neon Postgres (IE CRM database)
+Mac Mini  ───┘    Railway (IE CRM API)
+                  Priority Board (same table)
+                  Sandbox DB (same tables)
+```
+
+Agents don't need to know which machine the other agents are on. They communicate through the Priority Board — same as before. The Researcher (Mini) posts a priority, the Enricher (Studio) picks it up. No direct machine-to-machine communication needed.
+
+### Alternative Splits (For Different Needs)
+
+**If you want maximum enrichment throughput:**
+```
+Mac Studio: 2x Enricher instances (both using Qwen 72B) — double the contact verification speed
+Mac Mini: Researcher + Matcher + Logger
+```
+
+**If you want to experiment with new models:**
+```
+Mac Studio: Enricher + Matcher (production — Qwen 72B)
+Mac Mini: Researcher + Logger (production — MiniMax + Qwen 20B)
+           + Experimental model testing (use the 24GB headroom)
+```
+
+**If one machine goes down:**
+Either machine can run the full fleet solo at reduced performance. The supervisor detects the outage and can redistribute agents. Mac Mini becomes the fallback for everything — models are smaller but the fleet stays alive.
+
+### Migration Procedure (Mini → Studio Split)
+
+```
+1. Set up Mac Studio (same setup script as Mac Mini)
+2. Pull Qwen 72B on Mac Studio via Ollama (this is a large download — plan ahead)
+3. Test: run Enricher on Studio pointing at Qwen 72B, verify output quality
+4. Compare: is Qwen 72B producing better enrichment than Qwen 20B?
+5. If yes: migrate Enricher + Matcher to Studio permanently
+6. Update supervisor-config.json on both machines
+7. Mac Mini supervisor switches to "secondary" mode
+8. Monitor for 48 hours — verify cross-machine Priority Board works
+9. Done — fleet is split
+```
+
+---
+
 *Created: March 2026*
+*Updated: March 2026 — Added fleet split strategy for Mac Mini + Mac Studio*
 *For: IE CRM AI Master System — Process Management & Orchestration*

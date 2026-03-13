@@ -282,8 +282,16 @@ const COLUMN_MAPS = {
     'exit trigger events': 'exit_trigger_events', exit_trigger_events: 'exit_trigger_events',
     'airtable id': 'airtable_id', airtable_id: 'airtable_id',
     overflow: 'overflow',
-    // Auto-link fields (find-or-create company and create junction link)
+    // Auto-link fields (find-or-create and create junction link)
     '_link_company': '_link_company',
+    '_link_campaign': '_link_campaign',
+    '_link_owner_property': '_link_owner_property',
+    '_link_broker_property': '_link_broker_property',
+    // Auto-detect common CSV headers for campaign linking
+    campaigns: '_link_campaign', campaign: '_link_campaign', 'campaign name': '_link_campaign',
+    // Auto-detect common CSV headers for property linking
+    'owner properties': '_link_owner_property', 'owner property': '_link_owner_property',
+    'broker property': '_link_broker_property', 'broker properties': '_link_broker_property',
     // Notes → Activity (split notes into interaction records)
     '_notes_to_activity': '_notes_to_activity',
   },
@@ -1002,6 +1010,9 @@ export default function Import() {
                               { value: '_link_leasing_company', label: 'Leasing Company → link' },
                             ] : selectedTarget === 'contacts' ? [
                               { value: '_link_company', label: 'Company → link' },
+                              { value: '_link_campaign', label: 'Campaign → link' },
+                              { value: '_link_owner_property', label: 'Property (owner) → link' },
+                              { value: '_link_broker_property', label: 'Property (broker) → link' },
                               { value: '_notes_to_activity', label: 'Notes → Activity' },
                             ] : selectedTarget === 'companies' ? [
                               { value: '_link_contact', label: 'Contact → link' },
