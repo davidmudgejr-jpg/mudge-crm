@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import Section from './Section';
+import { useSlideOver } from './SlideOverContext';
 import { getTypeInfo } from '../../config/typeIcons';
 import { formatDateCompact } from '../../utils/timezone';
 
 const INITIAL_SHOW = 5;
 
 export default function ActivitySection({ interactions, onNewInteraction, onSelectInteraction }) {
+  const { open: openSlideOver } = useSlideOver();
   const [expanded, setExpanded] = useState(false);
 
   const shown = expanded ? interactions : interactions.slice(0, INITIAL_SHOW);
@@ -31,7 +33,10 @@ export default function ActivitySection({ interactions, onNewInteraction, onSele
             return (
               <button
                 key={int.interaction_id}
-                onClick={() => onSelectInteraction?.(int.interaction_id)}
+                onClick={() => {
+                  if (onSelectInteraction) onSelectInteraction(int.interaction_id);
+                  else openSlideOver('interaction', int.interaction_id);
+                }}
                 className="w-full flex gap-3 px-2 py-1.5 -mx-2 rounded-lg hover:bg-crm-card/60 transition-colors cursor-pointer text-left"
               >
                 <div className={`w-[18px] h-[18px] rounded-full flex items-center justify-center flex-shrink-0 mt-0.5 ${typeInfo.color}`}>
