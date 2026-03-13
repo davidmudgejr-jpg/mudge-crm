@@ -13,6 +13,7 @@ import QuickAddModal from '../components/shared/QuickAddModal';
 import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
+import { bulkOps } from '../api/bridge';
 
 const CONTACTED_OPTIONS = [
   'Contacted Owner', 'Not Contacted', 'Broker/Not worth it',
@@ -239,6 +240,20 @@ export default function Properties({ onCountChange }) {
     }
   };
 
+  const handleBulkDelete = useCallback(async () => {
+    if (selected.size === 0) return;
+    const count = selected.size;
+    if (!window.confirm(`Delete ${count} selected ${count === 1 ? 'property' : 'properties'}? This cannot be undone.`)) return;
+    try {
+      const { deleted } = await bulkOps.delete('properties', [...selected]);
+      addToast(`Deleted ${deleted} ${deleted === 1 ? 'property' : 'properties'}`, 'success');
+      setSelected(new Set());
+      fetchData();
+    } catch (err) {
+      addToast(`Delete failed: ${err.message}`, 'error');
+    }
+  }, [selected, fetchData, addToast]);
+
   const handleCellSave = useCallback(async (rowId, field, value) => {
     let oldValue;
     setRows((prev) => prev.map((r) => {
@@ -269,9 +284,17 @@ export default function Properties({ onCountChange }) {
           </div>
           <div className="flex items-center gap-2">
             {selected.size > 0 && (
-              <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">
-                {selected.size} selected
-              </span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">
+                  {selected.size} selected
+                </span>
+                <button
+                  onClick={handleBulkDelete}
+                  className="text-xs bg-red-600/80 hover:bg-red-600 text-white font-medium px-2 py-1 rounded transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
             )}
             <button
               onClick={() => setShowQuickAdd(true)}

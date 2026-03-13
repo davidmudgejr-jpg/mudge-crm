@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-09
-> Previous session: "Full system test protocol (all phases) — all features verified, bugs found & documented"
-> Next task: **Fix bugs → TPE readiness gaps → TPE SQL VIEW** — (1) fix duplicate column labels in Properties.jsx ALL_COLUMNS, (2) migration for missing TPE tables/columns, (3) build `property_tpe_scores` VIEW
+> Updated: 2026-03-12
+> Previous session: "Import engine hardening + auto-linking + bulk delete + column resize UX"
+> Next task: **Upload real Airtable data & run full test protocol** — verify imports, auto-linking, notes-to-activity, bulk delete, then fix any bugs found
 
 ---
 
@@ -76,9 +76,10 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] Full spec documented (5 models, all weights, tpe_config table)
 - [x] Supporting tables created (loan_maturities, property_distress, tenant_growth)
 - [ ] **Missing DB tables**: `debt_stress`, `tpe_config` not yet created
-- [ ] **Missing properties columns**: `owner_entity_type`, `owner_age_est`, `has_lien_or_delinquency`, `owner_call_status`, `tenant_call_status` (note: `holding_period_years` exists but spec calls it `hold_duration_years`)
+- [ ] **Missing properties columns**: `owner_entity_type`, `owner_age_est`, `has_lien_or_delinquency`, `owner_call_status`, `tenant_call_status` (note: `holding_period_years` exists but spec calls it `hold_duration_years`), `costar_star_rating` (INTEGER 1–5, see docs/COSTAR-STAR-RATINGS.md)
 - [ ] SQL VIEW `property_tpe_scores` not built (only `deal_formulas` view exists in DB)
 - [ ] TPE UI not built
+- [ ] **CoStar Star Rating integration** — `costar_star_rating` (1–5) is a nationally standardized building quality metric that supplements the broker-reported `building_class` (A/B/C). Can serve as Age Score modifier in TPE and flag class/quality divergences. Full reference: `docs/COSTAR-STAR-RATINGS.md`
 
 ### Phase 1F — Interaction Types ✅
 - [x] Expanded from 7 to 17 types (commit `e34ce30`)
@@ -86,6 +87,24 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 ### Phase 1G — CSV Import Engine ✅
 - [x] Address normalizer, composite matcher, batch INSERT (commit `fc6afe3`)
 - [x] Dedicated Import tab in sidebar
+- [x] **Array column fix** — PostgreSQL `text[]` columns (tags, contacted, etc.) now properly convert CSV strings to JS arrays via `ARRAY_COLS` set in server batch endpoint
+- [x] **SAVEPOINT per row** — one failed row no longer aborts entire transaction; uses `SAVEPOINT row_N` / `ROLLBACK TO SAVEPOINT` pattern
+- [x] **Auto-link for ALL entity types** — `_link_*` fields on properties, contacts, companies, deals, campaigns, interactions. Find-or-create contacts/companies/deals + junction table INSERT with correct role
+- [x] **Multi-value link handling** — comma-separated Airtable linked records (e.g. "Mike Thompson,Mark Sorenson") split and linked individually
+- [x] **Notes-to-Activity import** — `_notes_to_activity` mapping parses dated text entries into individual interaction records linked via junction tables. Handles M/D/YY, M/D/YYYY, M.D.YY, M-D-YY, Month YYYY date formats
+- [x] **Cyan color-coding for link fields** — `_link_*` and `_notes_to_activity` fields display as cyan in import mapper UI; matching fields as amber; regular fields as green
+- [x] **Holding period formula column** — `holding_period_years` created as formula column (`ROUND(EXTRACT(EPOCH FROM AGE(NOW(), last_sale_date)) / 31557600, 1)`) instead of static import
+
+### Bulk Delete ✅
+- [x] **`POST /api/bulk-delete` endpoint** — parameterized `DELETE FROM table WHERE id = ANY($1::uuid[])` with table validation
+- [x] **`bulkOps.delete()` in bridge.js** — frontend API function
+- [x] **Delete button on all list pages** — Properties, Contacts, Companies, Deals, Campaigns, Comps (with activeTab awareness for lease_comps vs sale_comps)
+- [x] **Confirmation dialog** before delete, toast notification on success/failure
+
+### CrmTable UX ✅
+- [x] **Column resize handle repositioned** — moved to `right: -9px` with 18px hit zone, separated from ••• menu button
+- [x] **••• menu button moved inline** — sits right after column label text instead of far-right, leaving entire right edge for resize handle
+- [x] **3-dot icon fixed** — was only rendering 2 dots (broken SVG path); replaced with explicit `<circle>` elements
 
 ### Step 16 UI Polish ✅
 - [x] Contacted → multi-select with full CRE status options
@@ -170,6 +189,7 @@ property_address, property_name, year_built, features, zoning, last_sale_date, l
 | Building Image Path | `building_image_path` | TEXT | Phase 1: placeholder. Phase 2: Costar PDF extraction |
 | Latitude | `latitude` | NUMERIC | For distance-based comp queries, pullable from CoStar |
 | Longitude | `longitude` | NUMERIC | For distance-based comp queries, pullable from CoStar |
+| CoStar Star Rating | `costar_star_rating` | INTEGER | 1–5 nationally standardized quality score from CoStar. Supplements broker-reported building_class (A/B/C). See `docs/COSTAR-STAR-RATINGS.md` for full rationale and TPE integration plan. Add during TPE migration. |
 
 **Column Aliases (not new columns — just mappings):**
 - `building_sqft` in ALL_COLUMNS → maps to `rba` in schema (same thing, Costar calls it RBA)

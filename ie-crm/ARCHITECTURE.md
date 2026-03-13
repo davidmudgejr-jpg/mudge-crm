@@ -85,6 +85,8 @@ Neon PostgreSQL — connected and working. Migrated March 2026.
 
 **TPE:** office_courtesy (Lee & Associates flag)
 
+**Quality Metrics:** building_class (A/B/C — broker-reported, market-relative), costar_star_rating (1–5 — nationally standardized, data-driven; see `docs/COSTAR-STAR-RATINGS.md`)
+
 **URLs:** costar_url, landvision_url, google_maps_url, zoning_map_url, listing_url
 
 **Indexes needed:** address, city, zip, county, type, owner_name, contacted, zoning, parcel_number, year_built
@@ -288,7 +290,7 @@ Live-computed Transaction Probability Engine scores for all properties.
 |---|---|---|---|
 | Lease Score | 30 | lease_comps nearest expiration | <=12mo=30, <=18mo=22, <=24mo=15, <=36mo=8 |
 | Ownership Score | 25 | properties (owner age, type, location) | Age tiers + out-of-area/user bonuses |
-| Age Score | 20 | properties.year_built | Same age tiers |
+| Age Score | 20 | properties.year_built (+ costar_star_rating modifier) | Same age tiers; star rating can adjust for renovations/condition — see docs/COSTAR-STAR-RATINGS.md |
 | Growth Score | 15 | tenant_growth.growth_rate | >=30%=15, >=20%=10, >=10%=5 |
 | Stress Score | 10 | property_distress + loan_maturities | NOD/Auction/REO flags |
 

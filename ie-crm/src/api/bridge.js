@@ -87,6 +87,11 @@ export const airtable = {
   },
 };
 
+// ── Bulk operations bridge ───────────────────────────────────
+export const bulkOps = {
+  delete: (table, ids) => httpPost('/api/bulk-delete', { table, ids }),
+};
+
 // ── Import bridge ────────────────────────────────────────────
 export const importApi = {
   detect: (headers) => httpPost('/api/import/detect', { headers }),

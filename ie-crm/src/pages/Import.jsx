@@ -1,6 +1,159 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { importApi } from '../api/bridge';
 import { useToast } from '../components/shared/Toast';
+
+// ============================================================
+// SEARCHABLE SELECT — filterable dropdown for column mapping
+// ============================================================
+function SearchableSelect({ value, onChange, options, linkOptions, matchOptions, placeholder = '-- Skip --' }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const ref = useRef(null);
+  const inputRef = useRef(null);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  // Build all items with group labels
+  const allItems = [];
+  // Regular fields
+  options.forEach(f => allItems.push({ value: f, label: f, group: 'fields' }));
+  // Matching-only
+  if (matchOptions) matchOptions.forEach(m => allItems.push({ ...m, group: 'matching' }));
+  // Auto-link
+  if (linkOptions) linkOptions.forEach(l => allItems.push({ ...l, group: 'linking' }));
+
+  const q = search.toLowerCase();
+  const filtered = q
+    ? allItems.filter(item => item.label.toLowerCase().includes(q) || item.value.toLowerCase().includes(q))
+    : allItems;
+
+  const selectedItem = value ? allItems.find(i => i.value === value) : null;
+  const selectedLabel = selectedItem?.label || value || null;
+  const selectedGroup = selectedItem?.group || (value?.startsWith('_link_') || value === '_notes_to_activity' ? 'linking' : value?.startsWith('_') ? 'matching' : 'fields');
+
+  const select = (val) => {
+    onChange(val);
+    setSearch('');
+    setOpen(false);
+  };
+
+  // Color-code the button based on field type
+  const btnColor = !value ? 'border-crm-border text-crm-muted'
+    : selectedGroup === 'linking' ? 'border-cyan-500/30 text-cyan-400 bg-cyan-500/5'
+    : selectedGroup === 'matching' ? 'border-amber-500/30 text-amber-400 bg-amber-500/5'
+    : 'border-green-500/30 text-green-400';
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => { setOpen(!open); setTimeout(() => inputRef.current?.focus(), 50); }}
+        className={`w-full text-left bg-transparent border rounded px-2 py-1 text-xs focus:outline-none truncate ${btnColor}`}
+      >
+        {selectedLabel || placeholder}
+      </button>
+
+      {open && (
+        <div className="absolute z-50 top-full left-0 mt-1 w-64 bg-crm-sidebar border border-crm-border rounded-lg shadow-xl overflow-hidden">
+          {/* Search input */}
+          <div className="p-1.5 border-b border-crm-border/50">
+            <input
+              ref={inputRef}
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search fields..."
+              className="w-full bg-crm-bg border border-crm-border rounded px-2 py-1 text-xs text-crm-text placeholder-crm-muted focus:outline-none focus:border-crm-accent"
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') { setOpen(false); setSearch(''); }
+                if (e.key === 'Enter' && filtered.length === 1) select(filtered[0].value);
+              }}
+            />
+          </div>
+
+          {/* Options list */}
+          <div className="max-h-52 overflow-y-auto">
+            {/* Skip option */}
+            {(!q || 'skip'.includes(q)) && (
+              <button
+                onClick={() => select('')}
+                className={`w-full text-left px-3 py-1.5 text-xs hover:bg-crm-hover transition-colors ${
+                  !value ? 'text-crm-accent' : 'text-crm-muted'
+                }`}
+              >
+                {placeholder}
+              </button>
+            )}
+
+            {/* Group: Regular fields */}
+            {filtered.filter(i => i.group === 'fields').length > 0 && (
+              <>
+                {q && <div className="px-3 py-1 text-[10px] text-crm-muted uppercase tracking-wider">Fields</div>}
+                {filtered.filter(i => i.group === 'fields').map(item => (
+                  <button
+                    key={item.value}
+                    onClick={() => select(item.value)}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-crm-hover transition-colors ${
+                      value === item.value ? 'text-green-400 bg-green-500/10' : 'text-crm-text'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </>
+            )}
+
+            {/* Group: Matching Only */}
+            {filtered.filter(i => i.group === 'matching').length > 0 && (
+              <>
+                <div className="px-3 py-1 text-[10px] text-amber-400/80 uppercase tracking-wider border-t border-crm-border/30 mt-1">Matching Only</div>
+                {filtered.filter(i => i.group === 'matching').map(item => (
+                  <button
+                    key={item.value}
+                    onClick={() => select(item.value)}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-crm-hover transition-colors ${
+                      value === item.value ? 'text-amber-400 bg-amber-500/10' : 'text-amber-400/70'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </>
+            )}
+
+            {/* Group: Auto-Link */}
+            {filtered.filter(i => i.group === 'linking').length > 0 && (
+              <>
+                <div className="px-3 py-1 text-[10px] text-cyan-400/80 uppercase tracking-wider border-t border-crm-border/30 mt-1">Auto-Link (find or create)</div>
+                {filtered.filter(i => i.group === 'linking').map(item => (
+                  <button
+                    key={item.value}
+                    onClick={() => select(item.value)}
+                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-crm-hover transition-colors ${
+                      value === item.value ? 'text-cyan-400 bg-cyan-500/10' : 'text-cyan-400/70'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </>
+            )}
+
+            {filtered.length === 0 && (
+              <div className="px-3 py-3 text-xs text-crm-muted text-center">No matches</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ============================================================
 // CSV PARSER (same as Comps.jsx but extracted)
@@ -96,8 +249,14 @@ const COLUMN_MAPS = {
     'phone 1': 'phone_1', phone: 'phone_1', 'phone number': 'phone_1', phone_1: 'phone_1',
     'phone 2': 'phone_2', phone_2: 'phone_2',
     'phone 3': 'phone_3', phone_3: 'phone_3',
+    'phone hot': 'phone_hot', phone_hot: 'phone_hot',
+    'email hot': 'email_hot', email_hot: 'email_hot',
+    'email kickback': 'email_kickback', email_kickback: 'email_kickback',
     'home address': 'home_address', home_address: 'home_address',
     'work address': 'work_address', work_address: 'work_address',
+    'work city': 'work_city', work_city: 'work_city',
+    'work state': 'work_state', work_state: 'work_state',
+    'work zip': 'work_zip', work_zip: 'work_zip',
     born: 'born', birthday: 'born', 'date of birth': 'born',
     age: 'age',
     notes: 'notes', linkedin: 'linkedin',
@@ -106,30 +265,151 @@ const COLUMN_MAPS = {
     tags: 'tags', 'data source': 'data_source', data_source: 'data_source',
     'client level': 'client_level', client_level: 'client_level',
     'active need': 'active_need', active_need: 'active_need',
+    // Prospect intelligence
+    'white pages url': 'white_pages_url', white_pages_url: 'white_pages_url',
+    'been verified url': 'been_verified_url', been_verified_url: 'been_verified_url',
+    'zoom info url': 'zoom_info_url', zoom_info_url: 'zoom_info_url',
+    'property type interest': 'property_type_interest', property_type_interest: 'property_type_interest',
+    'lease months left': 'lease_months_left', lease_months_left: 'lease_months_left',
+    'tenant space fit': 'tenant_space_fit', tenant_space_fit: 'tenant_space_fit',
+    'tenant ownership intent': 'tenant_ownership_intent', tenant_ownership_intent: 'tenant_ownership_intent',
+    'business trajectory': 'business_trajectory', business_trajectory: 'business_trajectory',
+    'last call outcome': 'last_call_outcome', last_call_outcome: 'last_call_outcome',
+    'follow up behavior': 'follow_up_behavior', follow_up_behavior: 'follow_up_behavior',
+    'decision authority': 'decision_authority', decision_authority: 'decision_authority',
+    'price cost awareness': 'price_cost_awareness', price_cost_awareness: 'price_cost_awareness',
+    'frustration signals': 'frustration_signals', frustration_signals: 'frustration_signals',
+    'exit trigger events': 'exit_trigger_events', exit_trigger_events: 'exit_trigger_events',
+    'airtable id': 'airtable_id', airtable_id: 'airtable_id',
+    overflow: 'overflow',
+    // Auto-link fields (find-or-create company and create junction link)
+    '_link_company': '_link_company',
+    // Notes → Activity (split notes into interaction records)
+    '_notes_to_activity': '_notes_to_activity',
   },
   properties: {
+    // Address & location
     address: 'property_address', 'property address': 'property_address', property_address: 'property_address', 'street address': 'property_address',
     'property name': 'property_name', property_name: 'property_name', 'building name': 'property_name',
     city: 'city', state: 'state', zip: 'zip', 'zip code': 'zip', county: 'county',
+    latitude: 'latitude', lat: 'latitude',
+    longitude: 'longitude', lng: 'longitude', lon: 'longitude',
+
+    // Size & physical
     rba: 'rba', 'building sf': 'rba', 'building sqft': 'rba', 'rentable building area': 'rba',
     'land sf': 'land_sf', land_sf: 'land_sf', 'land area sf': 'land_sf',
     'land area ac': 'land_area_ac', land_area_ac: 'land_area_ac', 'land acres': 'land_area_ac',
+    far: 'far', 'floor area ratio': 'far',
+    stories: 'stories', 'number of stories': 'stories', floors: 'stories',
+    units: 'units', 'number of units': 'units',
+    'parking spaces': 'parking_spaces', parking_spaces: 'parking_spaces',
+    'parking ratio': 'parking_ratio', parking_ratio: 'parking_ratio',
+
+    // Type & classification
     'property type': 'property_type', property_type: 'property_type', type: 'property_type',
     'building class': 'building_class', building_class: 'building_class', class: 'building_class',
+    'building status': 'building_status', building_status: 'building_status', status: 'building_status',
+    tenancy: 'tenancy', 'tenancy type': 'tenancy',
+    'lease type': 'lease_type', lease_type: 'lease_type',
+
+    // Construction details
     'year built': 'year_built', year_built: 'year_built',
-    'ceiling height': 'ceiling_ht', ceiling_ht: 'ceiling_ht', 'clear height': 'clear_ht',
+    'year renovated': 'year_renovated', year_renovated: 'year_renovated',
+    'ceiling height': 'ceiling_ht', ceiling_ht: 'ceiling_ht', 'ceiling ht': 'ceiling_ht',
+    'clear height': 'clear_ht', clear_ht: 'clear_ht', 'clear ht': 'clear_ht',
     'loading docks': 'number_of_loading_docks', number_of_loading_docks: 'number_of_loading_docks',
+    'drive ins': 'drive_ins', drive_ins: 'drive_ins', 'drive-ins': 'drive_ins',
+    'column spacing': 'column_spacing', column_spacing: 'column_spacing',
+    sprinklers: 'sprinklers', power: 'power',
+    'construction material': 'construction_material', construction_material: 'construction_material',
+    'number of cranes': 'number_of_cranes', number_of_cranes: 'number_of_cranes', cranes: 'number_of_cranes',
+    'rail lines': 'rail_lines', rail_lines: 'rail_lines', rail: 'rail_lines',
+    sewer: 'sewer', water: 'water', gas: 'gas', heating: 'heating',
     zoning: 'zoning', features: 'features',
+
+    // Financial
     'last sale date': 'last_sale_date', last_sale_date: 'last_sale_date',
     'last sale price': 'last_sale_price', last_sale_price: 'last_sale_price',
-    'owner name': 'owner_name', owner_name: 'owner_name', owner: 'owner_name',
+    'price psf': 'price_psf', price_psf: 'price_psf', 'price per sf': 'price_psf',
+    'price per sqft': 'price_per_sqft', price_per_sqft: 'price_per_sqft',
+    plsf: 'plsf', 'price land sf': 'plsf',
+    'loan amount': 'loan_amount', loan_amount: 'loan_amount',
+    'debt date': 'debt_date', debt_date: 'debt_date',
+    'holding period years': 'holding_period_years', holding_period_years: 'holding_period_years', 'holding period': 'holding_period_years',
+    'rent psf mo': 'rent_psf_mo', rent_psf_mo: 'rent_psf_mo', 'rent/sf/mo': 'rent_psf_mo', 'rent per sf': 'rent_psf_mo',
+    'cap rate': 'cap_rate', cap_rate: 'cap_rate',
+    'vacancy pct': 'vacancy_pct', vacancy_pct: 'vacancy_pct', vacancy: 'vacancy_pct', 'vacancy %': 'vacancy_pct',
     'percent leased': 'percent_leased', percent_leased: 'percent_leased', '% leased': 'percent_leased',
-    notes: 'notes', 'costar url': 'costar_url', costar_url: 'costar_url',
+    noi: 'noi', 'net operating income': 'noi',
+    'for sale price': 'for_sale_price', for_sale_price: 'for_sale_price', 'asking price': 'for_sale_price',
+    'ops expense psf': 'ops_expense_psf', ops_expense_psf: 'ops_expense_psf',
+    'building tax': 'building_tax', building_tax: 'building_tax',
+    'building opex': 'building_opex', building_opex: 'building_opex',
+    'avg weighted rent': 'avg_weighted_rent', avg_weighted_rent: 'avg_weighted_rent',
+
+    // Availability
+    'total available sf': 'total_available_sf', total_available_sf: 'total_available_sf',
+    'direct available sf': 'direct_available_sf', direct_available_sf: 'direct_available_sf',
+    'direct vacant space': 'direct_vacant_space', direct_vacant_space: 'direct_vacant_space',
+
+    // Owner info
+    'owner name': 'owner_name', owner_name: 'owner_name', owner: 'owner_name',
+    'owner phone': 'owner_phone', owner_phone: 'owner_phone',
+    'owner email': 'owner_email', owner_email: 'owner_email',
+    'owner address': 'owner_address', owner_address: 'owner_address',
+    'owner city state zip': 'owner_city_state_zip', owner_city_state_zip: 'owner_city_state_zip',
+    'owner mailing address': 'owner_mailing_address', owner_mailing_address: 'owner_mailing_address',
+    'recorded owner name': 'recorded_owner_name', recorded_owner_name: 'recorded_owner_name',
+    'true owner name': 'true_owner_name', true_owner_name: 'true_owner_name',
+    'owner type': 'owner_type', owner_type: 'owner_type',
+    'owner entity type': 'owner_entity_type', owner_entity_type: 'owner_entity_type',
+    'owner user or investor': 'owner_user_or_investor', owner_user_or_investor: 'owner_user_or_investor',
+    'out of area owner': 'out_of_area_owner', out_of_area_owner: 'out_of_area_owner',
+    'num properties owned': 'num_properties_owned', num_properties_owned: 'num_properties_owned', 'properties owned': 'num_properties_owned',
+    'owner call status': 'owner_call_status', owner_call_status: 'owner_call_status',
+    'tenant call status': 'tenant_call_status', tenant_call_status: 'tenant_call_status',
+    'has lien or delinquency': 'has_lien_or_delinquency', has_lien_or_delinquency: 'has_lien_or_delinquency',
+
+    // Status & flags
+    contacted: 'contacted', priority: 'priority',
+    'off market deal': 'off_market_deal', off_market_deal: 'off_market_deal', 'off market': 'off_market_deal',
+    target: 'target', 'target for': 'target_for', target_for: 'target_for',
+    'data confirmed': 'data_confirmed', data_confirmed: 'data_confirmed',
+    'office courtesy': 'office_courtesy', office_courtesy: 'office_courtesy',
+    tags: 'tags',
+
+    // Market / location context
+    'building park': 'building_park', building_park: 'building_park',
     'market name': 'market_name', market_name: 'market_name', market: 'market_name',
     'submarket name': 'submarket_name', submarket_name: 'submarket_name', submarket: 'submarket_name',
+    'submarket cluster': 'submarket_cluster', submarket_cluster: 'submarket_cluster',
+
+    // Reference / contacts
+    'leasing company': 'leasing_company', leasing_company: 'leasing_company',
+    'broker contact': 'broker_contact', broker_contact: 'broker_contact',
+    'owner contact': 'owner_contact', owner_contact: 'owner_contact',
+
+    // URLs & IDs
+    'costar url': 'costar_url', costar_url: 'costar_url',
+    'landvision url': 'landvision_url', landvision_url: 'landvision_url',
+    'sb county zoning': 'sb_county_zoning', sb_county_zoning: 'sb_county_zoning',
+    'google maps url': 'google_maps_url', google_maps_url: 'google_maps_url',
+    'zoning map url': 'zoning_map_url', zoning_map_url: 'zoning_map_url',
+    'listing url': 'listing_url', listing_url: 'listing_url',
+    'building image path': 'building_image_path', building_image_path: 'building_image_path',
     'parcel number': 'parcel_number', parcel_number: 'parcel_number', apn: 'parcel_number',
-    latitude: 'latitude', lat: 'latitude',
-    longitude: 'longitude', lng: 'longitude', lon: 'longitude',
+    'airtable id': 'airtable_id', airtable_id: 'airtable_id',
+
+    // Notes & misc
+    notes: 'notes',
+    overflow: 'overflow',
+
+    // Auto-link fields (find-or-create contact/company and create junction link with role)
+    '_link_owner_contact': '_link_owner_contact',
+    '_link_broker_contact': '_link_broker_contact',
+    '_link_company_owner': '_link_company_owner',
+    '_link_company_tenant': '_link_company_tenant',
+    '_link_leasing_company': '_link_leasing_company',
   },
   companies: {
     'company name': 'company_name', company_name: 'company_name', company: 'company_name', name: 'company_name',
@@ -142,24 +422,46 @@ const COLUMN_MAPS = {
     'company growth': 'company_growth', company_growth: 'company_growth', growth: 'company_growth',
     'company hq': 'company_hq', company_hq: 'company_hq', hq: 'company_hq', headquarters: 'company_hq',
     'lease exp': 'lease_exp', lease_exp: 'lease_exp', 'lease expiration': 'lease_exp',
+    'lease months left': 'lease_months_left', lease_months_left: 'lease_months_left',
     'move in date': 'move_in_date', move_in_date: 'move_in_date',
     city: 'city', notes: 'notes',
     'tenant sic': 'tenant_sic', tenant_sic: 'tenant_sic', sic: 'tenant_sic',
     'tenant naics': 'tenant_naics', tenant_naics: 'tenant_naics', naics: 'tenant_naics',
     suite: 'suite',
+    tags: 'tags',
+    'airtable id': 'airtable_id', airtable_id: 'airtable_id',
+    overflow: 'overflow',
+    // Auto-link fields (find-or-create contact and create junction link)
+    '_link_contact': '_link_contact',
   },
   deals: {
     'deal name': 'deal_name', deal_name: 'deal_name', name: 'deal_name', deal: 'deal_name',
     'deal type': 'deal_type', deal_type: 'deal_type', type: 'deal_type',
-    'deal source': 'deal_source', deal_source: 'deal_source',
+    'deal source': 'deal_source', deal_source: 'deal_source', source: 'deal_source',
     status: 'status', repping: 'repping',
     term: 'term', rate: 'rate', sf: 'sf',
     price: 'price', 'commission rate': 'commission_rate', commission_rate: 'commission_rate',
+    'gross fee potential': 'gross_fee_potential', gross_fee_potential: 'gross_fee_potential',
+    'net potential': 'net_potential', net_potential: 'net_potential',
     'close date': 'close_date', close_date: 'close_date',
+    'important date': 'important_date', important_date: 'important_date',
+    'deal dead reason': 'deal_dead_reason', deal_dead_reason: 'deal_dead_reason',
+    'fell through reason': 'fell_through_reason', fell_through_reason: 'fell_through_reason',
     notes: 'notes', 'priority deal': 'priority_deal', priority_deal: 'priority_deal',
     'run by': 'run_by', run_by: 'run_by',
     'other broker': 'other_broker', other_broker: 'other_broker',
     industry: 'industry', deadline: 'deadline',
+    increases: 'increases',
+    'escrow url': 'escrow_url', escrow_url: 'escrow_url',
+    'surveys brochures url': 'surveys_brochures_url', surveys_brochures_url: 'surveys_brochures_url',
+    'airtable id': 'airtable_id', airtable_id: 'airtable_id',
+    overflow: 'overflow',
+    // Auto-link fields (find-or-create contact/company/property and create junction link)
+    '_link_contact': '_link_contact',
+    '_link_company': '_link_company',
+    '_link_property': '_link_property',
+    // Notes → Activity (split notes into interaction records)
+    '_notes_to_activity': '_notes_to_activity',
   },
   loan_maturities: {
     lender: 'lender', 'loan amount': 'loan_amount', loan_amount: 'loan_amount',
@@ -205,6 +507,8 @@ const COLUMN_MAPS = {
     type: 'type', status: 'status', notes: 'notes',
     'sent date': 'sent_date', sent_date: 'sent_date',
     assignee: 'assignee', 'day time hits': 'day_time_hits', day_time_hits: 'day_time_hits',
+    // Auto-link fields
+    '_link_contact': '_link_contact',
   },
   interactions: {
     type: 'type', subject: 'subject', date: 'date',
@@ -216,6 +520,11 @@ const COLUMN_MAPS = {
     'team member': 'team_member', team_member: 'team_member',
     'email url': 'email_url', email_url: 'email_url',
     'email id': 'email_id', email_id: 'email_id',
+    // Auto-link fields
+    '_link_contact': '_link_contact',
+    '_link_company': '_link_company',
+    '_link_deal': '_link_deal',
+    '_link_property': '_link_property',
   },
 };
 
@@ -237,6 +546,8 @@ const TABLE_LABELS = {
 // Tables that need property matching
 const NEEDS_PROPERTY_MATCH = new Set(['lease_comps', 'sale_comps', 'loan_maturities', 'property_distress']);
 const NEEDS_COMPANY_MATCH = new Set(['lease_comps', 'tenant_growth']);
+// Tables that support auto-linking contacts/companies via _link_* fields
+const NEEDS_RECORD_LINKING = new Set(['properties', 'contacts', 'companies', 'deals', 'campaigns', 'interactions']);
 
 const NUMERIC_FIELDS = new Set([
   'sf', 'building_rba', 'rate', 'escalations', 'free_rent_months', 'ti_psf', 'term_months', 'cam_expenses', 'doors_with_lease',
@@ -443,11 +754,13 @@ export default function Import() {
     try {
       const needsPropertyMatch = NEEDS_PROPERTY_MATCH.has(selectedTarget);
       const needsCompanyMatch = NEEDS_COMPANY_MATCH.has(selectedTarget);
+      const needsRecordLinking = NEEDS_RECORD_LINKING.has(selectedTarget);
 
       // Remove matching-only fields before sending to batch endpoint
       const cleanRows = processedRows.map(row => {
         const clean = { ...row };
         // Keep property_address/city/zip for matching but they'll be stripped server-side
+        // Keep _link_* fields for auto-linking on the server
         return clean;
       });
 
@@ -455,12 +768,14 @@ export default function Import() {
         source: source || undefined,
         matchProperties: needsPropertyMatch,
         matchCompanies: needsCompanyMatch,
+        linkRecords: needsRecordLinking,
         onDuplicate: 'skip',
       });
 
       setImportResult(result);
       setStep(6);
-      addToast(`Imported ${result.inserted} records into ${TABLE_LABELS[selectedTarget]}`);
+      const linkMsg = result.linked ? ` (${result.linked} links created)` : '';
+      addToast(`Imported ${result.inserted} records into ${TABLE_LABELS[selectedTarget]}${linkMsg}`);
     } catch (err) {
       console.error('Import error:', err);
       addToast(`Import failed: ${err.message}`, 'error');
@@ -667,27 +982,44 @@ export default function Import() {
                         </svg>
                       </div>
                       <div className="px-3 py-1.5 border-b border-crm-border/50">
-                        <select
+                        <SearchableSelect
                           value={mapped || ''}
-                          onChange={(e) => updateMapping(idx, e.target.value)}
-                          className={`w-full bg-transparent border rounded px-2 py-1 text-xs focus:outline-none ${
-                            mapped ? 'border-green-500/30 text-green-400' :
-                            'border-crm-border text-crm-muted'
-                          }`}
-                        >
-                          <option value="">-- Skip --</option>
-                          {uniqueFields.map(f => (
-                            <option key={f} value={f}>{f}</option>
-                          ))}
-                          {/* Also include matching fields */}
-                          <optgroup label="Matching Only">
-                            <option value="_address">Address (for matching)</option>
-                            <option value="_city">City (for matching)</option>
-                            <option value="_state">State (for matching)</option>
-                            <option value="_zip">ZIP (for matching)</option>
-                            <option value="_company_name">Company (for matching)</option>
-                          </optgroup>
-                        </select>
+                          onChange={(val) => updateMapping(idx, val)}
+                          options={uniqueFields}
+                          matchOptions={[
+                            { value: '_address', label: 'Address (for matching)' },
+                            { value: '_city', label: 'City (for matching)' },
+                            { value: '_state', label: 'State (for matching)' },
+                            { value: '_zip', label: 'ZIP (for matching)' },
+                            { value: '_company_name', label: 'Company (for matching)' },
+                          ]}
+                          linkOptions={
+                            selectedTarget === 'properties' ? [
+                              { value: '_link_owner_contact', label: 'Owner Contact → link' },
+                              { value: '_link_broker_contact', label: 'Broker Contact → link' },
+                              { value: '_link_company_owner', label: 'Company Owner → link' },
+                              { value: '_link_company_tenant', label: 'Company Tenant → link' },
+                              { value: '_link_leasing_company', label: 'Leasing Company → link' },
+                            ] : selectedTarget === 'contacts' ? [
+                              { value: '_link_company', label: 'Company → link' },
+                              { value: '_notes_to_activity', label: 'Notes → Activity' },
+                            ] : selectedTarget === 'companies' ? [
+                              { value: '_link_contact', label: 'Contact → link' },
+                            ] : selectedTarget === 'deals' ? [
+                              { value: '_link_contact', label: 'Contact → link' },
+                              { value: '_link_company', label: 'Company → link' },
+                              { value: '_link_property', label: 'Property → link' },
+                              { value: '_notes_to_activity', label: 'Notes → Activity' },
+                            ] : selectedTarget === 'campaigns' ? [
+                              { value: '_link_contact', label: 'Contact → link' },
+                            ] : selectedTarget === 'interactions' ? [
+                              { value: '_link_contact', label: 'Contact → link' },
+                              { value: '_link_company', label: 'Company → link' },
+                              { value: '_link_deal', label: 'Deal → link' },
+                              { value: '_link_property', label: 'Property → link' },
+                            ] : null
+                          }
+                        />
                       </div>
                       <div className="px-3 py-2 border-b border-crm-border/50 text-crm-muted truncate max-w-[150px]" title={sampleVal}>
                         {sampleVal || '—'}
@@ -840,10 +1172,21 @@ export default function Import() {
                 <ResultStat label="Skipped" value={importResult.skipped} color="text-crm-muted" />
                 <ResultStat label="Updated" value={importResult.updated} color="text-blue-400" />
                 <ResultStat label="Flagged" value={importResult.flagged} color="text-amber-400" />
+                {importResult.linked > 0 && (
+                  <ResultStat label="Links Created" value={importResult.linked} color="text-cyan-400" />
+                )}
                 {importResult.errors > 0 && (
                   <ResultStat label="Errors" value={importResult.errors} color="text-red-400" />
                 )}
               </div>
+
+              {importResult.firstError && (
+                <div className="bg-red-500/10 rounded-lg p-3 mb-4 text-left">
+                  <p className="text-xs text-red-400 font-medium mb-1">First error detail:</p>
+                  <p className="text-[10px] text-crm-muted font-mono break-all">{importResult.firstError.message}</p>
+                  <p className="text-[10px] text-crm-muted mt-1">Columns: {importResult.firstError.columns?.join(', ')}</p>
+                </div>
+              )}
 
               {importResult.flaggedRows?.length > 0 && (
                 <div className="bg-amber-500/10 rounded-lg p-3 mb-4 text-left">

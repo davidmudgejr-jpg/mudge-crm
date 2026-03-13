@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { getCompanies, updateCompany } from '../api/database';
+import { bulkOps } from '../api/bridge';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
@@ -133,6 +134,20 @@ export default function Companies({ onCountChange }) {
     selected.size === rows.length ? setSelected(new Set()) : setSelected(new Set(rows.map((r) => r.company_id)));
   };
 
+  const handleBulkDelete = useCallback(async () => {
+    if (selected.size === 0) return;
+    const count = selected.size;
+    if (!window.confirm(`Delete ${count} selected ${count === 1 ? 'company' : 'companies'}? This cannot be undone.`)) return;
+    try {
+      const { deleted } = await bulkOps.delete('companies', [...selected]);
+      addToast(`Deleted ${deleted} ${deleted === 1 ? 'company' : 'companies'}`, 'success');
+      setSelected(new Set());
+      fetchData();
+    } catch (err) {
+      addToast(`Delete failed: ${err.message}`, 'error');
+    }
+  }, [selected, fetchData, addToast]);
+
   const handleCellSave = useCallback(async (rowId, field, value) => {
     let oldValue;
     setRows((prev) => prev.map((r) => {
@@ -160,7 +175,15 @@ export default function Companies({ onCountChange }) {
           </div>
           <div className="flex items-center gap-2">
             {selected.size > 0 && (
-              <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">{selected.size} selected</span>
+              <>
+                <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">{selected.size} selected</span>
+                <button
+                  onClick={handleBulkDelete}
+                  className="text-xs bg-red-600 hover:bg-red-700 text-white font-medium px-3 py-1.5 rounded-lg transition-colors"
+                >
+                  Delete {selected.size}
+                </button>
+              </>
             )}
             <button
               onClick={() => setShowQuickAdd(true)}

@@ -14,6 +14,7 @@ import LinkPickerModal from '../components/shared/LinkPickerModal';
 import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
+import { bulkOps } from '../api/bridge';
 
 const TYPE_COLORS = {
   Owner: 'bg-green-500/20 text-green-400',
@@ -184,6 +185,20 @@ export default function Contacts({ onCountChange }) {
     selected.size === rows.length ? setSelected(new Set()) : setSelected(new Set(rows.map((r) => r.contact_id)));
   };
 
+  const handleBulkDelete = useCallback(async () => {
+    if (selected.size === 0) return;
+    const count = selected.size;
+    if (!window.confirm(`Delete ${count} selected ${count === 1 ? 'contact' : 'contacts'}? This cannot be undone.`)) return;
+    try {
+      const { deleted } = await bulkOps.delete('contacts', [...selected]);
+      addToast(`Deleted ${deleted} ${deleted === 1 ? 'contact' : 'contacts'}`, 'success', 2000);
+      setSelected(new Set());
+      fetchData();
+    } catch (err) {
+      addToast(`Delete failed: ${err.message}`, 'error', 4000);
+    }
+  }, [selected, fetchData, addToast]);
+
   const handleCellSave = useCallback(async (rowId, field, value) => {
     let oldValue;
     setRows((prev) => prev.map((r) => {
@@ -227,7 +242,7 @@ export default function Contacts({ onCountChange }) {
           </div>
           <div className="flex items-center gap-2">
             {selected.size > 0 && (
-              <>
+              <div className="flex items-center gap-1.5">
                 <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">{selected.size} selected</span>
                 <button
                   onClick={() => setShowCampaignPicker(true)}
@@ -238,7 +253,13 @@ export default function Contacts({ onCountChange }) {
                   </svg>
                   Add to Campaign
                 </button>
-              </>
+                <button
+                  onClick={handleBulkDelete}
+                  className="text-xs bg-red-600/80 hover:bg-red-600 text-white font-medium px-2 py-1 rounded transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
             )}
             <button
               onClick={() => setShowQuickAdd(true)}

@@ -4,6 +4,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
 
@@ -252,30 +253,47 @@ const { matchProperty, matchCompany, matchContact, detectTable } = require('./ut
 // Column whitelist per table (matches database.js ALLOWED_COLS — import-safe subset, no IDs/timestamps)
 const IMPORT_COLS = {
   properties: new Set([
-    'property_address', 'property_name', 'city', 'county', 'state', 'zip',
-    'rba', 'land_area_ac', 'land_sf', 'far', 'property_type', 'building_class',
+    // Address & location
+    'property_address', 'property_name', 'city', 'county', 'state', 'zip', 'latitude', 'longitude',
+    // Size & physical
+    'rba', 'land_area_ac', 'land_sf', 'far', 'stories', 'units', 'parking_spaces', 'parking_ratio',
+    // Type & classification
+    'property_type', 'building_class', 'building_status', 'tenancy', 'lease_type',
+    // Construction
     'year_built', 'year_renovated', 'ceiling_ht', 'clear_ht', 'number_of_loading_docks', 'drive_ins',
-    'column_spacing', 'sprinklers', 'power', 'construction_material', 'zoning', 'features',
-    'last_sale_date', 'last_sale_price', 'plsf', 'loan_amount', 'debt_date',
-    'cap_rate', 'vacancy_pct', 'percent_leased', 'owner_name', 'contacted', 'notes',
-    'costar_url', 'off_market_deal', 'market_name', 'submarket_name', 'submarket_cluster',
-    'building_park', 'tenancy', 'parking_ratio', 'owner_type', 'owner_contact',
-    'building_tax', 'building_opex', 'leasing_company', 'broker_contact', 'for_sale_price',
-    'ops_expense_psf', 'sewer', 'water', 'gas', 'heating',
+    'column_spacing', 'sprinklers', 'power', 'construction_material', 'number_of_cranes', 'rail_lines',
+    'sewer', 'water', 'gas', 'heating', 'zoning', 'features',
+    // Financial
+    'last_sale_date', 'last_sale_price', 'price_psf', 'price_per_sqft', 'plsf',
+    'loan_amount', 'debt_date', 'holding_period_years', 'rent_psf_mo',
+    'cap_rate', 'vacancy_pct', 'percent_leased', 'noi', 'for_sale_price',
+    'ops_expense_psf', 'building_tax', 'building_opex', 'avg_weighted_rent',
+    // Availability
     'total_available_sf', 'direct_available_sf', 'direct_vacant_space',
-    'number_of_cranes', 'rail_lines', 'parcel_number', 'landvision_url',
-    'sb_county_zoning', 'google_maps_url', 'zoning_map_url', 'listing_url',
-    'avg_weighted_rent', 'building_image_path', 'latitude', 'longitude',
-    'owner_user_or_investor', 'out_of_area_owner', 'office_courtesy',
-    // migration 004
-    'units', 'stories', 'parking_spaces', 'price_per_sqft', 'noi', 'owner_email', 'owner_mailing_address',
+    // Owner info
+    'owner_name', 'owner_phone', 'owner_email', 'owner_address', 'owner_city_state_zip',
+    'owner_mailing_address', 'recorded_owner_name', 'true_owner_name',
+    'owner_type', 'owner_entity_type', 'owner_user_or_investor', 'out_of_area_owner',
+    'num_properties_owned', 'owner_call_status', 'tenant_call_status', 'has_lien_or_delinquency',
+    // Status & flags
+    'contacted', 'priority', 'off_market_deal', 'target', 'target_for', 'data_confirmed',
+    'office_courtesy', 'tags',
+    // Market / location context
+    'building_park', 'market_name', 'submarket_name', 'submarket_cluster',
+    // Reference / contacts (text columns)
+    'owner_contact', 'broker_contact', 'leasing_company',
+    // URLs & IDs
+    'costar_url', 'landvision_url', 'sb_county_zoning', 'google_maps_url',
+    'zoning_map_url', 'listing_url', 'building_image_path', 'parcel_number', 'airtable_id',
+    // Notes & misc
+    'notes', 'overflow',
   ]),
   contacts: new Set([
     'full_name', 'first_name', 'type', 'title', 'email', 'email_2', 'email_3',
     'phone_1', 'phone_2', 'phone_3', 'phone_hot', 'email_hot', 'email_kickback',
     'home_address', 'work_address', 'work_city', 'work_state', 'work_zip',
     'born', 'age', 'client_level', 'active_need', 'notes', 'linkedin',
-    'follow_up', 'last_contacted', 'data_source', 'tags',
+    'follow_up', 'last_contacted', 'data_source', 'tags', 'airtable_id', 'overflow',
     'white_pages_url', 'been_verified_url', 'zoom_info_url',
     'property_type_interest', 'lease_months_left', 'tenant_space_fit',
     'tenant_ownership_intent', 'business_trajectory', 'last_call_outcome',
@@ -285,7 +303,8 @@ const IMPORT_COLS = {
   companies: new Set([
     'company_name', 'company_type', 'industry_type', 'website', 'sf', 'employees',
     'revenue', 'company_growth', 'company_hq', 'lease_exp', 'lease_months_left',
-    'move_in_date', 'notes', 'city', 'tenant_sic', 'tenant_naics', 'suite', 'tags',
+    'move_in_date', 'notes', 'city', 'tenant_sic', 'tenant_naics', 'suite',
+    'tags', 'airtable_id', 'overflow',
   ]),
   deals: new Set([
     'deal_name', 'deal_type', 'deal_source', 'status', 'repping', 'term', 'rate', 'sf',
@@ -338,6 +357,27 @@ const TABLE_ID_COL = {
   lease_comps: 'id', sale_comps: 'id',
   loan_maturities: 'id', property_distress: 'id', tenant_growth: 'id',
 };
+
+// ── Bulk delete records ──────────────────────────────────────────
+app.post('/api/bulk-delete', async (req, res) => {
+  try {
+    const { table, ids } = req.body;
+    const idCol = TABLE_ID_COL[table];
+    if (!idCol) return res.status(400).json({ error: `Unknown table: ${table}` });
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'No IDs provided' });
+
+    // Use parameterized ANY($1) instead of string interpolation for safety
+    const result = await pool.query(
+      `DELETE FROM ${table} WHERE ${idCol} = ANY($1::uuid[])`,
+      [ids]
+    );
+
+    res.json({ deleted: result.rowCount });
+  } catch (err) {
+    console.error('[bulk-delete]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // Auto-detect table from CSV headers
 app.post('/api/import/detect', (req, res) => {
@@ -424,7 +464,7 @@ app.post('/api/import/preview', async (req, res) => {
 app.post('/api/import/batch', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected' });
   try {
-    const { target, rows, source, matchProperties, matchCompanies, onDuplicate = 'skip' } = req.body;
+    const { target, rows, source, matchProperties, matchCompanies, linkRecords: doLinkRecords, onDuplicate = 'skip' } = req.body;
     if (!target || !IMPORT_COLS[target]) {
       return res.status(400).json({ error: `Invalid target table: ${target}` });
     }
@@ -435,19 +475,105 @@ app.post('/api/import/batch', async (req, res) => {
     const allowedCols = IMPORT_COLS[target];
     const idCol = TABLE_ID_COL[target];
 
+    // Columns that are text[] arrays in PostgreSQL — values must be wrapped
+    const ARRAY_COLS = new Set([
+      'tags', 'contacted', 'deal_dead_reason', 'deal_source', 'repping', 'run_by', 'responsibility',
+    ]);
+
+    // Columns that are numeric/integer in PostgreSQL — must strip $, commas, ranges
+    const NUMERIC_COLS = new Set([
+      // properties
+      'avg_weighted_rent','cap_rate','ceiling_ht','clear_ht','direct_available_sf','direct_vacant_space',
+      'drive_ins','far','for_sale_price','holding_period_years','land_area_ac','land_sf','last_sale_price',
+      'latitude','loan_amount','longitude','noi','num_properties_owned','number_of_cranes',
+      'number_of_loading_docks','ops_expense_psf','parking_ratio','parking_spaces','percent_leased',
+      'plsf','price_per_sqft','price_psf','rba','rent_psf_mo','stories','total_available_sf','units',
+      'vacancy_pct','year_built','year_renovated',
+      // contacts
+      'age','lease_months_left',
+      // companies
+      'employees','revenue','sf',
+      // deals
+      'commission_rate','gross_fee_potential','increases','net_potential','price','rate','term',
+    ]);
+
+    // Sanitize a string into a number, or return null if impossible
+    function sanitizeNumeric(val) {
+      if (typeof val === 'number') return val;
+      let s = String(val).trim();
+      // Strip $, commas, % signs
+      s = s.replace(/[$,%]/g, '').replace(/,/g, '');
+      // If it's a range like "0.74 – 0.91 (Est.)" or "100 - 200", take the first number
+      const rangeMatch = s.match(/^([0-9.]+)/);
+      if (!rangeMatch) return null;
+      const n = parseFloat(rangeMatch[1]);
+      return isNaN(n) ? null : n;
+    }
+
     // Load reference data for matching
-    let properties = [], companies = [];
-    if (matchProperties) {
+    // Determine which reference data we need to pre-load
+    const linkConfig = LINK_CONFIGS[target] || {};
+    const linkTypes = new Set(Object.values(linkConfig).map(c => c.type));
+
+    let properties = [], companies = [], contacts = [];
+    if (matchProperties || (doLinkRecords && linkTypes.has('property'))) {
       const pRes = await pool.query('SELECT property_id, property_address, normalized_address, city, zip FROM properties');
       properties = pRes.rows;
     }
-    if (matchCompanies) {
+    if (matchCompanies || (doLinkRecords && linkTypes.has('company'))) {
       const cRes = await pool.query('SELECT company_id, company_name, city FROM companies');
       companies = cRes.rows;
     }
+    if (doLinkRecords && linkTypes.has('contact')) {
+      const ctRes = await pool.query('SELECT contact_id, full_name, email, email_2, email_3 FROM contacts');
+      contacts = ctRes.rows;
+    }
+    let deals = [];
+    if (doLinkRecords && linkTypes.has('deal')) {
+      const dRes = await pool.query('SELECT deal_id, deal_name FROM deals');
+      deals = dRes.rows;
+    }
 
-    let inserted = 0, skipped = 0, updated = 0, errors = 0;
+    // Track newly created records during this import (name → id) to reuse across rows
+    const createdContacts = new Map(); // lowercase name → contact_id
+    const createdCompanies = new Map(); // lowercase name → company_id
+
+    // Link field configs per target table
+    // { junction, col1 (source FK), col2 (linked FK), role (if junction has role col), type: 'contact'|'company'|'property', textCol (optional static text column) }
+    const LINK_CONFIGS = {
+      properties: {
+        _link_owner_contact:  { junction: 'property_contacts',  col1: 'property_id', col2: 'contact_id', role: 'owner',   type: 'contact', textCol: 'owner_contact' },
+        _link_broker_contact: { junction: 'property_contacts',  col1: 'property_id', col2: 'contact_id', role: 'broker',  type: 'contact', textCol: 'broker_contact' },
+        _link_company_owner:  { junction: 'property_companies', col1: 'property_id', col2: 'company_id', role: 'owner',   type: 'company', textCol: null },
+        _link_company_tenant: { junction: 'property_companies', col1: 'property_id', col2: 'company_id', role: 'tenant',  type: 'company', textCol: null },
+        _link_leasing_company:{ junction: 'property_companies', col1: 'property_id', col2: 'company_id', role: 'leasing', type: 'company', textCol: 'leasing_company' },
+      },
+      contacts: {
+        _link_company: { junction: 'contact_companies', col1: 'contact_id', col2: 'company_id', role: null, type: 'company', textCol: null },
+      },
+      companies: {
+        _link_contact: { junction: 'contact_companies', col1: 'company_id', col2: 'contact_id', role: null, type: 'contact', textCol: null },
+      },
+      deals: {
+        _link_contact:  { junction: 'deal_contacts',   col1: 'deal_id', col2: 'contact_id',  role: null, type: 'contact',  textCol: null },
+        _link_company:  { junction: 'deal_companies',  col1: 'deal_id', col2: 'company_id',  role: null, type: 'company',  textCol: null },
+        _link_property: { junction: 'deal_properties', col1: 'deal_id', col2: 'property_id', role: null, type: 'property', textCol: null },
+      },
+      campaigns: {
+        _link_contact: { junction: 'campaign_contacts', col1: 'campaign_id', col2: 'contact_id', role: null, type: 'contact', textCol: null },
+      },
+      interactions: {
+        _link_contact:  { junction: 'interaction_contacts',   col1: 'interaction_id', col2: 'contact_id',  role: null, type: 'contact',  textCol: null },
+        _link_company:  { junction: 'interaction_companies',  col1: 'interaction_id', col2: 'company_id',  role: null, type: 'company',  textCol: null },
+        _link_deal:     { junction: 'interaction_deals',      col1: 'interaction_id', col2: 'deal_id',     role: null, type: 'deal',     textCol: null },
+        _link_property: { junction: 'interaction_properties', col1: 'interaction_id', col2: 'property_id', role: null, type: 'property', textCol: null },
+      },
+    };
+    const LINK_FIELD_CONFIG = LINK_CONFIGS[target] || {};
+
+    let inserted = 0, skipped = 0, updated = 0, errors = 0, linked = 0;
     const flaggedRows = [];
+    let firstError = null; // Capture first error for debugging
     const client = await pool.connect();
 
     try {
@@ -460,7 +586,21 @@ app.post('/api/import/batch', async (req, res) => {
         const cleanRow = {};
         for (const [key, val] of Object.entries(row)) {
           if (allowedCols.has(key) && val != null && val !== '') {
-            cleanRow[key] = val;
+            if (ARRAY_COLS.has(key)) {
+              // Convert plain text to PostgreSQL text[] array
+              if (Array.isArray(val)) {
+                cleanRow[key] = val;
+              } else {
+                cleanRow[key] = String(val).split(',').map(s => s.trim()).filter(Boolean);
+              }
+            } else if (NUMERIC_COLS.has(key)) {
+              // Strip $, commas, %, ranges — extract clean number
+              const num = sanitizeNumeric(val);
+              if (num !== null) cleanRow[key] = num;
+              // If null, skip this column entirely (don't insert bad data)
+            } else {
+              cleanRow[key] = val;
+            }
           }
         }
 
@@ -495,6 +635,16 @@ app.post('/api/import/batch', async (req, res) => {
           }
         }
 
+        // Also store link field text values in the static text columns
+        if (doLinkRecords) {
+          for (const [linkField, config] of Object.entries(LINK_FIELD_CONFIG)) {
+            const name = row[linkField];
+            if (name && config.textCol && allowedCols.has(config.textCol) && !cleanRow[config.textCol]) {
+              cleanRow[config.textCol] = name.trim();
+            }
+          }
+        }
+
         const cols = Object.keys(cleanRow);
         if (cols.length === 0) { skipped++; continue; }
 
@@ -502,12 +652,178 @@ app.post('/api/import/batch', async (req, res) => {
         const params = cols.map(c => cleanRow[c]);
 
         try {
-          await client.query(
-            `INSERT INTO ${target} (${cols.join(', ')}) VALUES (${vals.join(', ')})`,
+          await client.query(`SAVEPOINT row_${i}`);
+          const insertResult = await client.query(
+            `INSERT INTO ${target} (${cols.join(', ')}) VALUES (${vals.join(', ')}) RETURNING ${idCol}`,
             params
           );
+          await client.query(`RELEASE SAVEPOINT row_${i}`);
           inserted++;
+
+          // Auto-link from _link_* fields (works for all target tables)
+          // Airtable exports multi-linked records as comma-separated text: "John Smith,Jane Doe"
+          // We split on commas and create a junction link for EACH value
+          if (doLinkRecords && insertResult.rows.length > 0) {
+            const sourceId = insertResult.rows[0][idCol];
+
+            for (const [linkField, config] of Object.entries(LINK_FIELD_CONFIG)) {
+              const rawCell = (row[linkField] || '').trim();
+              if (!rawCell) continue;
+
+              // Split multi-value cells — Airtable uses comma-separated linked records
+              const names = rawCell.split(',').map(s => s.trim()).filter(Boolean);
+
+              for (const singleName of names) {
+              try {
+                let linkedId = null;
+                const nameLower = singleName.toLowerCase();
+
+                if (config.type === 'contact') {
+                  if (createdContacts.has(nameLower)) {
+                    linkedId = createdContacts.get(nameLower);
+                  } else {
+                    const matchResult = matchContact({ full_name: singleName }, contacts);
+                    if (matchResult.match && matchResult.match.confidence >= 70) {
+                      linkedId = matchResult.match.id;
+                    } else {
+                      const newId = crypto.randomUUID();
+                      await client.query(
+                        'INSERT INTO contacts (contact_id, full_name, first_name) VALUES ($1, $2, $3)',
+                        [newId, singleName, singleName.split(' ')[0] || singleName]
+                      );
+                      linkedId = newId;
+                      contacts.push({ contact_id: newId, full_name: singleName, email: null, email_2: null, email_3: null });
+                    }
+                    createdContacts.set(nameLower, linkedId);
+                  }
+                } else if (config.type === 'company') {
+                  if (createdCompanies.has(nameLower)) {
+                    linkedId = createdCompanies.get(nameLower);
+                  } else {
+                    const matchResult = matchCompany(singleName, companies);
+                    if (matchResult.match && matchResult.match.confidence >= 85) {
+                      linkedId = matchResult.match.id;
+                    } else {
+                      const newId = crypto.randomUUID();
+                      await client.query(
+                        'INSERT INTO companies (company_id, company_name) VALUES ($1, $2)',
+                        [newId, singleName]
+                      );
+                      linkedId = newId;
+                      companies.push({ company_id: newId, company_name: singleName, city: null });
+                    }
+                    createdCompanies.set(nameLower, linkedId);
+                  }
+                } else if (config.type === 'property') {
+                  // Try to match existing property by address
+                  const matchResult = matchProperty({ property_address: singleName }, properties);
+                  if (matchResult.match && matchResult.match.confidence >= 70) {
+                    linkedId = matchResult.match.id;
+                  }
+                  // Don't auto-create properties — too complex (need address, city, etc.)
+                } else if (config.type === 'deal') {
+                  // Try to match existing deal by name (simple case-insensitive match)
+                  const found = deals.find(d => d.deal_name && d.deal_name.toLowerCase() === nameLower);
+                  if (found) linkedId = found.deal_id;
+                  // Don't auto-create deals — need deal type, status, etc.
+                }
+
+                // Create the junction table link
+                if (linkedId) {
+                  if (config.role) {
+                    await client.query(
+                      `INSERT INTO ${config.junction} (${config.col1}, ${config.col2}, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
+                      [sourceId, linkedId, config.role]
+                    );
+                  } else {
+                    await client.query(
+                      `INSERT INTO ${config.junction} (${config.col1}, ${config.col2}) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+                      [sourceId, linkedId]
+                    );
+                  }
+                  linked++;
+                }
+              } catch (linkErr) {
+                console.error(`[import] Link error for row ${i} field ${linkField} name "${singleName}":`, linkErr.message);
+              }
+              } // end for singleName
+            } // end for linkField
+          }
+
+          // ── Notes → Activity: split notes text into interaction records ──
+          if (doLinkRecords && insertResult.rows.length > 0) {
+            const notesRaw = (row['_notes_to_activity'] || '').trim();
+            if (notesRaw) {
+              const sourceId = insertResult.rows[0][idCol];
+              // Determine junction table based on import target
+              const notesJunction = target === 'contacts' ? 'interaction_contacts'
+                                  : target === 'deals' ? 'interaction_deals'
+                                  : target === 'companies' ? 'interaction_companies'
+                                  : target === 'properties' ? 'interaction_properties'
+                                  : null;
+              const notesFk = target === 'contacts' ? 'contact_id'
+                            : target === 'deals' ? 'deal_id'
+                            : target === 'companies' ? 'company_id'
+                            : target === 'properties' ? 'property_id'
+                            : null;
+
+              if (notesJunction && notesFk) {
+                // Split on newlines, group dated entries with their following undated lines
+                const lines = notesRaw.split(/\n/).map(l => l.trim()).filter(Boolean);
+                const entries = []; // { date: Date|null, text: string }
+
+                // Date patterns: M/D/YY, M/D/YYYY, M.D.YY, M.D.YYYY, "Month YYYY", "M-D-YY"
+                const dateRe = /^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{2,4})\s*[:;\-–—]?\s*/;
+                const monthNameRe = /^(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{4})\s*[:;\-–—,]?\s*/i;
+
+                for (const line of lines) {
+                  let dateMatch = line.match(dateRe);
+                  let monthMatch = !dateMatch ? line.match(monthNameRe) : null;
+
+                  if (dateMatch) {
+                    let [, m, d, y] = dateMatch;
+                    if (y.length === 2) y = (parseInt(y) > 50 ? '19' : '20') + y;
+                    const parsed = new Date(parseInt(y), parseInt(m) - 1, parseInt(d));
+                    const text = line.slice(dateMatch[0].length).trim();
+                    entries.push({ date: isNaN(parsed) ? null : parsed, text });
+                  } else if (monthMatch) {
+                    const [, monthName, year] = monthMatch;
+                    const parsed = new Date(`${monthName} 1, ${year}`);
+                    const text = line.slice(monthMatch[0].length).trim();
+                    entries.push({ date: isNaN(parsed) ? null : parsed, text });
+                  } else if (entries.length > 0) {
+                    // Append undated line to previous entry
+                    entries[entries.length - 1].text += '\n' + line;
+                  } else {
+                    // First line has no date — create entry with no date
+                    entries.push({ date: null, text: line });
+                  }
+                }
+
+                // Create an interaction for each entry
+                for (const entry of entries) {
+                  if (!entry.text) continue;
+                  try {
+                    const intId = crypto.randomUUID();
+                    await client.query(
+                      'INSERT INTO interactions (interaction_id, type, notes, date) VALUES ($1, $2, $3, $4)',
+                      [intId, 'note', entry.text, entry.date]
+                    );
+                    await client.query(
+                      `INSERT INTO ${notesJunction} (interaction_id, ${notesFk}) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+                      [intId, sourceId]
+                    );
+                    linked++;
+                  } catch (noteErr) {
+                    console.error(`[import] Note→activity error row ${i}:`, noteErr.message);
+                  }
+                }
+              }
+            }
+          }
+
         } catch (insertErr) {
+          await client.query(`ROLLBACK TO SAVEPOINT row_${i}`);
           if (insertErr.code === '23505') { // unique violation
             if (onDuplicate === 'skip') { skipped++; }
             else if (onDuplicate === 'update') {
@@ -517,6 +833,11 @@ app.post('/api/import/batch', async (req, res) => {
             }
           } else {
             console.error(`[import] Row ${i} error:`, insertErr.message);
+            if (!firstError) {
+              const rowCols = Object.keys(cleanRow);
+              firstError = { row: i, message: insertErr.message, code: insertErr.code, columns: rowCols };
+              console.error(`[import] FIRST ERROR detail — cols: [${rowCols.join(', ')}], values: [${rowCols.map(c => String(cleanRow[c]).substring(0, 30)).join(', ')}]`);
+            }
             errors++;
           }
         }
@@ -530,7 +851,7 @@ app.post('/api/import/batch', async (req, res) => {
       client.release();
     }
 
-    res.json({ inserted, skipped, updated, flagged: flaggedRows.length, errors, flaggedRows });
+    res.json({ inserted, skipped, updated, flagged: flaggedRows.length, errors, linked, flaggedRows, firstError });
   } catch (err) {
     console.error('[server] import/batch error:', err);
     res.status(500).json({ error: err.message });

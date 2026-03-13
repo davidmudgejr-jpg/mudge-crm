@@ -149,22 +149,24 @@ function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide,
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5 min-w-0">
         <div
-          className="flex items-center gap-1 cursor-pointer hover:text-crm-text transition-colors flex-1 min-w-0"
+          className="cursor-pointer hover:text-crm-text transition-colors truncate"
           onClick={() => onSort(col.key)}
         >
           <span className="truncate">{col.label}</span>
           {orderBy === col.key && (
-            <span className="text-crm-accent flex-shrink-0">{order === 'ASC' ? '↑' : '↓'}</span>
+            <span className="text-crm-accent ml-1">{order === 'ASC' ? '↑' : '↓'}</span>
           )}
         </div>
         <button
           onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
           className="flex-shrink-0 opacity-0 group-hover:opacity-100 hover:text-crm-text transition-all p-0.5 rounded hover:bg-crm-hover"
         >
-          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-            <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zm6 0a2 2 0 11-4 0 2 2 0 014 0zm6 0a2 2 0 11-4 0 2 2 0 014 0z" />
+          <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 16 16">
+            <circle cx="8" cy="2.5" r="1.5" />
+            <circle cx="8" cy="8" r="1.5" />
+            <circle cx="8" cy="13.5" r="1.5" />
           </svg>
         </button>
       </div>
@@ -201,12 +203,14 @@ function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide,
         </div>
       )}
 
-      {/* Resize handle */}
+      {/* Resize handle — offset right so it doesn't overlap the ••• menu */}
       <div
-        className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize hover:bg-crm-accent/30 transition-colors"
-        style={{ right: '-3px' }}
+        className="absolute top-0 bottom-0 cursor-col-resize z-20 group/resize"
+        style={{ right: '-9px', width: '18px' }}
         onMouseDown={(e) => onResizeStart(col.key, e)}
-      />
+      >
+        <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-[3px] rounded bg-transparent group-hover/resize:bg-crm-accent transition-colors" />
+      </div>
     </div>
   );
 }
@@ -409,6 +413,7 @@ export default function CrmTable({
                 } ${dragOverCol === col.key && dragCol !== col.key ? 'bg-crm-accent/10' : ''}`}
                 style={{
                   width: widths[col.key] || col.defaultWidth || 150,
+                  overflow: 'visible',
                   ...(dragOverCol === col.key && dragCol !== col.key
                     ? { boxShadow: 'inset 3px 0 0 0 #818cf8' }
                     : {}),
@@ -432,7 +437,7 @@ export default function CrmTable({
               <th
                 key={col.key}
                 className="group relative px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider select-none"
-                style={{ width: widths[col.key] || col.defaultWidth || 150 }}
+                style={{ width: widths[col.key] || col.defaultWidth || 150, overflow: 'visible' }}
               >
                 <ColumnHeader
                   col={col}

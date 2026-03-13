@@ -8,6 +8,7 @@ import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import CompDetail from './CompDetail';
 import CompManualEntryModal from '../components/shared/CompManualEntryModal';
 import { useToast } from '../components/shared/Toast';
+import { bulkOps } from '../api/bridge';
 import { useSlideOver } from '../components/shared/SlideOverContext';
 import useDetailPanel from '../hooks/useDetailPanel';
 
@@ -182,6 +183,21 @@ export default function Comps({ onCountChange }) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
+  const handleBulkDelete = useCallback(async () => {
+    if (selected.size === 0) return;
+    const count = selected.size;
+    const table = activeTab === 'lease' ? 'lease_comps' : 'sale_comps';
+    if (!window.confirm(`Delete ${count} selected ${activeTab} comp${count === 1 ? '' : 's'}? This cannot be undone.`)) return;
+    try {
+      const { deleted } = await bulkOps.delete(table, [...selected]);
+      addToast(`Deleted ${deleted} comp${deleted === 1 ? '' : 's'}`, 'success');
+      setSelected(new Set());
+      fetchData();
+    } catch (err) {
+      addToast(`Delete failed: ${err.message}`, 'error');
+    }
+  }, [selected, activeTab, fetchData, addToast]);
+
   // Reset state when switching tabs
   const switchTab = (tab) => {
     if (tab === activeTab) return;
@@ -220,7 +236,10 @@ export default function Comps({ onCountChange }) {
           </div>
           <div className="flex items-center gap-2">
             {selected.size > 0 && (
-              <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">{selected.size} selected</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">{selected.size} selected</span>
+                <button onClick={handleBulkDelete} className="text-xs bg-red-600/80 hover:bg-red-600 text-white font-medium px-2 py-1 rounded transition-colors">Delete</button>
+              </div>
             )}
             <button
               onClick={goToImport}
