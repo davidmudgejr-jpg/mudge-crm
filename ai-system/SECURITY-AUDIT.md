@@ -136,7 +136,7 @@ Each finding also gets a structured entry in the JSONL audit log:
 - **Model:** MiniMax 2.5 (local, via Ollama)
 - **Estimated tokens per run:** ~40K (10K per perspective)
 - **API cost:** $0.00 (local inference on Mac Mini)
-- **Cost tracking:** Each perspective logs to JSONL audit log with `action: llm_call`, `task_type: security_audit`, `model: minimax-2.5`
+- **Cost tracking:** Each perspective logs findings to JSONL audit log with per-perspective action types (`security_audit_offensive`, `security_audit_defensive`, `security_audit_privacy`, `security_audit_operational`). LLM calls within each perspective also log as `action: llm_call` with `task_type: security_audit`, `model: minimax-2.5`
 - **Timeout:** 3:45 AM hard stop — if not complete, submit partial findings and note which perspectives didn't finish
 
 ---
