@@ -435,7 +435,7 @@ export default function ClaudePanel({ isOpen, onToggle, currentTable, rowCount, 
 
   return (
     <div
-      className={`fixed top-8 bottom-0 w-[420px] bg-crm-panel glass-liquid border-l border-crm-border/50 flex flex-col transition-all duration-200 ${hasAnyPanel ? 'right-[520px] z-[41]' : 'right-0 z-30'}`}
+      className={`fixed top-8 bottom-0 w-[340px] bg-crm-panel glass-liquid border-l border-crm-border/50 flex flex-col transition-all duration-200 ${hasAnyPanel ? 'right-[520px] z-[41]' : 'right-0 z-30'}`}
       onDragEnter={handleDragEnter}
       onDragLeave={handleDragLeave}
       onDragOver={handleDragOver}
