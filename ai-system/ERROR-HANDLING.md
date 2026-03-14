@@ -501,5 +501,71 @@ The Agent Dashboard in IE CRM should show:
 
 ---
 
+## Category 8: Crash Recovery (Unclean Shutdown)
+
+The most underhandled failure mode: what happens when the Mac loses power, Ollama crashes mid-inference, or an agent gets killed mid-batch?
+
+### The Problem
+
+Without crash recovery, these scenarios lead to:
+- **Duplicate sandbox entries** — agent restarts and re-processes already-submitted items
+- **Orphaned work** — partially processed items never completed or cleaned up
+- **Wasted API calls** — re-calling paid services for work already done
+- **Ambiguous state** — did the last write land or not?
+
+### Transaction Journaling
+
+Every agent writes a **work intent** before starting and a **work completion** after. Full spec in `OPERATIONS.md §17`.
+
+```
+Before work: write /AI-Agents/{agent}/journal/current.json with status "in_progress"
+After each step: update steps_completed array
+On completion: delete journal file
+On crash recovery: read journal, check idempotency key, resume or skip
+```
+
+### Idempotency Keys
+
+Every sandbox write includes an idempotency key (format: `{agent}_{item_id}_{date}`). The sandbox API returns the existing record if a duplicate key is submitted — no duplicates on restart.
+
+### Per-Agent Recovery (Startup Sequence)
+
+```
+Agent starts up (normal or after crash):
+  1. Check journal/current.json
+  2. If exists:
+     a. Log: "Recovering from crash. Last work: [item_id] at step [step_name]"
+     b. Query sandbox by idempotency key — did the write succeed?
+     c. If yes → mark journal complete, move on
+     d. If no → resume from last completed step
+  3. If no journal → normal startup
+  4. Resume normal work loop
+```
+
+### Supervisor-Level Recovery
+
+```
+Mac startup / Ollama restart:
+  1. Check which agents were running (read supervisor state file)
+  2. Start agents in order: Logger → Enricher/Researcher → Matcher → Scout
+  3. Wait for healthy heartbeats (max 2 minutes each)
+  4. If agent fails to heartbeat → restart it once, then alert
+  5. After all healthy: "System recovered. All agents operational."
+```
+
+### What This Catches That Normal Error Handling Doesn't
+
+| Scenario | Without Recovery | With Recovery |
+|----------|-----------------|---------------|
+| Power loss mid-enrichment | Duplicate sandbox entries | Resume from last step |
+| Ollama OOM crash | Agent loops trying to restart | Graceful wait + retry on health |
+| Mac restart during batch | Entire batch re-processes | Skip via idempotency keys |
+| Network drop during API write | Ambiguous state | Idempotency key resolves |
+
+**Full implementation spec:** `OPERATIONS.md §17 — Crash Recovery Procedures`
+
+---
+
 *Created: March 2026*
+*Updated: March 2026 — Added Category 8: Crash Recovery*
 *For: IE CRM AI Master System — Error Handling & Recovery*

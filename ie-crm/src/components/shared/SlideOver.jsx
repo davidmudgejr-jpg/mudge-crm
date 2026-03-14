@@ -18,7 +18,7 @@ export default function SlideOver({ children, onClose, level = 0, width = 'w-[52
   return (
     <div className={`fixed inset-0 ${z} flex justify-end`} onClick={onClose}>
       {/* Overlay — only level 0 gets the full dim */}
-      <div className={`absolute inset-0 ${level === 0 ? 'bg-black/30' : 'bg-black/15'} animate-fade-in`} />
+      <div className={`absolute inset-0 ${level === 0 ? 'bg-black/50' : 'bg-black/25'} animate-fade-in`} />
       <div
         ref={panelRef}
         className={`relative ${width} bg-crm-panel glass-panel border-l border-crm-border/50 h-full overflow-y-auto animate-slide-in-right rounded-tl-xl`}

@@ -475,6 +475,51 @@ Both models stay loaded. No swapping. All agents run in true parallel from day o
 
 ---
 
+## 🔗 CRM ↔ AI INTEGRATION POINTS
+
+The CRM and AI system are designed independently but must connect seamlessly. These are the integration points that make the full system greater than the sum of its parts.
+
+### TPE ↔ Researcher Pipeline
+The Transaction Probability Engine (TPE) scores properties based on multiple weighted factors. The Researcher finds signals that should update TPE inputs, but currently there's no automated pipeline. The integration:
+- When Researcher finds a growth signal for a company → update `tenant_growth` TPE input
+- When Researcher finds lease expiry data → update `lease_expiry_proximity` TPE input
+- When signals are approved and promoted, Chief of Staff checks if TPE inputs should be recalculated
+- TPE weight adjustments based on which signals actually correlate with closed deals
+
+### Action Items ↔ AI Recommendations
+The CRM's Action Items feature (Apple Reminders-style) should be fed by AI recommendations:
+- Chief of Staff's reverse prompts create action items in IE CRM with: assignee, due date, priority, source
+- Example: "Call John Martinez — lease expiring in 6 months, 3 convergent signals this week" → action item for David, due today, high priority
+- Track completion rate of AI-generated action items to measure recommendation quality
+
+### Claude Panel ↔ Chief of Staff
+The CRM has a stubbed Claude Panel in the UI. This should become the primary interface for David to interact with Chief of Staff *in context*:
+- Viewing a property → ask "What do we know about this owner?"
+- Viewing a contact → ask "What signals have we found for their company?"
+- Viewing a deal → ask "What comparable deals have closed recently?"
+- Panel sends context (current record type + ID) to Chief of Staff for grounded responses
+
+### Comps ↔ Matcher Outreach
+The CRM's Comps feature (lease & sale comps with CSV import) should feed Matcher's outreach:
+- Matcher queries `/api/ai/comps` when drafting outreach
+- Includes 1-2 relevant comps in email body for credibility: "Similar space at [address] leased for $X.XX/SF"
+- Comps make outreach feel market-informed, not generic
+
+### Hot 10 ↔ Dashboard
+Logger's velocity-based Hot 10 list should be a first-class panel in the CRM:
+- Agent Dashboard shows the Hot 10 updated daily
+- Each entry links to the company/contact in IE CRM
+- Click to see all signals, interactions, and enrichment data
+- Team visibility via Houston channel morning briefing
+
+### Feedback Loop ↔ Instruction Improvement
+Every approval/rejection David makes in the CRM Dashboard feeds the feedback loop:
+- Override patterns are tracked in `feedback_loop` table
+- Chief of Staff reviews weekly and adjusts agent instructions
+- The CRM UI shows: "Your feedback has improved Enricher accuracy from 78% to 91%"
+
+---
+
 ## 💡 KEY PRINCIPLES
 
 - **Ambient beats genius** — A less-smart model running 24/7 outperforms a brilliant model used occasionally
@@ -489,8 +534,12 @@ Both models stay loaded. No swapping. All agents run in true parallel from day o
 - **One brain, two mouths** — Houston speaks to the team; Telegram speaks to David. Same intelligence, different audiences
 - **Idle cycles are gold** — When agents have nothing assigned, they should look for things nobody asked about. That's where competitive advantage lives
 - **The system should improve itself** — Not just agent instructions, but propose CRM features, workflow changes, and new data sources
+- **Close the feedback loops** — A system that doesn't learn from its mistakes is just expensive automation
+- **Detect velocity, not just signals** — Acceleration matters more than any single data point
+- **Calibrate or it's theater** — Confidence scores mean nothing if they're not validated against reality
 
 ---
 
 *Created: March 2026*
+*Updated: March 2026 — Added CRM ↔ AI integration points, new principles*
 *For: IE CRM / Inland Empire Commercial Real Estate*

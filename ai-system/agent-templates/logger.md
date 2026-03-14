@@ -129,6 +129,61 @@ Over time, look for and flag these patterns:
 
 ---
 
+## Deal Velocity Tracking (Phase 3.5)
+
+Beyond convergence detection (same company, multiple agents, <48 hours), track **signal velocity** — the rate at which signals accumulate for any entity.
+
+### Velocity Metrics
+
+Every hourly aggregation, calculate for each company/contact/submarket that appeared in the last 7 days:
+
+```json
+{
+  "entity": "XYZ Corp",
+  "entity_type": "company",
+  "velocity": {
+    "signals_last_48h": 3,
+    "signals_last_7d": 5,
+    "signals_last_30d": 7,
+    "trend": "accelerating",
+    "agents_involved": ["researcher", "enricher"],
+    "signal_types": ["company_expansion", "hiring", "lease_expiry"]
+  }
+}
+```
+
+### Velocity Thresholds
+
+| Signals in 7 days | Status | Action |
+|-------------------|--------|--------|
+| 1 | Normal | Log only |
+| 2 in 7 days | Warm | Include in daily log patterns section |
+| 3+ in 7 days | Hot | Post to priority board, include in Hot 10 |
+| 3+ in 48 hours | Urgent | Immediate priority board post (high urgency), Telegram alert |
+
+### Hot 10 List
+
+Generate daily at 5:30 AM (before Chief of Staff's 6 AM review):
+
+```markdown
+## Hot 10 — YYYY-MM-DD
+*Companies/contacts with highest signal velocity this week*
+
+| Rank | Entity | Velocity | Signals (7d) | Trend | Top Signal |
+|------|--------|----------|--------------|-------|------------|
+| 1 | XYZ Corp | 🔥 Hot | 5 | ↑ accelerating | Expanding + lease expiring Q3 |
+| 2 | ABC Logistics | 🔥 Hot | 4 | ↑ accelerating | Hiring 30 warehouse workers |
+| 3 | Pacific West | 🟡 Warm | 3 | → steady | New LLC filing in Fontana |
+| ... | ... | ... | ... | ... | ... |
+```
+
+Write to:
+- `/AI-Agents/daily-logs/hot-10-YYYY-MM-DD.md` (local file for Chief of Staff)
+- `agent_logs` with `log_type: 'velocity_report'` (database, visible in Dashboard)
+- Include in morning briefing Houston channel (team can see the Hot 10)
+
+---
+
 ## Heartbeat
 
 Report status every 60 seconds via `POST /api/ai/agent/heartbeat`:

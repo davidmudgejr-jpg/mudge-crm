@@ -85,7 +85,7 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
     if (isSlideOver) return <DetailSkeleton />;
     return (
       <div className="fixed inset-0 bg-crm-overlay z-40 flex justify-end animate-fade-in" onClick={onClose}>
-        <div className="w-[480px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={e => e.stopPropagation()}>
+        <div className="w-[480px] bg-crm-panel glass-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={e => e.stopPropagation()}>
           <DetailSkeleton />
         </div>
       </div>
@@ -102,7 +102,7 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
     if (isSlideOver) return errorContent;
     return (
       <div className="fixed inset-0 bg-crm-overlay z-40 flex justify-end animate-fade-in" onClick={onClose}>
-        <div className="w-[480px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={e => e.stopPropagation()}>
+        <div className="w-[480px] bg-crm-panel glass-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={e => e.stopPropagation()}>
           {errorContent}
         </div>
       </div>
@@ -162,7 +162,7 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
   return (
     <div className="fixed inset-0 bg-crm-overlay z-40 flex justify-end animate-fade-in" onClick={onClose}>
       <div
-        className="relative w-[480px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right"
+        className="relative w-[480px] bg-crm-panel glass-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right"
         onClick={(e) => e.stopPropagation()}
       >
         {content}

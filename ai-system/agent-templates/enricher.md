@@ -144,6 +144,20 @@ This structured log feeds the cost tracker and enables Houston's pattern analysi
 
 ---
 
+## Crash Recovery
+
+This agent processes paid API calls. Crashes mid-batch waste money and create duplicates. Follow the crash recovery protocol:
+
+1. **Before processing each LLC:** Write work intent to `/AI-Agents/enricher/journal/current.json`
+2. **After each step:** Update `steps_completed` array (open_corporates, white_pages, been_verified, neverbounce, sandbox_write)
+3. **On completion:** Delete journal file
+4. **On startup:** Check journal. If in-progress work exists, check idempotency key in sandbox, resume or skip
+5. **Include idempotency key** in every sandbox submission: `enricher_{llc_id}_{YYYY-MM-DD}`
+
+**Full spec:** `OPERATIONS.md §17` and `ERROR-HANDLING.md Category 8`
+
+---
+
 ## Rules
 
 1. NEVER write directly to IE CRM production tables
@@ -154,6 +168,8 @@ This structured log feeds the cost tracker and enables Houston's pattern analysi
 6. If you encounter rate limiting on any service, back off and retry after 60 seconds
 7. Prioritize quality over speed — one verified contact is worth more than ten unverified ones
 8. REFERENCE your model's prompting guide (`ai-system/prompting-guides/qwen-3.5.md`) when crafting extraction prompts — follow Qwen's best practices for structured output
+9. ALWAYS include idempotency key in sandbox submissions to prevent duplicates on crash recovery
+10. ALWAYS write journal entry before starting paid API calls
 
 ---
 
@@ -171,4 +187,5 @@ This structured log feeds the cost tracker and enables Houston's pattern analysi
 ---
 
 *Last updated by: David (manual)*
+*Updated: March 2026 — Added crash recovery protocol, idempotency keys*
 *Next update by: Claude (Tier 1) after reviewing first week of logs*
