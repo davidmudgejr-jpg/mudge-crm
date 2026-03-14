@@ -31,7 +31,8 @@ export default function LinkedChips({ items, type, labelKey, max = 2 }) {
       {shown.map((item, i) => (
         <span
           key={i}
-          className={`text-[10px] leading-tight px-1.5 py-0.5 rounded-full font-medium truncate max-w-[120px] cursor-pointer hover:brightness-125 transition-all ${color}`}
+          className={`text-[10px] leading-tight px-1.5 py-0.5 rounded-full font-medium truncate max-w-[120px] cursor-pointer hover:brightness-125 hover:scale-[1.02] transition-all ${color}`}
+          style={{ transitionTimingFunction: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)' }}
           title={item[labelKey]}
           onClick={(e) => {
             e.stopPropagation();

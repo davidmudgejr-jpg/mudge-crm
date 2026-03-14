@@ -157,8 +157,17 @@ function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide,
         >
           <span className="truncate">{col.label}</span>
           {orderBy === col.key && (
-            <svg className="w-3 h-3 text-crm-accent ml-1 inline-block" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d={order === 'ASC' ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7'} />
+            <svg
+              className="w-3 h-3 text-crm-accent ml-1 inline-block"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              style={{
+                transition: 'transform 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+                transform: order === 'ASC' ? 'rotate(0deg)' : 'rotate(180deg)',
+              }}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 15l7-7 7 7" />
             </svg>
           )}
         </div>
@@ -394,7 +403,7 @@ export default function CrmTable({
 
   return (
     <div className="relative w-full h-full overflow-auto">
-      <table className="text-sm border-collapse" style={{ tableLayout: 'fixed', minWidth: 'max-content' }}>
+      <table className="text-sm" style={{ tableLayout: 'fixed', minWidth: 'max-content', borderCollapse: 'separate', borderSpacing: 0 }}>
         <thead className="sticky top-0 bg-crm-bg/95 glass-sidebar z-10">
           <tr className="border-b border-crm-border/30">
             {/* Checkbox column */}
@@ -515,10 +524,18 @@ export default function CrmTable({
                   e.preventDefault();
                   setContextMenu({ x: e.clientX, y: e.clientY, row });
                 }}
-                className={`border-b border-crm-border/30 cursor-pointer transition-colors duration-150 animate-row-appear ${
-                  isSelected ? 'bg-crm-accent/15' : 'hover:bg-crm-hover'
+                className={`border-b border-crm-border/30 cursor-pointer animate-row-appear ${
+                  isSelected
+                    ? 'bg-crm-accent/15 shadow-[0_8px_24px_rgba(0,0,0,0.35),inset_0_0_0_1px_rgba(255,255,255,0.1)] -translate-y-[3px]'
+                    : 'hover:bg-crm-hover hover:-translate-y-[2px] hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] active:scale-[0.995]'
                 } ${extraClass}`}
-                style={idx % 2 === 1 ? { backgroundColor: 'rgba(255,255,255,0.02)' } : undefined}
+                style={{
+                  '--row-index': idx,
+                  animationDelay: `calc(var(--row-index, 0) * 30ms)`,
+                  transition: 'transform 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94), background-color 150ms ease',
+                  borderRadius: '8px',
+                  ...(idx % 2 === 1 ? { backgroundColor: 'rgba(255,255,255,0.02)' } : {}),
+                }}
               >
                 <td
                   className="px-3 py-2.5 sticky left-0 bg-crm-bg z-[5]"

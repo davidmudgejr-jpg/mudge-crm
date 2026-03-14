@@ -73,7 +73,7 @@ export default function ContextMenu({ x, y, items, onClose }) {
   return createPortal(
     <div
       ref={menuRef}
-      className="fixed z-[100] min-w-[160px] py-1 bg-crm-card/95 glass-modal border border-crm-border/50 rounded-lg shadow-2xl animate-fade-in"
+      className="fixed z-[100] min-w-[160px] py-1 bg-crm-card/95 glass-modal border border-crm-border/50 rounded-lg shadow-2xl animate-sheet-down"
       style={{ top: position.top, left: position.left }}
     >
       {items.map((item, idx) => {

@@ -22,7 +22,7 @@
   /* Surfaces & overlays */
   --crm-deep: #000000;
   --crm-overlay: rgba(0, 0, 0, 0.3);
-  --crm-panel: rgba(36,36,38,0.97);
+  --crm-panel: rgba(36,36,38,0.55);
   --crm-tooltip: #1c1c1e;
 
   /* Scrollbar */
@@ -35,25 +35,37 @@
   --crm-sql-string: #34d399;
   --crm-sql-number: #fbbf24;
   --crm-sql-comment: #64748b;
+
+  /* Gradient accents */
+  --crm-gradient-primary: linear-gradient(135deg, #007AFF, #AF52DE);
+  --crm-gradient-primary-shadow: 0 6px 20px rgba(0,122,255,0.4);
+  --crm-gradient-success: linear-gradient(135deg, #30D158, #34C759);
+  --crm-gradient-warning: linear-gradient(135deg, #FF9F0A, #FFD60A);
+  --crm-gradient-info: linear-gradient(135deg, #007AFF, #5AC8FA);
+  --crm-gradient-purple: linear-gradient(135deg, #AF52DE, #BF5AF2);
+
+  /* Spring easing curves */
+  --spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --spring-smooth: cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
 @media (prefers-color-scheme: light) {
   :root {
     --crm-bg: #f5f5f7;
-    --crm-sidebar: rgba(255,255,255,0.97);
+    --crm-sidebar: rgba(255,255,255,0.45);
     --crm-card: #ffffff;
     --crm-accent: #007AFF;
     --crm-accent-hover: #0056CC;
     --crm-text: #1d1d1f;
     --crm-muted: #8e8e93;
     --crm-success: #34C759;
-    --crm-border: rgba(0,0,0,0.06);
+    --crm-border: rgba(0,0,0,0.08);
     --crm-hover: rgba(0,0,0,0.04);
 
     --crm-deep: #ececee;
-    --crm-overlay: rgba(0, 0, 0, 0.2);
+    --crm-overlay: rgba(0, 0, 0, 0.22);
     --crm-tooltip: #1c1c1e;
-    --crm-panel: rgba(255,255,255,0.85);
+    --crm-panel: rgba(255,255,255,0.35);
 
     --crm-scroll-track: transparent;
     --crm-scroll-thumb: rgba(0,0,0,0.15);
@@ -131,32 +143,39 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Frosted glass utility classes */
+/* Frosted glass utility classes — Apple liquid glass aesthetic.
+   Lower background opacity + heavy blur = translucent depth.
+   Inner box-shadow provides a frosted white "film" that keeps text readable. */
 .glass-sidebar {
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.3);
 }
 
 .glass-panel {
-  backdrop-filter: blur(30px) saturate(150%);
-  -webkit-backdrop-filter: blur(30px) saturate(150%);
+  backdrop-filter: blur(60px) saturate(180%) brightness(1.02);
+  -webkit-backdrop-filter: blur(60px) saturate(180%) brightness(1.02);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);
 }
 
 .glass-modal {
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
+  backdrop-filter: blur(60px) saturate(220%) brightness(1.15);
+  -webkit-backdrop-filter: blur(60px) saturate(220%) brightness(1.15);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), inset 0 0 0 1px rgba(255,255,255,0.25), 0 12px 40px rgba(0,0,0,0.12);
 }
 
-/* Liquid glass — bright frosted surface for detail panels & modals.
-   brightness() counteracts dark overlays so the frost appears white, not gray. */
+/* Liquid glass — the hero effect for detail panels, modals & slide-overs.
+   Heavy blur + brightness lift keeps the frost white & luminous.
+   Inner white shadow acts as a frosted film for text contrast. */
 .glass-liquid {
-  backdrop-filter: blur(50px) saturate(200%) brightness(1.2);
-  -webkit-backdrop-filter: blur(50px) saturate(200%) brightness(1.2);
+  backdrop-filter: blur(80px) saturate(200%) brightness(1.18);
+  -webkit-backdrop-filter: blur(80px) saturate(200%) brightness(1.18);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.55), inset 0 0 0 1px rgba(255,255,255,0.25), 0 8px 32px rgba(0,0,0,0.08);
 }
 
 .glass-toast {
-  backdrop-filter: blur(20px) saturate(150%);
-  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  backdrop-filter: blur(30px) saturate(150%);
+  -webkit-backdrop-filter: blur(30px) saturate(150%);
 }
 
 /* macOS-style input utilities */
@@ -195,4 +214,87 @@ body {
 .sql-comment {
   color: var(--crm-sql-comment);
   font-style: italic;
+}
+
+/* ============================================================
+   MOTION: Spring easing + gradient utilities
+   ============================================================ */
+
+/* Primary CTA button — gradient with glow */
+.btn-primary {
+  background: var(--crm-gradient-primary);
+  color: white;
+  font-weight: 600;
+  box-shadow: var(--crm-gradient-primary-shadow),
+              inset 0 1px 0 rgba(255,255,255,0.2);
+  border: none;
+  border-radius: 8px;
+  transition: transform 150ms var(--spring),
+              box-shadow 150ms var(--spring-smooth);
+}
+.btn-primary:hover {
+  box-shadow: 0 8px 24px rgba(0,122,255,0.5),
+              inset 0 1px 0 rgba(255,255,255,0.2);
+  transform: translateY(-1px);
+}
+.btn-primary:active {
+  transform: scale(0.97);
+  box-shadow: 0 2px 8px rgba(0,122,255,0.3);
+}
+
+/* Focus ring animation */
+:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 0px rgba(0,122,255,0.4);
+  animation: focus-ring-in 150ms var(--spring) forwards;
+}
+@keyframes focus-ring-in {
+  to { box-shadow: 0 0 0 3px rgba(0,122,255,0.4); }
+}
+
+/* Toast slide-up */
+@keyframes toast-slide-up {
+  from {
+    transform: translateY(20px) scale(0.95);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+/* Custom checkbox — gradient fill with bounce */
+input[type="checkbox"].rounded {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--crm-border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition: all 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  position: relative;
+}
+input[type="checkbox"].rounded:checked {
+  background: linear-gradient(135deg, #007AFF, #5856D6);
+  border-color: transparent;
+  animation: checkbox-bounce 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+input[type="checkbox"].rounded:checked::after {
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: 1.5px;
+  width: 5px;
+  height: 9px;
+  border: solid white;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+@keyframes checkbox-bounce {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.15); }
+  100% { transform: scale(1); }
 }

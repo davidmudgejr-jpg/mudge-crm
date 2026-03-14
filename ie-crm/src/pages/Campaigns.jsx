@@ -8,16 +8,17 @@ import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import { useToast } from '../components/shared/Toast';
+import EmptyState from '../components/shared/EmptyState';
 import { formatDatePacific, formatDateTimePacific } from '../utils/timezone';
 import useDetailPanel from '../hooks/useDetailPanel';
 
 const STATUS_COLORS = {
-  Draft: 'bg-gray-500/20 text-gray-400',
-  Scheduled: 'bg-blue-500/20 text-blue-400',
-  Active: 'bg-green-500/20 text-green-400',
-  Sent: 'bg-crm-accent/20 text-crm-accent',
-  Completed: 'bg-emerald-500/20 text-emerald-400',
-  Paused: 'bg-yellow-500/20 text-yellow-400',
+  Draft: 'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
+  Scheduled: 'bg-gradient-to-r from-[#007AFF] to-[#5AC8FA] text-white shadow-[0_2px_6px_rgba(0,122,255,0.3)]',
+  Active: 'bg-gradient-to-r from-[#30D158] to-[#34C759] text-white shadow-[0_2px_6px_rgba(48,209,88,0.3)]',
+  Sent: 'bg-gradient-to-r from-[#007AFF] to-[#AF52DE] text-white shadow-[0_2px_6px_rgba(0,122,255,0.3)]',
+  Completed: 'bg-gradient-to-r from-[#AF52DE] to-[#BF5AF2] text-white shadow-[0_2px_6px_rgba(175,82,222,0.3)]',
+  Paused: 'bg-gradient-to-r from-[#FF9F0A] to-[#FFD60A] text-white shadow-[0_2px_6px_rgba(255,159,10,0.3)]',
 };
 
 const ALL_COLUMNS = [
@@ -384,7 +385,7 @@ export default function Campaigns({ onCountChange }) {
             )}
             <button
               onClick={() => setShowQuickAdd(true)}
-              className="text-xs bg-crm-accent hover:bg-crm-accent-hover text-white font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+              className="text-xs btn-primary px-3 py-1.5 flex items-center gap-1"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -396,7 +397,8 @@ export default function Campaigns({ onCountChange }) {
 
         {/* Filters */}
         <div className="flex items-center gap-2">
-          <div className="flex-1 relative">
+          <div className="flex-1" />
+          <div className="w-48 relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-crm-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -446,34 +448,38 @@ export default function Campaigns({ onCountChange }) {
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        <CrmTable
-          tableKey="campaigns"
-          columns={visibleColumns}
-          rows={rows}
-          idField="campaign_id"
-          loading={loading}
-          onRowClick={(row) => setDetailId(row.campaign_id)}
-          onSort={handleSort}
-          orderBy={orderBy}
-          order={order}
-          selected={selected}
-          onToggleSelect={toggleSelect}
-          onToggleAll={toggleAll}
-          emptyMessage="No campaigns found"
-          emptySubMessage="Create a new campaign to get started"
-          onRenameColumn={renameColumn}
-          onHideColumn={toggleColumn}
-          customColumns={customColumns}
-          customValues={values}
-          onCustomCellChange={setValue}
-          onAddField={addField}
-          onRenameField={(id, name) => updateField(id, { name })}
-          onDeleteField={removeField}
-          onHideCustomField={hideField}
-          onSelectOnly={selectOnly}
-          onShiftSelect={shiftSelect}
-          onDeleteRow={deleteRow}
-        />
+        {!loading && rows.length === 0 && !search && !filterType && !filterStatus ? (
+          <EmptyState entity="campaigns" entityLabel="Campaigns" onAdd={() => setShowQuickAdd(true)} addLabel="+ New Campaign" />
+        ) : (
+          <CrmTable
+            tableKey="campaigns"
+            columns={visibleColumns}
+            rows={rows}
+            idField="campaign_id"
+            loading={loading}
+            onRowClick={(row) => setDetailId(row.campaign_id)}
+            onSort={handleSort}
+            orderBy={orderBy}
+            order={order}
+            selected={selected}
+            onToggleSelect={toggleSelect}
+            onToggleAll={toggleAll}
+            emptyMessage="No campaigns found"
+            emptySubMessage="Create a new campaign to get started"
+            onRenameColumn={renameColumn}
+            onHideColumn={toggleColumn}
+            customColumns={customColumns}
+            customValues={values}
+            onCustomCellChange={setValue}
+            onAddField={addField}
+            onRenameField={(id, name) => updateField(id, { name })}
+            onDeleteField={removeField}
+            onHideCustomField={hideField}
+            onSelectOnly={selectOnly}
+            onShiftSelect={shiftSelect}
+            onDeleteRow={deleteRow}
+          />
+        )}
       </div>
 
       {/* Campaign Detail Slide-in */}

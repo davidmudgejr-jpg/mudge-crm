@@ -14,6 +14,7 @@ import QuickAddModal from '../components/shared/QuickAddModal';
 import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
+import EmptyState from '../components/shared/EmptyState';
 
 function formatRevenue(val) {
   if (val == null || val === '') return <span className="text-crm-muted">--</span>;
@@ -211,7 +212,7 @@ export default function Companies({ onCountChange }) {
             )}
             <button
               onClick={() => setShowQuickAdd(true)}
-              className="text-xs bg-crm-accent hover:bg-crm-accent-hover text-white font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+              className="text-xs btn-primary px-3 py-1.5 flex items-center gap-1"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -221,7 +222,8 @@ export default function Companies({ onCountChange }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex-1 relative">
+          <div className="flex-1" />
+          <div className="w-48 relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-crm-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -244,35 +246,39 @@ export default function Companies({ onCountChange }) {
       </div>
 
       <div className="flex-1 overflow-auto">
-        <CrmTable
-          tableKey="companies"
-          columns={visibleColumns}
-          rows={augmentedRows}
-          idField="company_id"
-          loading={loading}
-          onRowClick={(row) => setDetailId(row.company_id)}
-          onSort={handleSort}
-          orderBy={orderBy}
-          order={order}
-          selected={selected}
-          onToggleSelect={toggleSelect}
-          onToggleAll={toggleAll}
-          emptyMessage="No companies found"
-          emptySubMessage="Try adjusting your search"
-          onRenameColumn={renameColumn}
-          onHideColumn={toggleColumn}
-          customColumns={customColumns}
-          customValues={values}
-          onCustomCellChange={setValue}
-          onAddField={addField}
-          onRenameField={(id, name) => updateField(id, { name })}
-          onDeleteField={removeField}
-          onHideCustomField={hideField}
-          onCellSave={handleCellSave}
-          onSelectOnly={selectOnly}
-          onShiftSelect={shiftSelect}
-          onDeleteRow={deleteRow}
-        />
+        {!loading && augmentedRows.length === 0 && !search ? (
+          <EmptyState entity="companies" entityLabel="Companies" onAdd={() => setShowQuickAdd(true)} addLabel="+ New Company" />
+        ) : (
+          <CrmTable
+            tableKey="companies"
+            columns={visibleColumns}
+            rows={augmentedRows}
+            idField="company_id"
+            loading={loading}
+            onRowClick={(row) => setDetailId(row.company_id)}
+            onSort={handleSort}
+            orderBy={orderBy}
+            order={order}
+            selected={selected}
+            onToggleSelect={toggleSelect}
+            onToggleAll={toggleAll}
+            emptyMessage="No companies found"
+            emptySubMessage="Try adjusting your search"
+            onRenameColumn={renameColumn}
+            onHideColumn={toggleColumn}
+            customColumns={customColumns}
+            customValues={values}
+            onCustomCellChange={setValue}
+            onAddField={addField}
+            onRenameField={(id, name) => updateField(id, { name })}
+            onDeleteField={removeField}
+            onHideCustomField={hideField}
+            onCellSave={handleCellSave}
+            onSelectOnly={selectOnly}
+            onShiftSelect={shiftSelect}
+            onDeleteRow={deleteRow}
+          />
+        )}
       </div>
 
       {detailId && (
