@@ -85,7 +85,7 @@ function AppShell() {
       <Sidebar onTableChange={setCurrentTable} />
 
       {/* Main Content */}
-      <main className={`flex-1 pt-8 overflow-hidden transition-all duration-200 ${claudeOpen ? 'mr-[340px]' : ''}`}>
+      <main className={`flex-1 pt-8 overflow-hidden transition-all duration-200 ${claudeOpen ? 'mr-[300px]' : ''}`}>
         <Routes>
           <Route path="/" element={<Properties onCountChange={setRowCount} />} />
           <Route path="/properties" element={<Properties onCountChange={setRowCount} />} />
