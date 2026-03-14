@@ -373,5 +373,36 @@ This is the build plan for the AI Master System — a tiered, hybrid AI organiza
 
 ---
 
+## 5-Round Deep Audit — 47-Tier Evolution System (March 2026)
+
+This roadmap covers Phase 0-5 of the original build plan. A subsequent 5-round deep audit (60 prompts) expanded the system to a **47-tier evolution roadmap** covering plumbing, nervous system, brain, foresight, and body layers. The audit design documents supersede and extend the phases above:
+
+| Round | Tiers | Focus | Roadmap Doc |
+|-------|-------|-------|-------------|
+| Round 1 | 0-7 | Plumbing — schema fixes, auth, pagination, email, testing | `docs/plans/2026-03-13-evolution-roadmap.md` |
+| Round 2 | 8-15 | Nervous System — feedback loops, calibration, innovation | `docs/plans/2026-03-13-evolution-roadmap-round2.md` |
+| Round 3 | 16-23 | Brain — relationships, temporal, simulation, market theory | `docs/plans/2026-03-13-evolution-roadmap-round3.md` |
+| Round 4 | 24-35 | Foresight — predictions, data bounties, proxy signals, calibration | `docs/plans/2026-03-13-evolution-roadmap-round4.md` |
+| Round 5 | 36-47 | Body — runtime, ops dashboard, email, notifications, RBAC, CI/CD | `docs/plans/2026-03-13-evolution-roadmap-round5.md` |
+
+**Detailed specs:**
+- `docs/superpowers/plans/2026-03-13-prompts-13-16-agent-learning-loops.md`
+- `docs/superpowers/plans/2026-03-13-prompts-25-28-strategic-cognition.md`
+- `docs/superpowers/plans/2026-03-13-prompts-37-40-predictive-intelligence.md`
+- `docs/superpowers/plans/2026-03-13-prompts-49-52-implementation-bridge.md`
+- `docs/superpowers/specs/2026-03-13-prompts-17-20-deep-analysis.md`
+- `docs/superpowers/specs/2026-03-13-prompts-29-32-strategic-cognition.md`
+- `docs/superpowers/specs/2026-03-13-prompts-33-36-deep-strategy-layer.md`
+- `docs/superpowers/specs/2026-03-13-prompts-41-44-prediction-actionability.md`
+- `docs/superpowers/specs/2026-03-13-prompts-45-48-portfolio-predictions.md`
+- `docs/superpowers/specs/2026-03-13-prompts-53-56-ops-email-notifications.md`
+- `docs/superpowers/specs/2026-03-13-prompts-57-60-rbac-devops.md`
+- `docs/superpowers/specs/2026-03-13-advanced-intelligence-design.md`
+
+**Stats:** 115+ new tables designed, 47 capability tiers, 16 design documents.
+
+---
+
 *Created: March 2026*
+*Updated: March 2026 — Added 47-tier evolution roadmap cross-reference*
 *For: IE CRM / Inland Empire Commercial Real Estate*

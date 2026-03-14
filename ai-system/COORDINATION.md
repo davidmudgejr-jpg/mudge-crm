@@ -418,6 +418,21 @@ The priority board gets its own section in the Agent Dashboard UI:
 
 ---
 
+## 47-Tier Evolution Roadmap Reference
+
+This coordination document covers the priority board pattern for inter-agent communication. A 5-round deep audit (60 prompts, March 2026) designed additional coordination capabilities:
+
+- **Tier 9:** Cross-agent intelligence — shared entity context cache, signal fusion across agents
+- **Tier 38:** Multi-Mac coordination — agent_registry table, distributed locking (agent_locks), shared memory directories, fleet split strategy across Mac Mini + Mac Studio
+- **Tier 40:** AI Ops Dashboard — unified activity timeline showing cross-agent activity and sandbox queue
+
+**Full specs:**
+- `docs/superpowers/plans/2026-03-13-prompts-13-16-agent-learning-loops.md` (cross-agent learning)
+- `docs/superpowers/plans/2026-03-13-prompts-49-52-implementation-bridge.md` (multi-Mac coordination)
+- `docs/superpowers/specs/2026-03-13-prompts-53-56-ops-email-notifications.md` (AI Ops dashboard)
+
+---
+
 *Created: March 2026*
-*Updated: March 2026 — Added business value scoring, dependency chains, completion callbacks*
+*Updated: March 2026 — Added business value scoring, dependency chains, completion callbacks, 47-tier evolution reference*
 *For: IE CRM AI Master System — Inter-Agent Coordination*

@@ -540,6 +540,21 @@ Every approval/rejection David makes in the CRM Dashboard feeds the feedback loo
 
 ---
 
+## 47-Tier Evolution Roadmap Reference
+
+This architecture document describes the foundational 3-tier (Local → QA → Claude) agent system. A 5-round deep audit (60 prompts, March 2026) expanded this into a **47-tier evolution system** that adds:
+
+- **Tiers 0-7 (Plumbing):** Schema fixes, auth, sandbox promotion, pagination, email pipeline, AI testing
+- **Tiers 8-15 (Nervous System):** Agent feedback loops, cross-agent learning, calibration, innovation
+- **Tiers 16-23 (Brain):** Relationship graphs, temporal intelligence, simulation, market theory, antifragility
+- **Tiers 24-35 (Foresight):** Data gap awareness, predictions, proxy signals, calibration, portfolio intelligence
+- **Tiers 36-47 (Body):** Agent runtime (PM2), AI Ops dashboard, email (Postmark), notifications (Telegram), RBAC, CI/CD, DR
+
+**Evolution roadmaps:** `docs/plans/2026-03-13-evolution-roadmap*.md` (5 docs, one per round)
+**Detailed specs:** `docs/superpowers/specs/2026-03-13-prompts-*.md` and `docs/superpowers/plans/2026-03-13-prompts-*.md`
+
+---
+
 *Created: March 2026*
-*Updated: March 2026 — Added CRM ↔ AI integration points, new principles*
+*Updated: March 2026 — Added CRM ↔ AI integration points, new principles, 47-tier evolution reference*
 *For: IE CRM / Inland Empire Commercial Real Estate*

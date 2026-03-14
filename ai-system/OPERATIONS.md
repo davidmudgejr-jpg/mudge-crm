@@ -1035,6 +1035,24 @@ ALTER TABLE sandbox_outreach ADD COLUMN IF NOT EXISTS idempotency_key TEXT UNIQU
 
 ---
 
+## 47-Tier Evolution Roadmap Reference
+
+This operations document covers escalation, testing, versioning, retention, and crash recovery for the current agent system. A 5-round deep audit (60 prompts, March 2026) designed additional operational capabilities across 47 tiers:
+
+- **Tier 37:** Agent lifecycle management — PM2 process management, crash recovery with exponential backoff, watchdog daemon
+- **Tier 40:** AI Ops Dashboard — fleet status, cycle logs, cost tracking, sandbox queue, activity timeline
+- **Tier 43:** Notification infrastructure — Telegram alerts, in-app notifications, daily digest emails, quiet hours
+- **Tier 45:** Comprehensive audit trail — per-request change logging with before/after JSONB snapshots
+- **Tier 46:** CI/CD pipeline — GitHub Actions, Neon database branching, migration runner
+- **Tier 47:** Monitoring & disaster recovery — API metrics, slow query detection, health checks, recovery playbooks
+
+**Full specs:**
+- `docs/superpowers/plans/2026-03-13-prompts-49-52-implementation-bridge.md` (agent runtime + lifecycle)
+- `docs/superpowers/specs/2026-03-13-prompts-53-56-ops-email-notifications.md` (ops dashboard + notifications)
+- `docs/superpowers/specs/2026-03-13-prompts-57-60-rbac-devops.md` (audit trail + CI/CD + DR)
+
+---
+
 *Created: March 2026*
-*Updated: March 2026 — Added feedback loop system, auto-promotion rules, audit queryability, crash recovery procedures*
+*Updated: March 2026 — Added feedback loop system, auto-promotion rules, audit queryability, crash recovery, 47-tier evolution reference*
 *For: IE CRM AI Master System — System Operations*

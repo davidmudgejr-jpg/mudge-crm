@@ -315,6 +315,22 @@ Last updated: March 2026
 
 ---
 
+## 47-Tier Evolution Roadmap Reference
+
+This CRM roadmap covers Phases 1-7. A 5-round deep audit (60 prompts, March 2026) designed a **47-tier evolution system** that extends the CRM with:
+
+- **Tiers 0-7:** Schema fixes, auth, pagination, email pipeline (Postmark), AI testing harness
+- **Tiers 39-41:** Enhanced Action Items + Comps pages, TPE visualization, global search (Cmd+K), bulk ops (update/tag/reassign), document attachments
+- **Tier 42:** Email pipeline — outbound/inbound via Postmark, templates, campaign sends, auto-Interaction creation, suppression list
+- **Tier 43:** Notification bell, Telegram bot alerts, daily digest emails
+- **Tier 44:** Multi-user RBAC — Admin (David), Agent (Missy), Observer (Houston), AI Agent (system)
+- **Tier 45:** Audit trail — comprehensive change tracking with before/after snapshots
+
+**Evolution roadmaps:** `docs/plans/2026-03-13-evolution-roadmap*.md` (5 docs)
+**CRM-specific specs:** `docs/superpowers/specs/2026-03-13-prompts-53-56-ops-email-notifications.md`, `docs/superpowers/specs/2026-03-13-prompts-57-60-rbac-devops.md`
+
+---
+
 ## Guiding Principles
 
 1. Schema decisions before data — never load 50K records into a table you're not confident in
