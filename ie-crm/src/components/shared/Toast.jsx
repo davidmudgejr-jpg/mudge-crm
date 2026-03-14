@@ -45,7 +45,8 @@ function ToastItem({ toast, onDismiss }) {
   };
   return (
     <div
-      className={`pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm animate-fade-in glass-toast shadow-lg ${colors[toast.type] || colors.info}`}
+      className={`pointer-events-auto flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm glass-toast shadow-lg ${colors[toast.type] || colors.info}`}
+      style={{ animation: 'toast-slide-up 350ms cubic-bezier(0.175, 0.885, 0.32, 1.275) both' }}
     >
       <span className="flex-1">{toast.message}</span>
       <button onClick={onDismiss} className="opacity-60 hover:opacity-100 transition-opacity text-xs">

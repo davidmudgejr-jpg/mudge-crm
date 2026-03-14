@@ -76,7 +76,7 @@ function SearchableSelect({ value, onChange, options, linkOptions, matchOptions,
       {open && createPortal(
         <div
           ref={dropRef}
-          className="fixed z-[100] w-64 bg-crm-sidebar border border-crm-border rounded-lg shadow-xl overflow-hidden"
+          className="fixed z-[100] w-64 bg-crm-card border border-crm-border rounded-lg shadow-xl overflow-hidden"
           style={{ top: dropPos.top, left: dropPos.left }}
         >
           {/* Search input */}

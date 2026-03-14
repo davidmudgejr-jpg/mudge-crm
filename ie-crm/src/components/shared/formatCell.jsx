@@ -43,16 +43,16 @@ export default function formatCell(value, format) {
     }
 
     case 'status': {
-      const statusColors = {
-        Active: 'bg-green-500/15 text-green-400 border-green-500/30',
-        Closed: 'bg-gray-500/15 text-gray-400 border-gray-500/30',
-        Pending: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-        'Under Contract': 'bg-blue-500/15 text-blue-400 border-blue-500/30',
-        Lost: 'bg-red-500/15 text-red-400 border-red-500/30',
-        Won: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
+      const statusGradients = {
+        Active: 'bg-gradient-to-r from-[#30D158] to-[#34C759] text-white shadow-[0_2px_6px_rgba(48,209,88,0.3)]',
+        Closed: 'bg-gradient-to-r from-[#AF52DE] to-[#BF5AF2] text-white shadow-[0_2px_6px_rgba(175,82,222,0.3)]',
+        Pending: 'bg-gradient-to-r from-[#FF9F0A] to-[#FFD60A] text-white shadow-[0_2px_6px_rgba(255,159,10,0.3)]',
+        'Under Contract': 'bg-gradient-to-r from-[#007AFF] to-[#5AC8FA] text-white shadow-[0_2px_6px_rgba(0,122,255,0.3)]',
+        Lost: 'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
+        Won: 'bg-gradient-to-r from-[#AF52DE] to-[#BF5AF2] text-white shadow-[0_2px_6px_rgba(175,82,222,0.3)]',
       };
       return (
-        <span className={`text-xs px-1.5 py-0.5 rounded border ${statusColors[value] || 'bg-crm-card text-crm-muted border-crm-border'}`}>
+        <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${statusGradients[value] || 'bg-crm-card text-crm-muted'}`}>
           {value}
         </span>
       );

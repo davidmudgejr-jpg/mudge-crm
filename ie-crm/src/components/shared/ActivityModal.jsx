@@ -87,9 +87,9 @@ export default function ActivityModal({ entityType, entityId, entityLabel, onClo
   return (
     <>
       <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[8vh]" onClick={onClose}>
-        <div className="absolute inset-0 bg-black/50" />
+        <div className="absolute inset-0 bg-black/30" />
         <div
-          className="relative bg-crm-card border border-crm-border rounded-xl shadow-2xl w-full max-w-xl max-h-[80vh] flex flex-col"
+          className="relative bg-crm-panel glass-liquid border border-crm-border/50 rounded-xl shadow-2xl w-full max-w-xl max-h-[80vh] flex flex-col animate-sheet-down"
           onClick={(e) => e.stopPropagation()}
         >
           {/* Header */}

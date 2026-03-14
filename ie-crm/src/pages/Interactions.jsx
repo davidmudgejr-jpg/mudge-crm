@@ -4,6 +4,7 @@ import TYPE_ICONS, { INTERACTION_TYPES, getTypeInfo } from '../config/typeIcons'
 import InteractionDetail, { formatDate, formatTime } from './InteractionDetail';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
 import { useToast } from '../components/shared/Toast';
+import EmptyState from '../components/shared/EmptyState';
 import { todayPacific } from '../utils/timezone';
 import useDetailPanel from '../hooks/useDetailPanel';
 
@@ -68,7 +69,7 @@ export default function Interactions({ onCountChange }) {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowQuickAdd(true)}
-              className="text-xs bg-crm-accent hover:bg-crm-accent-hover text-white font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+              className="text-xs btn-primary px-3 py-1.5 flex items-center gap-1"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -86,7 +87,8 @@ export default function Interactions({ onCountChange }) {
 
         {/* Filters */}
         <div className="flex items-center gap-2">
-          <div className="flex-1 relative">
+          <div className="flex-1" />
+          <div className="w-48 relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-crm-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -120,6 +122,8 @@ export default function Interactions({ onCountChange }) {
       <div className="flex-1 overflow-y-auto px-6 py-4">
         {loading ? (
             <div className="flex items-center justify-center h-40 text-crm-muted text-sm">Loading...</div>
+          ) : rows.length === 0 && !search && !filterType ? (
+            <EmptyState entity="interactions" entityLabel="Activity" onAdd={() => setShowQuickAdd(true)} addLabel="+ New Activity" />
           ) : rows.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 text-crm-muted">
               <p className="text-sm">No activity found</p>

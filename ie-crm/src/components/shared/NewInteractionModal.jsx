@@ -206,7 +206,7 @@ export default function NewInteractionModal({ onCreated, onClose, initialLinks }
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[10vh]" onClick={onClose}>
       <div className="absolute inset-0 bg-black/50" />
-      <div className="relative bg-crm-card border border-crm-border rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col" onClick={(e) => e.stopPropagation()}>
+      <div className="relative bg-crm-card border border-crm-border rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] flex flex-col animate-sheet-down" onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className="px-4 py-3 border-b border-crm-border flex items-center justify-between flex-shrink-0">
           <h3 className="text-sm font-semibold">New Interaction</h3>

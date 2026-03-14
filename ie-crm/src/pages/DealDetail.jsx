@@ -17,16 +17,16 @@ export const STATUSES = ['Prospecting', 'Active', 'Under Contract', 'Closed', 'D
 export const DEAL_TYPES = ['Lease', 'Sale', 'Acquisition', 'Disposition', 'Investment', 'Development'];
 
 const STATUS_COLORS = {
-  Active: 'bg-green-500/20 text-green-400',
-  Lead: 'bg-cyan-500/20 text-cyan-400',
-  Prospect: 'bg-yellow-500/20 text-yellow-400',
-  Prospecting: 'bg-yellow-500/20 text-yellow-400',
-  'Long Leads': 'bg-orange-500/20 text-orange-400',
-  'Under Contract': 'bg-blue-500/20 text-blue-400',
-  Closed: 'bg-purple-500/20 text-purple-400',
-  'Deal fell through': 'bg-red-500/20 text-red-400',
-  Dead: 'bg-gray-500/20 text-gray-400',
-  'Dead Lead': 'bg-gray-500/20 text-gray-400',
+  Active: 'bg-gradient-to-r from-[#30D158] to-[#34C759] text-white shadow-[0_2px_6px_rgba(48,209,88,0.3)]',
+  Lead: 'bg-gradient-to-r from-[#FF9F0A] to-[#FFD60A] text-white shadow-[0_2px_6px_rgba(255,159,10,0.3)]',
+  Prospect: 'bg-gradient-to-r from-[#FF9F0A] to-[#FFD60A] text-white shadow-[0_2px_6px_rgba(255,159,10,0.3)]',
+  Prospecting: 'bg-gradient-to-r from-[#FF9F0A] to-[#FFD60A] text-white shadow-[0_2px_6px_rgba(255,159,10,0.3)]',
+  'Long Leads': 'bg-gradient-to-r from-[#FF9F0A] to-[#FF6B2C] text-white shadow-[0_2px_6px_rgba(255,107,44,0.3)]',
+  'Under Contract': 'bg-gradient-to-r from-[#007AFF] to-[#5AC8FA] text-white shadow-[0_2px_6px_rgba(0,122,255,0.3)]',
+  Closed: 'bg-gradient-to-r from-[#AF52DE] to-[#BF5AF2] text-white shadow-[0_2px_6px_rgba(175,82,222,0.3)]',
+  'Deal fell through': 'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
+  Dead: 'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
+  'Dead Lead': 'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
 };
 
 export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isSlideOver }) {
@@ -107,7 +107,7 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
     return (
       <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
         <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-        <div className="w-[520px] bg-crm-panel glass-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+        <div className="w-[520px] bg-crm-panel glass-liquid border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
           <DetailSkeleton />
         </div>
       </div>
@@ -125,7 +125,7 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
     return (
       <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
         <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-        <div className="w-[520px] bg-crm-panel glass-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+        <div className="w-[520px] bg-crm-panel glass-liquid border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
           {errorContent}
         </div>
       </div>
@@ -195,7 +195,7 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
   return (
     <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-      <div className="relative w-[520px] bg-crm-panel glass-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-[520px] bg-crm-panel glass-liquid border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
         {content}
       </div>
     </div>

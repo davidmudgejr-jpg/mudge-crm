@@ -183,7 +183,7 @@ function MultiSelectEditor({ value, options, onSave, onCancel }) {
           <span key={i} className="text-[10px] bg-crm-card border border-crm-border rounded px-1 py-0">{v}</span>
         )) : <span className="text-crm-muted text-xs">Select...</span>}
       </div>
-      <div className="absolute left-0 top-full mt-1 bg-crm-sidebar border border-crm-border rounded-lg shadow-xl z-50 py-1 max-h-48 overflow-y-auto min-w-[180px]">
+      <div className="absolute left-0 top-full mt-1 bg-crm-card border border-crm-border rounded-lg shadow-xl z-50 py-1 max-h-48 overflow-y-auto min-w-[180px]">
         {options.map((opt) => {
           const checked = selected.includes(opt);
           return (

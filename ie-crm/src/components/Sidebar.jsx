@@ -53,9 +53,10 @@ export default function Sidebar({ onTableChange }) {
               onClick={() => handleClick(item)}
               className={`no-drag relative group flex flex-col items-center justify-center py-3 rounded-xl transition-all duration-200 ${
                 isActive
-                  ? 'bg-crm-accent/15 text-crm-accent'
-                  : 'text-crm-muted hover:text-crm-text hover:bg-crm-hover'
+                  ? 'text-white shadow-[0_0_20px_rgba(0,122,255,0.3)]'
+                  : 'text-crm-muted hover:text-crm-text hover:bg-crm-hover hover:scale-[1.08] active:scale-[0.92]'
               }`}
+              style={isActive ? { background: 'linear-gradient(135deg, #007AFF, #5856D6)', borderRadius: '12px' } : undefined}
               title={item.label}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">

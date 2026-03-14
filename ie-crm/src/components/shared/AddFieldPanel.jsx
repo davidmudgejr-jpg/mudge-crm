@@ -56,7 +56,7 @@ export default function AddFieldPanel({ onAdd, onClose }) {
   return (
     <div
       ref={panelRef}
-      className="absolute top-0 right-0 z-50 w-72 bg-crm-sidebar border border-crm-border rounded-lg shadow-xl animate-fade-in overflow-hidden"
+      className="absolute top-0 right-0 z-50 w-72 bg-crm-card border border-crm-border rounded-lg shadow-xl animate-sheet-down overflow-hidden"
       style={{ maxHeight: '70vh' }}
     >
       {phase === 'pick' && (

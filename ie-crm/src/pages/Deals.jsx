@@ -14,19 +14,20 @@ import QuickAddModal from '../components/shared/QuickAddModal';
 import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
+import EmptyState from '../components/shared/EmptyState';
 import { playDealSound } from '../utils/dealSound';
 
 const STATUS_COLORS = {
-  Active: 'bg-green-500/20 text-green-400',
-  Lead: 'bg-cyan-500/20 text-cyan-400',
-  Prospect: 'bg-yellow-500/20 text-yellow-400',
-  Prospecting: 'bg-yellow-500/20 text-yellow-400',
-  'Long Leads': 'bg-orange-500/20 text-orange-400',
-  'Under Contract': 'bg-blue-500/20 text-blue-400',
-  Closed: 'bg-purple-500/20 text-purple-400',
-  'Deal fell through': 'bg-red-500/20 text-red-400',
-  Dead: 'bg-gray-500/20 text-gray-400',
-  'Dead Lead': 'bg-gray-500/20 text-gray-400',
+  Active: 'bg-gradient-to-r from-[#30D158] to-[#34C759] text-white shadow-[0_2px_6px_rgba(48,209,88,0.3)]',
+  Lead: 'bg-gradient-to-r from-[#FF9F0A] to-[#FFD60A] text-white shadow-[0_2px_6px_rgba(255,159,10,0.3)]',
+  Prospect: 'bg-gradient-to-r from-[#FF9F0A] to-[#FFD60A] text-white shadow-[0_2px_6px_rgba(255,159,10,0.3)]',
+  Prospecting: 'bg-gradient-to-r from-[#FF9F0A] to-[#FFD60A] text-white shadow-[0_2px_6px_rgba(255,159,10,0.3)]',
+  'Long Leads': 'bg-gradient-to-r from-[#FF9F0A] to-[#FF6B2C] text-white shadow-[0_2px_6px_rgba(255,107,44,0.3)]',
+  'Under Contract': 'bg-gradient-to-r from-[#007AFF] to-[#5AC8FA] text-white shadow-[0_2px_6px_rgba(0,122,255,0.3)]',
+  Closed: 'bg-gradient-to-r from-[#AF52DE] to-[#BF5AF2] text-white shadow-[0_2px_6px_rgba(175,82,222,0.3)]',
+  'Deal fell through': 'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
+  Dead: 'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
+  'Dead Lead': 'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
 };
 
 const DEAL_TYPES = ['Lease', 'Sale', 'Purchase', 'Sub-Lease', 'Renewal', 'Other'];
@@ -256,7 +257,7 @@ export default function Deals({ onCountChange }) {
             )}
             <button
               onClick={() => setShowQuickAdd(true)}
-              className="text-xs bg-crm-accent hover:bg-crm-accent-hover text-white font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+              className="text-xs btn-primary px-3 py-1.5 flex items-center gap-1"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -266,7 +267,8 @@ export default function Deals({ onCountChange }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex-1 relative">
+          <div className="flex-1" />
+          <div className="w-48 relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-crm-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -294,35 +296,39 @@ export default function Deals({ onCountChange }) {
       </div>
 
       <div className="flex-1 overflow-auto">
-        <CrmTable
-          tableKey="deals"
-          columns={visibleColumns}
-          rows={augmentedRows}
-          idField="deal_id"
-          loading={loading}
-          onRowClick={(row) => setDetailId(row.deal_id)}
-          onSort={handleSort}
-          orderBy={orderBy}
-          order={order}
-          selected={selected}
-          onToggleSelect={toggleSelect}
-          onToggleAll={toggleAll}
-          emptyMessage="No deals found"
-          emptySubMessage="Try adjusting your filters"
-          onRenameColumn={renameColumn}
-          onHideColumn={toggleColumn}
-          customColumns={customColumns}
-          customValues={values}
-          onCustomCellChange={setValue}
-          onAddField={addField}
-          onRenameField={(id, name) => updateField(id, { name })}
-          onDeleteField={removeField}
-          onHideCustomField={hideField}
-          onCellSave={handleCellSave}
-          onSelectOnly={selectOnly}
-          onShiftSelect={shiftSelect}
-          onDeleteRow={deleteRow}
-        />
+        {!loading && augmentedRows.length === 0 && !search && !filterStatus ? (
+          <EmptyState entity="deals" entityLabel="Deals" onAdd={() => setShowQuickAdd(true)} addLabel="+ New Deal" />
+        ) : (
+          <CrmTable
+            tableKey="deals"
+            columns={visibleColumns}
+            rows={augmentedRows}
+            idField="deal_id"
+            loading={loading}
+            onRowClick={(row) => setDetailId(row.deal_id)}
+            onSort={handleSort}
+            orderBy={orderBy}
+            order={order}
+            selected={selected}
+            onToggleSelect={toggleSelect}
+            onToggleAll={toggleAll}
+            emptyMessage="No deals found"
+            emptySubMessage="Try adjusting your filters"
+            onRenameColumn={renameColumn}
+            onHideColumn={toggleColumn}
+            customColumns={customColumns}
+            customValues={values}
+            onCustomCellChange={setValue}
+            onAddField={addField}
+            onRenameField={(id, name) => updateField(id, { name })}
+            onDeleteField={removeField}
+            onHideCustomField={hideField}
+            onCellSave={handleCellSave}
+            onSelectOnly={selectOnly}
+            onShiftSelect={shiftSelect}
+            onDeleteRow={deleteRow}
+          />
+        )}
       </div>
 
       {detailId && (

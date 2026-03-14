@@ -168,7 +168,7 @@ export default function CompManualEntryModal({ compType = 'lease', onClose, onCr
     <div className="fixed inset-0 z-50 flex items-center justify-center" onClick={onClose}>
       <div className="absolute inset-0 bg-crm-overlay" />
       <div
-        className="relative bg-crm-sidebar border border-crm-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col animate-fade-in"
+        className="relative bg-crm-sidebar border border-crm-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col animate-sheet-down"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}

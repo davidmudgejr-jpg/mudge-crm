@@ -3,6 +3,7 @@ import { getActionItems, updateActionItem } from '../api/database';
 import ActionItemDetail, { STATUSES } from './ActionItemDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import { useToast } from '../components/shared/Toast';
+import EmptyState from '../components/shared/EmptyState';
 import { formatDatePacific } from '../utils/timezone';
 import useDetailPanel from '../hooks/useDetailPanel';
 
@@ -204,7 +205,7 @@ export default function ActionItems({ onCountChange }) {
           </div>
           <button
             onClick={() => setShowQuickAdd(true)}
-            className="text-xs bg-crm-accent hover:bg-crm-accent-hover text-white font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+            className="text-xs btn-primary px-3 py-1.5 flex items-center gap-1"
           >
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -230,7 +231,8 @@ export default function ActionItems({ onCountChange }) {
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex-1 relative">
+          <div className="flex-1" />
+          <div className="w-48 relative">
             <svg className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-crm-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
@@ -255,6 +257,8 @@ export default function ActionItems({ onCountChange }) {
           <div className="flex items-center justify-center py-12">
             <div className="w-5 h-5 border-2 border-crm-accent/30 border-t-crm-accent rounded-full animate-spin" />
           </div>
+        ) : rows.length === 0 && !search && !filterStatus && activeView === 'all' ? (
+          <EmptyState entity="tasks" entityLabel="Tasks" onAdd={() => setShowQuickAdd(true)} addLabel="+ New Task" />
         ) : rows.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-sm text-crm-muted">No action items found</p>
