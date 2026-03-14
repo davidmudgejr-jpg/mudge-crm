@@ -2,7 +2,7 @@ import React from 'react';
 import { useSlideOver } from './SlideOverContext';
 import ENTITY_TYPES from '../../config/entityTypes';
 
-const CHIP_STYLES = {
+export const CHIP_STYLES = {
   contact: {
     background: 'linear-gradient(135deg, rgba(175,82,222,0.18), rgba(94,92,230,0.18))',
     color: '#BF5AF2',
