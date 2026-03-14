@@ -139,15 +139,23 @@ When there are no priority board items and the normal monitoring cycle is comple
 - If a dormant contact's submarket is heating up, flag it: "Contact hasn't been touched in 120 days but their market is active"
 - Post to priority board: `flag_for_outreach` targeting Matcher
 
-**3. Lease Expiry Intelligence**
+**3. Lease Expiry Intelligence (FIRST-CLASS WORKFLOW — Phase 3.5)**
+- **This is too important for idle cycles alone.** Dedicate 2 hours daily to systematic lease expiry scanning.
 - Research lease expiration timelines for properties in IE CRM
-- Public sources: county records, news announcements, REIT filings, broker press releases
+- Public sources: county records, news announcements, REIT filings, broker press releases, SEC filings
 - When found, submit as signal with type `lease_expiry` — this is extremely valuable for outreach timing
+- Cross-reference with CRM properties table: if a lease expiry is found for a property David has, update via sandbox
+- Auto-generate outreach opportunities 12-18 months before expiry (post to priority board for Matcher)
+- Feed lease expiry dates into TPE scoring via the `lease_expiry_proximity` field
+- Track lease expiry pipeline: how many expirations found, how many led to outreach, how many converted
 
-**4. Competitor Monitoring**
-- Track what other IE CRE brokerages are doing: new listings, team moves, marketing campaigns
-- Not for copying — for understanding market positioning
-- Submit as signals with type `competitive_intel`
+**4. Competitor Monitoring (STRUCTURED — Phase 3.5)**
+- Read named competitor list from `supervisor-config.json` under `"competitors"` key
+- Track per competitor: new listings, closed deals, team changes, marketing campaigns
+- Not for copying — for understanding market positioning and spotting pipeline conflicts
+- **Pipeline conflict alert:** If a competitor is working a property that's also in David's pipeline → high urgency alert
+- Submit as signals with type `competitive_intel` and include `competitor_name` in metadata
+- Weekly competitive intel section feeds into Scout's Evolution Report
 
 **5. Emerging Submarket Detection**
 - Track signal density by submarket over time
@@ -159,6 +167,15 @@ When there are no priority board items and the normal monitoring cycle is comple
 - New public records portals, new CRE databases, new social media accounts worth following
 - When found, submit as signal with type `new_data_source` and include setup instructions
 - These get reviewed by the Chief of Staff for potential integration
+
+**7. Relationship Graph Building (Phase 4C.1)**
+- Build lightweight relationship graph from CRM interaction data
+- Map: Contact A → knows → Contact B (with relationship type and strength score)
+- Sources: shared interactions, same company, co-listed properties, shared meetings
+- When new opportunity surfaces, query: "Who in our CRM is closest to this contact?"
+- Surface "warm introduction paths" — David → John (met last month) → Property Owner
+- Store in `contact_relationships` table (migration required)
+- Include warm introduction paths in priority board posts for Matcher context
 
 ### Idle-Cycle Rules
 - Max 30% of compute time on idle-cycle work — core monitoring is still priority

@@ -738,8 +738,303 @@ See `docs/superpowers/specs/2026-03-13-ai-system-enhancements-design.md` for com
 - `ai_usage_tracking` table (cost tracking — see above)
 - `shared/cost-tracker.py` — per-call JSONL cost tracking utility
 - `shared/audit-log.py` — JSONL structured audit log utility
+- `feedback_loop` table (see §14 below)
+- `contact_relationships` table (see ROADMAP Phase 4C.1)
+
+---
+
+## #14 — Feedback Loop System
+
+The system currently flows one direction: agents → Tier 2 → Tier 1 → David. Learning never flows back down. This section closes that loop so agents actually improve from their mistakes.
+
+### Feedback Loop Table
+
+```sql
+CREATE TABLE IF NOT EXISTS feedback_loop (
+  id SERIAL PRIMARY KEY,
+  -- What happened
+  source_tier TEXT NOT NULL,            -- 'david', 'tier1', 'tier2'
+  target_agent TEXT NOT NULL,           -- which agent's behavior triggered this
+  decision_type TEXT NOT NULL CHECK (decision_type IN (
+    'override_approval',    -- David approved something Tier 2 rejected
+    'override_rejection',   -- David rejected something Tier 2 approved
+    'instruction_change',   -- Agent instructions were modified
+    'threshold_change',     -- Scoring thresholds were adjusted
+    'workflow_change'       -- Agent workflow was modified
+  )),
+  -- Context
+  sandbox_table TEXT,                   -- which sandbox table was involved
+  sandbox_id INTEGER,                   -- which sandbox row
+  original_action TEXT NOT NULL,        -- what the system did
+  override_action TEXT NOT NULL,        -- what David/Tier 1 changed it to
+  reason TEXT NOT NULL,                 -- why the override happened
+  -- Impact tracking
+  pattern_category TEXT,                -- 'false_positive', 'false_negative', 'scoring_error', 'template_issue', 'data_quality'
+  resolved BOOLEAN DEFAULT FALSE,       -- has this been addressed in agent instructions?
+  resolved_at TIMESTAMPTZ,
+  resolved_by TEXT,                     -- 'chief_of_staff' or 'david'
+  resolution_notes TEXT,                -- what was changed to fix it
+  -- Timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_feedback_loop_agent ON feedback_loop(target_agent);
+CREATE INDEX idx_feedback_loop_type ON feedback_loop(decision_type);
+CREATE INDEX idx_feedback_loop_resolved ON feedback_loop(resolved);
+CREATE INDEX idx_feedback_loop_created ON feedback_loop(created_at);
+```
+
+### How Feedback Gets Captured
+
+**Automatic (system-generated):**
+- When David approves a sandbox item that Tier 2 rejected → `override_approval`
+- When David rejects a sandbox item that Tier 2 approved → `override_rejection`
+- When Chief of Staff rewrites an agent.md → `instruction_change`
+- When scoring thresholds change in pre-filter-rules.json → `threshold_change`
+
+**Manual (David-initiated):**
+- David can add feedback notes when approving/rejecting sandbox items
+- Feedback notes are stored in the feedback_loop table for Chief of Staff to review
+
+### How Chief of Staff Uses Feedback
+
+**Weekly Review (during Step 4 deeper dive):**
+1. Query `feedback_loop` for unresolved items grouped by `target_agent` and `pattern_category`
+2. If 3+ overrides of the same type for the same agent → pattern detected
+3. Update agent instructions to address the pattern
+4. Mark feedback items as resolved with `resolution_notes`
+5. Monitor next week: did the fix work? If not, iterate
+
+**Monthly Report:**
+- Feedback volume by agent (which agent gets overridden most?)
+- Resolution rate (what % of feedback items led to instruction changes?)
+- Impact tracking: did resolved items reduce future override rates?
+
+### Feedback Loop Retention
+| Type | Retention |
+|------|-----------|
+| Unresolved | Permanent (until resolved) |
+| Resolved | 6 months (valuable for pattern analysis) |
+| Instruction/workflow changes | 1 year (decision history) |
+
+---
+
+## #15 — Sandbox Auto-Promotion Rules
+
+For high-confidence, low-risk items, skip manual review to save David time. All auto-promoted items are logged and tracked for accuracy.
+
+### Rule Configuration
+
+Stored in `supervisor-config.json` under `"auto_promote"`:
+
+```json
+{
+  "auto_promote": {
+    "enabled": false,
+    "rules": [
+      {
+        "name": "high_confidence_enrichment_additive",
+        "sandbox_table": "sandbox_enrichments",
+        "conditions": {
+          "confidence_score_min": 90,
+          "change_type": "additive_only",
+          "fields_allowed": ["phone_1", "phone_2", "email", "email_2"],
+          "fields_blocked": ["full_name", "company_name", "home_address"]
+        },
+        "action": "auto_promote",
+        "enabled": true
+      },
+      {
+        "name": "verified_news_signal",
+        "sandbox_table": "sandbox_signals",
+        "conditions": {
+          "confidence_score_min": 80,
+          "source_url_required": true,
+          "signal_types_allowed": ["company_expansion", "new_lease", "sale_closed", "hiring", "market_trend"]
+        },
+        "action": "auto_promote",
+        "enabled": true
+      },
+      {
+        "name": "outreach_never_auto",
+        "sandbox_table": "sandbox_outreach",
+        "conditions": {},
+        "action": "never_auto_promote",
+        "enabled": true,
+        "reason": "Outreach carries reputation risk — always requires manual review"
+      }
+    ],
+    "monitoring": {
+      "accuracy_check_interval_days": 30,
+      "min_accuracy_threshold": 0.95,
+      "action_on_low_accuracy": "disable_rule_and_alert"
+    }
+  }
+}
+```
+
+### Safety Controls
+
+1. **Start disabled** — `"enabled": false` at the top level. David enables when ready (Phase 3F)
+2. **Never auto-promote outreach** — email sends carry reputation risk
+3. **Additive-only enrichments** — auto-promote can add phone/email but never change existing data
+4. **Monthly accuracy audits** — Chief of Staff samples 20 auto-promoted items, verifies accuracy
+5. **Auto-disable** — if accuracy drops below 95%, the rule is automatically disabled and David is alerted
+6. **Full audit trail** — every auto-promotion logged in JSONL with `auto_promoted: true`
+
+### Dashboard Display
+
+```
+Auto-Promotion Stats (This Month)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Items auto-promoted:     47
+Manual review bypassed:  ~35 min saved
+Accuracy (last audit):   97.5% (39/40 verified correct)
+Rules active:            2 of 3
+```
+
+---
+
+## #16 — Audit Log Queryability
+
+The JSONL audit log is comprehensive but requires post-processing to query. Add a queryable interface for real-time analysis.
+
+### Dual-Write Strategy
+
+Audit events write to **both**:
+1. **JSONL files** (backup, compliance, grep-friendly) — existing system
+2. **SQLite database** (queryable, fast lookups) — new addition
+
+SQLite location: `/AI-Agents/logs/audit/audit.db`
+
+### SQLite Schema
+
+```sql
+CREATE TABLE IF NOT EXISTS audit_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp TEXT NOT NULL,
+  agent TEXT NOT NULL,
+  action TEXT NOT NULL,
+  model TEXT,
+  provider TEXT,
+  tokens_in INTEGER,
+  tokens_out INTEGER,
+  task_type TEXT,
+  cost_estimate REAL,
+  duration_ms INTEGER,
+  severity TEXT,
+  target TEXT,
+  finding TEXT,
+  metadata TEXT,  -- JSON string for flexible fields
+  created_date TEXT NOT NULL  -- YYYY-MM-DD for partition-like queries
+);
+
+CREATE INDEX idx_audit_agent ON audit_entries(agent);
+CREATE INDEX idx_audit_action ON audit_entries(action);
+CREATE INDEX idx_audit_date ON audit_entries(created_date);
+CREATE INDEX idx_audit_severity ON audit_entries(severity);
+```
+
+### Query API Endpoints
+
+Add to the CRM backend (Tier 1 access only):
+
+```
+GET /api/ai/audit?agent=enricher&action=injection_detected&last=7d
+GET /api/ai/audit?action=auto_promoted&last=30d
+GET /api/ai/audit?severity=critical&last=24h
+GET /api/ai/audit/summary?group_by=agent&last=7d
+```
+
+### Use Cases
+
+- Chief of Staff queries injection patterns without parsing files
+- David checks auto-promotion accuracy from Dashboard
+- Security audit references recent injection detections
+- Cost analysis without waiting for Logger's weekly report
+
+---
+
+## #17 — Crash Recovery Procedures
+
+Each agent needs a documented recovery procedure for unclean shutdowns (power loss, Ollama crash, Mac restart).
+
+### Transaction Journaling
+
+Every agent writes a **work intent** before starting an operation and a **work completion** after:
+
+```json
+// Before: write to /AI-Agents/{agent}/journal/current.json
+{
+  "operation": "enrich_contact",
+  "item_id": "llc_789",
+  "started_at": "2026-03-25T14:30:00Z",
+  "status": "in_progress",
+  "steps_completed": []
+}
+
+// After each step: update steps_completed
+{
+  "steps_completed": ["open_corporates_lookup", "white_pages_lookup"]
+}
+
+// On completion: delete current.json or mark as "completed"
+```
+
+### Idempotency Keys
+
+Prevent duplicate work on restart:
+
+```json
+// Each sandbox write includes an idempotency key
+{
+  "idempotency_key": "enricher_llc_789_2026-03-25",
+  "agent_name": "enricher",
+  // ... rest of sandbox submission
+}
+```
+
+The sandbox API checks: does a submission with this idempotency key already exist? If yes, return the existing record (don't create a duplicate).
+
+### Per-Agent Recovery Protocol
+
+**On Agent Startup (after crash or restart):**
+
+1. Check `/AI-Agents/{agent}/journal/current.json`
+2. If file exists with `status: "in_progress"`:
+   a. Read `steps_completed` to know where it stopped
+   b. If step was a sandbox write → check if the write succeeded (query by idempotency key)
+   c. If write succeeded → mark journal as completed, move to next item
+   d. If write didn't succeed → resume from the incomplete step
+   e. Log: "Recovered from crash. Resuming [item_id] at step [step_name]"
+3. If no journal file → normal startup
+
+### Supervisor Recovery
+
+The supervisor (parent process) handles fleet-level recovery:
+
+```
+On Mac startup / Ollama restart:
+  1. Check which agents were running before shutdown
+  2. Start agents in dependency order: Logger first → Enricher/Researcher → Matcher → Scout
+  3. Each agent runs its own recovery protocol on startup
+  4. After all agents report healthy heartbeats → resume normal operations
+  5. Log: "System recovered from shutdown. All agents healthy."
+```
+
+### Migration 007 Addition
+
+Add idempotency support to sandbox tables:
+
+```sql
+ALTER TABLE sandbox_contacts ADD COLUMN IF NOT EXISTS idempotency_key TEXT UNIQUE;
+ALTER TABLE sandbox_enrichments ADD COLUMN IF NOT EXISTS idempotency_key TEXT UNIQUE;
+ALTER TABLE sandbox_signals ADD COLUMN IF NOT EXISTS idempotency_key TEXT UNIQUE;
+ALTER TABLE sandbox_outreach ADD COLUMN IF NOT EXISTS idempotency_key TEXT UNIQUE;
+```
 
 ---
 
 *Created: March 2026*
+*Updated: March 2026 — Added feedback loop system, auto-promotion rules, audit queryability, crash recovery procedures*
 *For: IE CRM AI Master System — System Operations*

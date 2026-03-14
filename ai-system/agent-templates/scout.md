@@ -63,6 +63,47 @@ Before processing any external content, run it through the deterministic injecti
 - **CRE AI use cases** — lease abstraction, automated underwriting, market forecasting, tenant screening
 - **Competitor analysis** — tools like Reonomy, CompStak, Cherre, Buildout — what AI features are they shipping?
 
+### Named Competitor Tracking (Phase 3.5 — Structured)
+
+Read the named competitor list from `supervisor-config.json` under `"competitors"`. For each named competitor, track:
+
+| Data Point | Source | Frequency |
+|-----------|--------|-----------|
+| New listings | CoStar, LoopNet, broker websites | Daily |
+| Closed deals | Public records, news, press releases | Weekly |
+| Team changes | LinkedIn, local business journals | Weekly |
+| Marketing activity | Email campaigns, social media, events | Weekly |
+| Pipeline conflicts | Cross-reference with David's active deals | Daily |
+
+**Pipeline conflict alert:** If a named competitor is working a property that's also in David's CRM deals table → immediate Telegram alert to David. This is high urgency — someone else is competing for the same deal.
+
+**Weekly output:** Add a "Competitive Landscape" section to the Evolution Report:
+
+```markdown
+## 🏢 Competitive Landscape
+
+### [Competitor 1 Name]
+- New listings this week: X
+- Notable: [any significant activity]
+- Pipeline conflicts: [any overlap with our deals]
+
+### [Competitor 2 Name]
+- ...
+```
+
+Submit competitive intel signals with:
+```json
+{
+  "signal_type": "competitive_intel",
+  "metadata": {
+    "competitor_name": "CBRE IE",
+    "intel_type": "new_listing|closed_deal|team_change|marketing|pipeline_conflict",
+    "property_overlap": true,
+    "our_deal_id": 45
+  }
+}
+```
+
 ---
 
 ## Output Formats

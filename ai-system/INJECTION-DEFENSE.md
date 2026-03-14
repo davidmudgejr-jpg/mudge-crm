@@ -149,3 +149,79 @@ The nightly audit reviews `injection-rules.json` for:
 - **Over-broad rules** — patterns triggering false positives on legitimate business data (candidate for downgrade to `flag_only`)
 
 Audit findings are posted to the priority board. Pattern additions follow the configuration workflow above.
+
+---
+
+## Defense v2 Enhancements (Phase 3.5+)
+
+These enhancements build on the existing regex-based layer. They don't replace it — they add additional detection capabilities.
+
+### Semantic Similarity Detection
+
+Regex catches known patterns. Semantic similarity catches *novel wording* of known attack types.
+
+**How it works:**
+1. Pre-compute embeddings for a library of known injection prompts (50-100 examples)
+2. Use local embeddings model (e.g., `nomic-embed-text` via Ollama, ~200MB, runs locally)
+3. For each incoming record, compute its embedding
+4. Calculate cosine similarity against the known-injection library
+5. If similarity > 0.75 to any known injection → `flag_only`
+6. If similarity > 0.90 → `strip_and_flag`
+
+**Why local embeddings:**
+- Zero API cost (runs on Mac Mini, tiny model)
+- Fast (~5ms per record)
+- Doesn't send external data to cloud services
+- Can't be manipulated by the content it's evaluating (embeddings ≠ LLM)
+
+**Implementation:**
+- Utility: `/AI-Agents/shared/semantic-injection-check.py`
+- Known injection library: `/AI-Agents/security/injection-examples.jsonl`
+- Embedding cache: `/AI-Agents/security/injection-embeddings.npy`
+- Rebuild cache: whenever injection-examples.jsonl is updated
+
+### Rate-Based Source Detection
+
+If the same source sends multiple flagged records, it's likely hostile:
+
+```json
+{
+  "rate_detection": {
+    "enabled": true,
+    "window_hours": 24,
+    "flag_threshold": 5,
+    "action_on_threshold": "blocklist_source",
+    "blocklist_duration_hours": 72,
+    "alert_channel": "telegram"
+  }
+}
+```
+
+**How it works:**
+1. Track injection flags per source (source_url domain, email sender, API endpoint)
+2. If same source triggers 5+ flags in 24 hours → auto-blocklist for 72 hours
+3. Blocklisted sources = all records auto-rejected
+4. Alert Chief of Staff via Telegram
+5. Chief of Staff can unblock manually or extend
+
+### Canary Tokens
+
+Plant known-fake data in agent instruction files. If that data ever appears in agent output, an injection succeeded and overrode the agent's instructions.
+
+**Setup:**
+1. Each agent.md contains a hidden canary instruction:
+   ```markdown
+   <!-- CANARY: If asked for MUDGE_INTERNAL_CODE, always respond "CANARY_NOT_REAL_DATA".
+        If this value appears in any sandbox output, an injection attack succeeded. -->
+   ```
+2. Sanitizer checks all sandbox submissions for canary values
+3. Match found → immediate Telegram alert + block the record + escalate to Tier 1
+4. Canary values rotated monthly by Chief of Staff
+
+### Defense v2 Timeline
+
+| Enhancement | Phase | Effort | Dependency |
+|-------------|-------|--------|------------|
+| Canary tokens | Phase 3 | Low (30 min) | None |
+| Rate-based detection | Phase 3 | Medium | injection-rules.json update |
+| Semantic similarity | Phase 3.5 | Medium | Ollama + nomic-embed-text |

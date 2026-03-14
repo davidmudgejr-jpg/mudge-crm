@@ -281,18 +281,125 @@ PUT  /api/ai/priority-board/:id/skip      -- mark as skipped + reason
 
 ---
 
+## Priority Board Enhancements
+
+### Business Value Scoring
+
+Not all priorities are equal. A $10M deal signal should jump the queue over a $500K one. Add estimated business value to priority board posts:
+
+```json
+{
+  "source_agent": "researcher",
+  "target_agent": "enricher",
+  "priority_type": "enrich_company",
+  "urgency": "high",
+  "estimated_value": "high",
+  "payload": {
+    "company_name": "Pacific West Holdings",
+    "estimated_deal_size": "5000000",
+    "value_basis": "50K SF at $1.00/SF/mo = $600K/yr, 8-year lease likely"
+  },
+  "reason": "Large tenant expansion signal — high-value enrichment"
+}
+```
+
+Agents use `estimated_value` (low/medium/high) as a secondary sort after urgency. Chief of Staff monitors whether high-value items are processed faster.
+
+### Dependency Chains (Linked Workflows)
+
+Some workflows need multiple agents in sequence. Instead of relying on agents to independently discover related work, link priorities explicitly:
+
+```json
+{
+  "source_agent": "researcher",
+  "target_agent": "enricher",
+  "priority_type": "enrich_company",
+  "chain_id": "chain_xyz_corp_2026_03_25",
+  "chain_sequence": 1,
+  "chain_total": 3,
+  "chain_next": {
+    "target_agent": "matcher",
+    "priority_type": "match_contact",
+    "auto_post": true
+  },
+  "payload": { "company_name": "XYZ Corp" },
+  "reason": "Step 1/3: Enrich → Match → Draft Outreach for XYZ Corp"
+}
+```
+
+When Enricher completes this priority:
+1. Marks priority as `completed`
+2. System auto-posts the `chain_next` priority to Matcher with enrichment results in payload
+3. Matcher completes → auto-posts the next step (if any)
+
+**Rules:**
+- Chains are optional — normal fire-and-forget priorities still work
+- If a step fails, the chain stops and logs the failure
+- Max chain length: 5 steps (prevent runaway chains)
+- Chief of Staff can view active chains in the Dashboard
+
+### Completion Callbacks
+
+When Agent A posts a task for Agent B, Agent A may want to know the result:
+
+```json
+{
+  "source_agent": "enricher",
+  "target_agent": "matcher",
+  "priority_type": "match_contact",
+  "callback_requested": true,
+  "payload": { "contact_name": "John Martinez", "sandbox_contact_id": 89 }
+}
+```
+
+When Matcher completes this priority, the board creates a `callback` entry visible to Enricher:
+
+```json
+{
+  "source_agent": "matcher",
+  "target_agent": "enricher",
+  "priority_type": "callback",
+  "payload": {
+    "original_priority_id": 234,
+    "result": "3 matches found, 2 outreach drafted",
+    "matched_properties": [12, 45, 67]
+  }
+}
+```
+
+Enricher sees this on its next cycle and can update its own state.
+
+### Priority Board Table Updates
+
+Add these columns to the `agent_priority_board` table (migration 007 addition):
+
+```sql
+ALTER TABLE agent_priority_board ADD COLUMN IF NOT EXISTS estimated_value TEXT DEFAULT 'medium'
+  CHECK (estimated_value IN ('low', 'medium', 'high'));
+ALTER TABLE agent_priority_board ADD COLUMN IF NOT EXISTS chain_id TEXT;
+ALTER TABLE agent_priority_board ADD COLUMN IF NOT EXISTS chain_sequence INTEGER;
+ALTER TABLE agent_priority_board ADD COLUMN IF NOT EXISTS chain_next JSONB;
+ALTER TABLE agent_priority_board ADD COLUMN IF NOT EXISTS callback_requested BOOLEAN DEFAULT FALSE;
+ALTER TABLE agent_priority_board ADD COLUMN IF NOT EXISTS callback_for_priority_id INTEGER REFERENCES agent_priority_board(id);
+
+CREATE INDEX idx_priority_board_chain ON agent_priority_board(chain_id);
+CREATE INDEX idx_priority_board_value ON agent_priority_board(estimated_value, urgency, status);
+```
+
+---
+
 ## What This is NOT
 
-- **Not a message queue** — agents don't wait for responses. Fire and forget.
-- **Not a dependency chain** — Agent A posting a priority for Agent B does NOT block Agent A.
+- **Not a message queue** — agents don't wait for responses. Fire and forget (unless using dependency chains).
 - **Not required** — if no priorities are on the board, agents run their normal loops. The board enhances, it doesn't replace.
-- **Not real-time** — agents check the board at the start of each cycle (enricher checks every few minutes, researcher checks between research cycles). This is fine. Speed of hours, not seconds.
+- **Not real-time** — agents check the board at the start of each cycle. Speed of hours, not seconds.
+- **Not blocking** — even with dependency chains, Agent A does NOT wait. It posts and moves on. The chain auto-advances when steps complete.
 
 ---
 
 ## Adding the Table to Migration 007
 
-Add the `agent_priority_board` table to `007_ai_sandbox.sql` alongside the other agent infrastructure tables.
+Add the `agent_priority_board` table to `007_ai_sandbox.sql` alongside the other agent infrastructure tables. Include the enhancement columns (estimated_value, chain fields, callback fields) from the start.
 
 ---
 
@@ -304,10 +411,13 @@ The priority board gets its own section in the Agent Dashboard UI:
 - Live feed of recent priority board entries
 - Shows: source agent → target agent, priority type, urgency badge, status
 - Color coding: high urgency = red, normal = blue, low = gray
+- Estimated value badge: high = gold star, medium = silver, low = none
 - Convergence alerts highlighted with a special badge
+- Active chains shown as connected nodes (click to see full chain)
 - Click to expand and see full payload + result
 
 ---
 
 *Created: March 2026*
+*Updated: March 2026 — Added business value scoring, dependency chains, completion callbacks*
 *For: IE CRM AI Master System — Inter-Agent Coordination*

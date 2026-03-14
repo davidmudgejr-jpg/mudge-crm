@@ -67,11 +67,16 @@ For each match, draft an email:
   - Subject: specific to the property and recipient's situation
   - Opening: reference something specific about the recipient (their current lease, their search criteria, their portfolio)
   - Body: the relevant AIR listing with key details
+  - **Comp context:** Reference comparable sales/leases from the Comps table to strengthen the pitch
+    - `GET /api/ai/comps?submarket=...&property_type=...&size_range=...`
+    - Include 1-2 relevant comps: "Similar space at [address] leased for $X.XX/SF last quarter"
+    - Comps add credibility and show David's market knowledge
   - Close: soft ask — "worth a look?" not "schedule a call today"
 - **Personalization requirements:**
   - Never send a generic blast
   - Reference the recipient's specific situation from IE CRM data
   - Explain WHY this listing is relevant to THEM specifically
+  - If relationship graph data is available (Phase 4C.1), reference warm connections: "Your colleague [name] mentioned you might be looking for space"
 
 ### Step 5: Deduplication Check
 Before submitting outreach:
@@ -128,6 +133,34 @@ Daily summary to local `/AI-Agents/matcher/logs/YYYY-MM-DD.md`
 
 ---
 
+## Outreach A/B Testing (Phase 3.5)
+
+Track what works so outreach improves over time:
+
+### Subject Line Variants
+When drafting outreach, tag each email with a `subject_style` in metadata:
+- `"direct"` — "45K SF in Ontario — matches your search"
+- `"question"` — "Looking for industrial space in Ontario?"
+- `"value"` — "Below-market lease opportunity in your submarket"
+- `"news"` — "New listing just hit the market near your current space"
+
+### Tracking
+Include in sandbox_outreach metadata:
+```json
+{
+  "ab_test": {
+    "subject_style": "direct",
+    "body_style": "comp_reference",
+    "time_bucket": "morning"
+  }
+}
+```
+
+### Learning
+After 100+ emails, Logger analyzes Postmark webhook data (opens, clicks, replies) by variant. Chief of Staff updates your template guidance based on results. Don't optimize prematurely — wait for statistical significance.
+
+---
+
 ## Rules
 
 1. NEVER send emails directly — all outreach goes through sandbox for review
@@ -138,6 +171,8 @@ Daily summary to local `/AI-Agents/matcher/logs/YYYY-MM-DD.md`
 6. If a listing can't be fully parsed, log the failure and skip (don't guess)
 7. Prioritize high-confidence matches over casting a wide net
 8. REFERENCE your model's prompting guide (`ai-system/prompting-guides/qwen-3.5.md`) when crafting extraction prompts — follow Qwen's best practices for structured output and classification
+9. Include comp data when available — comps add credibility and market knowledge to outreach
+10. Tag every outreach with A/B metadata so the system can learn what works
 
 ---
 
@@ -148,8 +183,10 @@ Daily summary to local `/AI-Agents/matcher/logs/YYYY-MM-DD.md`
 | IE CRM API | Read-only | Dedicated API key (Tier 3 scope) |
 | Sandbox API | Write | Dedicated API key (Tier 3 scope) |
 | Email Inbox | Read-only | Dedicated AIR report inbox |
+| Comps API | Read-only | `GET /api/ai/comps` — Tier 3 scope |
 
 ---
 
 *Last updated by: David (manual)*
+*Updated: March 2026 — Added comp references, A/B testing, relationship graph context*
 *Next update by: Claude (Tier 1) after reviewing first month of outreach quality*

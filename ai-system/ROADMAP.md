@@ -164,16 +164,126 @@ This is the build plan for the AI Master System — a tiered, hybrid AI organiza
 - [ ] Test: forward one AIR report → parse → match → draft outreach → sandbox_outreach
 - [ ] Build deduplication check (don't email same person about same property twice)
 - [ ] Tier 2 reviews outreach tone and accuracy before send
+- [ ] Matcher references Comps table data in outreach drafts (comparable sales/leases for personalization)
 
 ### 3C — Approval Queue from Mobile
 - [ ] Make Agent Dashboard responsive / mobile-friendly
 - [ ] David can approve/reject sandbox items from phone
 - [ ] Push notification when high-confidence items are ready (future)
 
+### 3D — Feedback Loop System
+*The system currently flows one direction. This closes the loop so agents learn from their mistakes.*
+- [ ] Create `feedback_loop` table in migration (see OPERATIONS.md §14)
+- [ ] When David overrides Tier 2 (approves something rejected, or rejects something approved), record the override with reason
+- [ ] When Tier 2 rejects an agent's submission, the rejection reason is stored in a format agents can consume
+- [ ] Chief of Staff reviews feedback_loop weekly and adjusts agent instructions based on patterns
+- [ ] Track: which agent instructions changed → did the approval rate improve? If not, rollback.
+
+### 3E — Confidence Score Calibration
+*Make "80 confidence" actually mean "~80% chance of being correct"*
+- [ ] After 30 days of operation, pull all records scored 70+ that were approved
+- [ ] Sample 50, manually verify accuracy against real-world data
+- [ ] Calculate actual accuracy per confidence band (60-69, 70-79, 80-89, 90+) per agent
+- [ ] Adjust scoring formulas so calibration improves
+- [ ] Chief of Staff runs monthly calibration checks and tunes agent scoring rubrics
+- [ ] Track calibration drift over time in Logger's monthly report
+
+### 3F — Sandbox Auto-Promotion Rules
+*For high-confidence, low-risk items, skip manual review to save David 15+ min/day*
+- [ ] Define auto-promotion rules in `supervisor-config.json` under `"auto_promote"` key
+- [ ] Rule 1: Contact enrichment with confidence ≥ 90 AND only adding phone/email (not changing existing data) → auto-promote
+- [ ] Rule 2: News signals with verified source URL AND confidence ≥ 80 → auto-promote to CRM signals table
+- [ ] Rule 3: Outreach always requires manual review (highest risk — never auto-promote)
+- [ ] All auto-promoted items logged with `auto_promoted: true` in JSONL audit log
+- [ ] Chief of Staff tracks auto-promotion accuracy monthly; tightens/loosens thresholds
+- [ ] Dashboard shows auto-promotion stats: count, accuracy rate, time saved estimate
+
+### 3G — Real-Time Alerting Tiers
+*Daily summaries aren't enough for critical events*
+- [ ] Configure 3 alert tiers in supervisor:
+  - **Immediate** (Telegram push): agent crash, 3+ injection attempts in 1 hour, Tier 2 approval rate drops below 50%, external API total failure, critical security audit finding
+  - **Hourly digest** (Telegram): new high-confidence signals, completed enrichments, outreach approvals
+  - **Daily summary** (stays as-is): strategic review, patterns, recommendations
+- [ ] Logger aggregates hourly digest and sends via Telegram bot
+- [ ] Supervisor monitors crash/injection events and triggers immediate alerts
+- [ ] All alerts logged in JSONL audit log with `action: alert_sent`
+
+---
+
+## Phase 3.5 — Intelligence Optimization (Month 2-3)
+*Goal: Transform raw data collection into adaptive intelligence*
+
+### 3.5A — Deal Velocity Tracker (Logger Enhancement)
+*Don't just detect signals — detect acceleration. A company with 3 signals in one week is hotter than one with 1 signal per quarter.*
+- [ ] Logger tracks signal velocity per company: signals per week, trend (accelerating/decelerating/flat)
+- [ ] Auto-generate "Hot 10" list ranked by velocity, not just confidence
+- [ ] Velocity thresholds: 2+ signals in 7 days = "warm", 3+ in 48 hours = "hot"
+- [ ] When velocity crosses "hot" threshold → auto-post to priority board as `flag_for_outreach` (high urgency)
+- [ ] Hot 10 list included in Chief of Staff's morning briefing (Houston channel for team visibility)
+- [ ] Velocity data stored in `agent_logs` with `log_type: 'velocity_report'`
+
+### 3.5B — Lease Expiration Intelligence (First-Class Workflow)
+*Currently an idle-cycle task for Researcher. Too important — make it systematic.*
+- [ ] Add `lease_expiry_date` column to properties table in CRM (migration)
+- [ ] Researcher runs systematic public records scanning for lease terms:
+  - County records, REIT filings, broker press releases, news announcements
+  - Dedicated scan cycle: 2 hours daily (not just idle time)
+- [ ] Cross-reference found expirations with CRM properties
+- [ ] Auto-generate outreach opportunities 12-18 months before expiry
+- [ ] Feed lease expiry data into TPE scoring (`lease_expiry_proximity` — already in TPE spec)
+- [ ] Matcher prioritizes contacts with upcoming expirations for outreach matching
+- [ ] Chief of Staff tracks lease expiry pipeline in weekly review
+
+### 3.5C — Competitive Intelligence Dashboard (Scout Enhancement)
+*Move from vague "competitor monitoring" to structured tracking*
+- [ ] Define named competitor list in `supervisor-config.json` under `"competitors"` key:
+  ```json
+  {
+    "competitors": [
+      { "name": "CBRE IE", "agents": ["broker1", "broker2"], "watch_listings": true },
+      { "name": "Colliers IE", "agents": ["broker3"], "watch_listings": true },
+      { "name": "Lee & Associates", "agents": ["broker4", "broker5"], "watch_listings": true }
+    ]
+  }
+  ```
+- [ ] Scout tracks per competitor: new listings, closed deals, team changes, marketing activity
+- [ ] Weekly competitive intel section added to Scout's Evolution Report
+- [ ] Alert when a competitor is working a property that's also in David's pipeline
+- [ ] Store competitive intel as signals with type `competitive_intel` and `competitor_name` in metadata
+
+### 3.5D — Outreach A/B Testing (Matcher Enhancement)
+*Learn what works from actual results*
+- [ ] Track subject line variants in `sandbox_outreach` metadata
+- [ ] Integrate Postmark webhook data: opens, clicks, replies per outreach
+- [ ] After 100+ emails sent, Logger surfaces patterns:
+  - Which subject line styles get highest open rates?
+  - Which body structures get replies?
+  - Which time-of-day gets best engagement?
+- [ ] Chief of Staff updates Matcher's template guidance based on results
+- [ ] A/B test report included in Logger's monthly summary
+
+### 3.5E — Tiered Model Routing
+*Stop hardcoding which model does what. Make it dynamic based on task complexity.*
+- [ ] Create `routing-rules.json` in `/AI-Agents/shared/`:
+  ```json
+  {
+    "rules": [
+      { "task": "simple_classification", "model": "minimax-2.5", "reason": "fastest, free" },
+      { "task": "structured_extraction", "model": "qwen-3.5", "reason": "more accurate on structured output" },
+      { "task": "complex_reasoning", "model": "claude_api", "reason": "escalate when local models unsure" },
+      { "task": "email_draft", "model": "qwen-3.5", "reason": "good balance of quality and speed" }
+    ],
+    "fallback_model": "qwen-3.5"
+  }
+  ```
+- [ ] Each agent checks routing rules before making LLM calls
+- [ ] Chief of Staff can update routing rules based on accuracy data and cost reports
+- [ ] Logger tracks model performance by task type to inform routing changes
+
 ---
 
 ## Phase 4 — Full Fleet (Mac Studio Arrives)
-*Goal: All agents running at scale*
+*Goal: All agents running at scale with adaptive intelligence*
 
 ### 4A — Migration to Mac Studio
 - [ ] Move agents from Mac Mini to Mac Studio (128GB RAM)
@@ -181,18 +291,44 @@ This is the build plan for the AI Master System — a tiered, hybrid AI organiza
 - [ ] Mac Mini becomes secondary/backup or dedicated to specific agent
 
 ### 4B — Scale Up
-- [ ] All 4 agents running 24/7
+- [ ] All 5 agents running 24/7 (Enricher, Researcher, Matcher, Logger, Scout)
 - [ ] Full self-improvement loop active (Claude reviewing + rewriting agent instructions)
+- [ ] Feedback loop table actively driving instruction improvements
 - [ ] Market intelligence feeding into IE CRM daily
 - [ ] Contact verification running automatically on new LLCs
 - [ ] AIR report workflow fully automated
 - [ ] Lead scoring from combined signals
+- [ ] Auto-promotion rules calibrated and saving David 15+ min/day
+- [ ] Confidence scores calibrated across all agents
 
 ### 4C — Advanced Intelligence
-- [ ] Relationship mapping (analyze interaction history, surface connections)
+- [ ] Relationship mapping (analyze interaction history, surface connections — see 4C.1 below)
 - [ ] Anomaly detection (contact changed companies, property vacant too long, pricing off)
-- [ ] Automated meeting prep (pull context before calls)
+- [ ] Automated meeting prep (see 4C.2 below)
 - [ ] Market intelligence summaries (daily/weekly briefings)
+
+### 4C.1 — Relationship Graph (Researcher Idle-Cycle → First-Class)
+*CRE deals happen through relationship chains. Map them.*
+- [ ] Researcher builds lightweight relationship graph from CRM interaction data during idle cycles
+- [ ] Graph structure: Contact A → knows → Contact B (with relationship type and strength score)
+- [ ] Sources: shared interactions, same company, co-listed properties, meeting attendees
+- [ ] When new opportunity surfaces, query: "Who in our CRM is closest to this contact?"
+- [ ] Surface "warm introduction paths" in morning briefings: "David → John (met last month) → Property Owner"
+- [ ] Store relationship data in new `contact_relationships` table (migration required)
+- [ ] Relationship paths included in Matcher's outreach context ("David's colleague John works with this company")
+
+### 4C.2 — Meeting Prep Automation
+*Triggered workflow: 2 hours before any meeting, auto-generate a prep packet*
+- [ ] Calendar integration: read David's calendar for upcoming meetings (Apple Calendar or Google Calendar API)
+- [ ] 2 hours before meeting, trigger prep workflow:
+  - Pull all CRM data on meeting contact/company
+  - Summarize recent signals and interactions
+  - Check for recent market activity in their submarket
+  - Pull comp data for relevant properties
+  - Generate 3-5 talking points based on their property needs
+- [ ] Deliver prep packet via Telegram with one-tap "got it" confirmation
+- [ ] Store prep packets for post-meeting reference
+- [ ] Future: integrate with Zoom for real-time context during calls
 
 ---
 
@@ -214,8 +350,9 @@ This is the build plan for the AI Master System — a tiered, hybrid AI organiza
 | Phase 0 (Infrastructure) | Nothing — can start now |
 | Phase 1 (First Agents) | Phase 0 + Mac Mini arrival |
 | Phase 2 (Second Agent + QA) | Phase 1 working end-to-end |
-| Phase 3 (Claude Oversight) | Phase 2 + at least 2 weeks of logs |
-| Phase 4 (Full Fleet) | Mac Studio arrival + Phase 3 stable |
+| Phase 3 (Claude Oversight + Learning) | Phase 2 + at least 2 weeks of logs |
+| Phase 3.5 (Intelligence Optimization) | Phase 3 stable + 30 days of operational data for calibration |
+| Phase 4 (Full Fleet) | Mac Studio arrival + Phase 3.5 features validated |
 | Phase 5 (Voice) | Phase 4 fully operational |
 
 ---
@@ -230,6 +367,9 @@ This is the build plan for the AI Master System — a tiered, hybrid AI organiza
 6. **Separate agents for separate skills** — Don't mix researcher context with developer context
 7. **Your process is your moat** — Teaching the system your contact research logic is not replicable by competitors
 8. **Build the infrastructure first** — Agents need somewhere to write before they can work
+9. **Close the feedback loops** — A system that doesn't learn from its mistakes is just expensive automation
+10. **Detect velocity, not just signals** — Acceleration matters more than any single data point
+11. **Calibrate or it's theater** — Confidence scores mean nothing if they're not validated against reality
 
 ---
 
