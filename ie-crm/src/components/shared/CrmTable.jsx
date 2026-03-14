@@ -175,7 +175,7 @@ function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide,
       </div>
 
       {menuOpen && (
-        <div ref={menuRef} className="absolute top-full left-0 mt-1 w-36 bg-crm-sidebar border border-crm-border rounded-lg shadow-xl z-50 overflow-hidden animate-fade-in">
+        <div ref={menuRef} className="absolute top-full left-0 mt-1 w-36 bg-crm-card border border-crm-border rounded-lg shadow-xl z-50 overflow-hidden animate-fade-in">
           <button
             onClick={() => setRenaming(true)}
             className="w-full text-left px-3 py-1.5 text-xs text-crm-text hover:bg-crm-hover transition-colors"
@@ -543,13 +543,13 @@ export default function CrmTable({
                   return (
                     <td
                       key={col.key}
-                      className={`px-3 py-2.5 overflow-hidden text-ellipsis whitespace-nowrap${isEditable && !isEditing ? ' cursor-cell' : ''}`}
+                      className={`px-3 py-2.5 text-ellipsis whitespace-nowrap${isEditing ? ' overflow-visible relative z-20' : ' overflow-hidden'}${isEditable && !isEditing ? ' cursor-cell' : ''}`}
                       style={{
                         width: widths[col.key] || col.defaultWidth || 150,
                         minWidth: widths[col.key] || col.defaultWidth || 150,
                         maxWidth: widths[col.key] || col.defaultWidth || 150,
                       }}
-                      onDoubleClick={isEditable ? (e) => {
+                      onClick={isEditable ? (e) => {
                         e.stopPropagation();
                         if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
                       } : undefined}
@@ -583,13 +583,13 @@ export default function CrmTable({
                   return (
                     <td
                       key={col.key}
-                      className="px-3 py-2.5 overflow-hidden text-ellipsis whitespace-nowrap"
+                      className={`px-3 py-2.5 text-ellipsis whitespace-nowrap${isEditing ? ' overflow-visible relative z-20' : ' overflow-hidden'}`}
                       style={{
                         width: widths[col.key] || col.defaultWidth || 150,
                         minWidth: widths[col.key] || col.defaultWidth || 150,
                         maxWidth: widths[col.key] || col.defaultWidth || 150,
                       }}
-                      onDoubleClick={(e) => {
+                      onClick={(e) => {
                         e.stopPropagation();
                         if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
                       }}

@@ -21,7 +21,7 @@ export default function SlideOver({ children, onClose, level = 0, width = 'w-[52
       <div className={`absolute inset-0 ${level === 0 ? 'bg-black/30' : 'bg-black/15'} animate-fade-in`} />
       <div
         ref={panelRef}
-        className={`relative ${width} bg-crm-panel glass-panel border-l border-crm-border/50 h-full overflow-y-auto animate-slide-in-right rounded-tl-xl`}
+        className={`relative ${width} bg-crm-panel glass-liquid border-l border-crm-border/50 h-full overflow-y-auto animate-slide-in-right rounded-tl-xl`}
         onClick={(e) => e.stopPropagation()}
       >
         {children}
@@ -35,7 +35,7 @@ export function SlideOverHeader({ title, subtitle, onClose, children }) {
   const isNested = slideOver?.stack?.length > 1;
 
   return (
-    <div className="sticky top-0 bg-crm-panel glass-panel border-b border-crm-border/50 px-5 py-4 z-10">
+    <div className="sticky top-0 bg-crm-panel glass-liquid border-b border-crm-border/50 px-5 py-4 z-10">
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2 flex-1 min-w-0">
           {isNested && (

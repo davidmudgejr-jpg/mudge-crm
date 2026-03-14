@@ -47,7 +47,7 @@ export default function ColumnToggleMenu({ allColumns, visibleKeys, toggleColumn
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-56 max-h-80 overflow-y-auto rounded-lg border border-crm-border bg-crm-sidebar shadow-xl">
+        <div className="absolute right-0 top-full mt-1 z-50 w-56 max-h-80 overflow-y-auto rounded-lg border border-crm-border bg-crm-card shadow-xl">
           {/* Header actions */}
           <div className="flex items-center justify-between px-3 py-2 border-b border-crm-border">
             <span className="text-[10px] font-medium text-crm-muted uppercase tracking-wider">Toggle Columns</span>

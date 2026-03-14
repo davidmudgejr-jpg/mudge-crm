@@ -759,7 +759,136 @@ These columns should open the detail panel, not inline edit:
 
 ---
 
-## Phase 13: Final Report
+## Phase 13: Column Resize (Drag-to-Resize)
+
+All main table views support Airtable-style column resizing via drag handles on column header borders.
+
+### 13.1 Drag-to-Resize Works
+
+On the Properties table (or any main table):
+- [ ] **Drag handle visible** — Hover over a column header right border → cursor changes to `col-resize`
+- [ ] **Drag to widen** — Drag right → column widens, cell content has more space
+- [ ] **Drag to narrow** — Drag left → column narrows, text truncates with ellipsis
+- [ ] **Minimum width** — Cannot drag below 60px (minimum enforced)
+- [ ] **Other columns unaffected** — Only the dragged column changes width; siblings don't shift unexpectedly
+
+### 13.2 Widths Persist Across Navigation
+
+- [ ] Resize a column → navigate to a different tab → navigate back → column retains the resized width
+- [ ] Close and reopen the app → widths persist (stored in localStorage key `crm-col-widths-{tableKey}`)
+
+### 13.3 Table Layout Enforced
+
+- [ ] Columns respect the set width — text overflows with ellipsis, not by expanding the column
+- [ ] `table-layout: fixed` is active — columns don't auto-expand to fit content
+- [ ] Horizontal scroll works when total column width exceeds viewport
+
+### 13.4 New Columns Get Default Width
+
+- [ ] If a new custom field column is added, it receives a default width (150px) without breaking existing column sizes
+
+---
+
+## Phase 14: CSV Import — Campaign & Property Linking
+
+The Import tab supports linking contacts to campaigns, owner properties, and broker properties during CSV upload.
+
+### 14.1 Link Options Appear for Contacts Target
+
+When "contacts" is selected as the import target:
+- [ ] **Column mapping dropdown** includes: `Campaign → link`, `Property (owner) → link`, `Property (broker) → link`
+- [ ] These appear alongside the existing `Company → link` and `Notes → Activity` options
+
+### 14.2 Campaign Linking (Comma-Separated)
+
+Prepare a test CSV with a column containing comma-separated campaign names (e.g., `"Spring Mailer, Fall Outreach"`):
+- [ ] Map the column to `Campaign → link`
+- [ ] **Preview** step shows the column correctly
+- [ ] **Import succeeds** — links are created in `campaign_contacts` junction table
+- [ ] **New campaigns auto-created** — If a campaign name doesn't exist, it's created in `campaigns` table
+- [ ] **Existing campaigns matched** — If the campaign already exists (case-insensitive), the existing record is linked (no duplicate created)
+- [ ] **Multiple campaigns per row** — Each comma-separated name creates a separate link
+
+### 14.3 Property Owner Linking
+
+Prepare a test CSV with a column containing property addresses that match existing properties:
+- [ ] Map the column to `Property (owner) → link`
+- [ ] Import links contacts to matching properties in `property_contacts` with `role = 'owner'`
+- [ ] **Match-only** — If the property address doesn't match any existing property, the row is skipped (no auto-create for properties)
+
+### 14.4 Property Broker Linking
+
+Same as 14.3 but with `Property (broker) → link`:
+- [ ] Links are created with `role = 'broker'` in `property_contacts`
+
+### 14.5 Auto-Detect Column Names
+
+CSV columns with these header names should auto-map:
+- [ ] `campaigns`, `campaign`, `campaign name` → `Campaign → link`
+- [ ] `owner properties`, `owner property` → `Property (owner) → link`
+- [ ] `broker property`, `broker properties` → `Property (broker) → link`
+
+### 14.6 Import Error Resilience
+
+- [ ] Per-row savepoints work — one failed row doesn't abort the entire batch
+- [ ] **Error count reported** — Import summary shows inserted count, link count, and error count
+- [ ] Missing `normalized_address` column handled gracefully (try/catch fallback in property SELECT)
+
+---
+
+## Phase 15: Activity Display — Icons & Note Preview
+
+Activity cells, activity sections, and activity modals display interaction types with correct icons and note previews.
+
+### 15.1 Case-Insensitive Type Matching
+
+Interactions with lowercase types from Airtable imports render correctly:
+- [ ] `"note"` (lowercase) → shows **yellow** Note icon (annotation bubble), NOT gray Other icon
+- [ ] `"phone call"` (lowercase) → shows **green** Phone icon
+- [ ] Title displays as canonical Title Case: "Note", "Phone Call" — NOT "note", "phone call"
+- [ ] All 17+ interaction types resolve correctly regardless of case in DB
+
+### 15.2 Note Icon Style
+
+- [ ] Note type icon is an annotation/speech-bubble with text lines (NOT the old pencil-alt/edit icon)
+- [ ] Icon is consistent across: table cell preview, activity section (detail panel), activity modal, interactions page
+
+### 15.3 Note Preview Text
+
+In all activity displays (table cell, detail panel, modal):
+- [ ] Note-type interactions show **"Note"** as the type label (not raw note text as the title)
+- [ ] Below the label: truncated preview of note content (2-line clamp in sections/modal, ~35 chars in table cells)
+- [ ] Non-Note types also show their note preview below the type label (consistent rendering)
+- [ ] Clicking the activity item opens InteractionDetail with the full note content
+
+### 15.4 Table Cell Activity Preview (ActivityCellPreview)
+
+- [ ] Shows up to 3 recent interactions with colored type icons
+- [ ] Each row shows: icon circle → type + preview text → date
+- [ ] Note entries show: `"Note — Met with tenant to dis…"` (not just "note")
+- [ ] `"+N more"` link appears when >3 interactions exist
+
+### 15.5 InteractionDetail Type Display
+
+- [ ] Opening any interaction shows the correct icon and Title Case type name in the header
+- [ ] Email-type interactions (case-insensitive match) show the Email section with Subject/Body fields
+
+---
+
+## Phase 16: Boolean Coercion in Imports (If Implemented)
+
+> **Note:** This may not be implemented yet. If boolean coercion has been added, test it. Otherwise skip.
+
+CSV fields mapped to boolean columns should handle non-standard values:
+- [ ] `"checked"` → `true`
+- [ ] `"🔥"` → `true`
+- [ ] `"yes"`, `"true"`, `"1"` → `true`
+- [ ] `"no"`, `"false"`, `"0"`, `""` → `false`
+- [ ] Unexpected values (e.g., `"maybe"`) → `false` (or null, no crash)
+
+---
+
+## Phase 17: Final Report
 
 After all tests complete, produce a report in this format:
 
@@ -820,6 +949,36 @@ After all tests complete, produce a report in this format:
 - Escape cancels: PASS/FAIL
 - Optimistic update + rollback: PASS/FAIL
 
+## Column Resize (Phase 13)
+- Drag-to-resize works: PASS/FAIL
+- Minimum width enforced (60px): PASS/FAIL
+- Widths persist across navigation: PASS/FAIL
+- Widths persist after app restart (localStorage): PASS/FAIL
+- table-layout: fixed enforced: PASS/FAIL
+
+## CSV Import — Campaign & Property Linking (Phase 14)
+- Campaign link option appears for contacts: PASS/FAIL
+- Comma-separated campaigns create multiple links: PASS/FAIL
+- New campaigns auto-created: PASS/FAIL
+- Existing campaigns matched (no dupes): PASS/FAIL
+- Property (owner) linking works: PASS/FAIL
+- Property (broker) linking works: PASS/FAIL
+- Auto-detect column headers: PASS/FAIL
+- Per-row error resilience: PASS/FAIL
+
+## Activity Display — Icons & Note Preview (Phase 15)
+- Case-insensitive type matching: PASS/FAIL
+- Lowercase "note" shows yellow icon (not gray Other): PASS/FAIL
+- Note icon is annotation bubble (not pencil): PASS/FAIL
+- Note preview text shows below type label: PASS/FAIL
+- Title Case display names in all views: PASS/FAIL
+- Table cell preview shows "Note — preview…": PASS/FAIL
+- InteractionDetail shows correct icon + name: PASS/FAIL
+
+## Boolean Coercion (Phase 16) — if implemented
+- Standard values coerced correctly: PASS/FAIL/SKIPPED
+- Emoji/text values handled: PASS/FAIL/SKIPPED
+
 ## Fixes Applied
 1. [file:line] — description of what was broken and how it was fixed
 2. ...
@@ -833,6 +992,25 @@ After all tests complete, produce a report in this format:
 
 ## Recommendation
 [Ready to build TPE / Need to fix X before TPE]
+
+## Improvement Recommendations
+Things that aren't broken but could be better — discovered during testing.
+
+### UX / Visual
+1. [Component/area] — suggestion and why it would help
+2. ...
+
+### Performance
+1. [Area] — what's slow and a proposed improvement
+2. ...
+
+### Data Integrity
+1. [Area] — edge case or validation gap worth addressing
+2. ...
+
+### Future-Proofing
+1. [Area] — something that works now but may cause issues at scale
+2. ...
 ```
 
 ---

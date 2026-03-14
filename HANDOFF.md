@@ -1,7 +1,7 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-12
-> Previous session: "Import engine hardening + auto-linking + bulk delete + column resize UX"
+> Updated: 2026-03-13
+> Previous session: "AI system architecture updates — Scout agent, credential hygiene, parallel sub-agents, self-improvement loop, YouTube transcript MCP"
 > Next task: **Upload real Airtable data & run full test protocol** — verify imports, auto-linking, notes-to-activity, bulk delete, then fix any bugs found
 
 ---
@@ -143,6 +143,17 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **Column metadata on all 4 pages** — Added `editable: false` to primary columns (address/name), `editType`/`editOptions` to select/multi-select/tags/boolean columns. Properties: property_type select (7 options), contacted multi-select (14 options), priority select, boolean flags. Contacts: type select (8 types), client_level select (A-D), boolean flags. Deals: status select (9 statuses), deal_type select, repping/run_by multi-select, priority_deal boolean. Companies: revenue number, tags.
 - [x] **handleCellSave on all 4 pages** — Optimistic update with rollback on error. Uses `updateProperty`/`updateContact`/`updateDeal`/`updateCompany` DB functions. Toast notifications for success/failure.
 - [x] **Empty activity cell click** — ActivityCellPreview `--` placeholder now has `onClick` → opens ActivityModal instead of falling through to detail panel. Works on all 4 table views.
+
+### AI System Architecture Updates (2026-03-13)
+- [x] **YouTube Transcript MCP** — installed `@kimtaeyoon83/mcp-server-youtube-transcript` for both Claude Desktop and Claude Code (project-level `.mcp.json`). Drop any YouTube URL in future sessions and Claude can pull the transcript.
+- [x] **Credential Hygiene** — new OPERATIONS.md §11: credential scanning before Git backup, nightly config backup cron (4:30 AM), env var pattern for agent configs, placeholder replacement rules. Prevents API key leakage.
+- [x] **Alert-Only Health Checks** — new OPERATIONS.md §12: heartbeat monitoring only notifies when something's wrong (no "all clear" spam). Hostile input defense rules for all agents consuming external content.
+- [x] **Parallel Sub-Agent Spawning** — new ORCHESTRATION.md section: fan-out/fan-in pattern for Researcher. 5 parallel sub-searches (county records, listings, news, social, CRM cross-ref) merge into single report. Timeout and fallback rules included.
+- [x] **Nightly Self-Maintenance Cron** — new ORCHESTRATION.md section: 3-5:30 AM schedule for index rebuilds, data cleanup, model updates, config backup, performance reporting.
+- [x] **Scout Agent (new — Agent 5)** — AI & tech intelligence agent. Scans HN, Reddit, X, ArXiv, Ollama registry, HuggingFace for new models/tools/techniques. Weekly Evolution Report with effort-vs-impact matrix. Immediate alerts for urgent discoveries (security vulnerabilities, major model releases). Full agent template created at `agent-templates/scout.md`.
+- [x] **Self-Improvement Loop v2** — ARCHITECTURE.md updated: two feedback streams into Claude (internal performance + external intelligence). Evolution Proposal format defined with categories: model_upgrade, new_tool, workflow_change, cost_optimization, security_patch, competitor_intel, new_data_source.
+- [x] **ROADMAP Phase 2D** — Scout agent deployment added to Phase 2 roadmap.
+- [x] **Supervisor config + folder structure** — ORCHESTRATION.md updated with Scout in architecture diagram, supervisor-config.json, startup order, folder structure, and fleet split strategy (Scout on Mac Mini alongside Researcher).
 
 ---
 

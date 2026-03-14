@@ -7,7 +7,6 @@ import useAutoSave from '../hooks/useAutoSave';
 import { SlideOverHeader } from '../components/shared/SlideOver';
 import DetailSkeleton from '../components/shared/DetailSkeleton';
 import NotesSection from '../components/shared/NotesSection';
-import InteractionDetail from './InteractionDetail';
 import { formatDatePacific } from '../utils/timezone';
 import TYPE_ICONS from '../config/typeIcons';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
@@ -44,7 +43,6 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
   const [interactions, setInteractions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [selectedInteraction, setSelectedInteraction] = useState(null);
   const [showNewInteraction, setShowNewInteraction] = useState(false);
 
   const saveField = useAutoSave(updateContact, resolvedId, setContact, onRefresh);
@@ -106,7 +104,7 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
     return (
       <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
         <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-        <div className="w-[500px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+        <div className="w-[500px] bg-crm-panel glass-liquid border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
           <DetailSkeleton />
         </div>
       </div>
@@ -124,7 +122,7 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
     return (
       <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
         <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-        <div className="w-[500px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+        <div className="w-[500px] bg-crm-panel glass-liquid border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
           {errorContent}
         </div>
       </div>
@@ -182,16 +180,7 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
         </div>
       </Section>
 
-      <ActivitySection interactions={interactions} onNewInteraction={() => setShowNewInteraction(true)} onSelectInteraction={(id) => setSelectedInteraction(id)} />
-
-      {selectedInteraction && (
-        <div className="fixed inset-0 z-50 flex justify-end" onClick={() => setSelectedInteraction(null)}>
-          <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-          <div className="relative w-[480px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
-            <InteractionDetail id={selectedInteraction} onClose={() => setSelectedInteraction(null)} onRefresh={loadData} isSlideOver />
-          </div>
-        </div>
-      )}
+      <ActivitySection interactions={interactions} onNewInteraction={() => setShowNewInteraction(true)} />
 
       {showNewInteraction && (
         <NewInteractionModal
@@ -214,7 +203,7 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
   return (
     <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
       <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-      <div className="relative w-[500px] bg-crm-panel border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
+      <div className="relative w-[500px] bg-crm-panel glass-liquid border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
         {content}
       </div>
     </div>
