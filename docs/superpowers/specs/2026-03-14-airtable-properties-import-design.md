@@ -49,7 +49,7 @@ Reusable: the engine function can be called from the CLI script, agent API endpo
 | Year Built | year_built | cleanNum → int |
 | Year Renovated | year_renovated | cleanNum → int |
 | RBA | rba | cleanNum |
-| Number Of Stories | number_of_stories | cleanNum → int (note: schema also has `stories` from migration 004 — use `number_of_stories`) |
+| Number Of Stories | stories | cleanNum → int (migration 004 column) |
 | Land Area (AC) | land_area_ac | cleanNum |
 | Land SF | land_sf | cleanNum |
 | FAR | far | cleanNum |
@@ -64,14 +64,14 @@ Reusable: the engine function can be called from the CLI script, agent API endpo
 | Number Of Cranes | number_of_cranes | cleanNum → int |
 | Construction Material | construction_material | cleanStr |
 | Rail Lines | rail_lines | cleanStr |
-| Number Of Parking Spaces | number_of_parking_spaces | cleanNum → int (note: schema also has `parking_spaces` from migration 004 — use `number_of_parking_spaces`) |
+| Number Of Parking Spaces | parking_spaces | cleanNum → int (migration 004 column) |
 | Parking Ratio | parking_ratio | cleanNum |
 | Features | features | cleanStr |
 | Last Sale Date | last_sale_date | cleanDate |
 | Last Sale Price | last_sale_price | cleanNum (strip $, commas) |
 | Price PSF | price_psf | cleanNum |
 | Rent/SF/Mo | rent_psf_mo | cleanNum |
-| Rate Type | rate_type | cleanStr |
+| Rate Type | overflow JSONB | cleanStr (no dedicated column on properties — store in overflow) |
 | Debt Date | debt_date | cleanDate |
 | Loan Amount | loan_amount | cleanNum |
 | Contacted? | contacted | Split comma-separated multi-select into TEXT[] (e.g. "Contacted Owner, Sent Mailer" → `{'Contacted Owner','Sent Mailer'}`) |
@@ -114,8 +114,8 @@ Parsing rules:
 1. Split on newlines, semicolons, or `" - "` preceded by a date pattern
 2. Date patterns: `M/D/YY`, `MM/DD/YYYY`, `YYYY-MM-DD`, `Mon DD, YYYY` (two-digit years: `24`→`2024`, `99`→`1999`)
 3. If date found → use as `interaction_date`; otherwise use import timestamp
-4. `interaction_type` = `'note'`
-5. `source` = `'airtable_import'`
+4. `type` = `'note'` (schema column name)
+5. `lead_source` = `'airtable_import'` (schema column name)
 6. Link via `interaction_properties` junction (property_id)
 7. Link via `interaction_contacts` junction (contact_id) if owner contact matched
 
@@ -157,6 +157,11 @@ Parsing rules:
 - Exact cache lookup first
 - Fuzzy ≥85%: match
 - <85%: create new
+
+### Edge Case: Same Contact as Owner + Broker
+- `property_contacts` PK is `(property_id, contact_id)` — no role column
+- If same person is both Owner Contact and Broker Contact, second insert would fail
+- **Handling:** First role wins; log a warning for manual review
 
 ### Enrich-Only Rule
 - Fill blank fields only, never overwrite existing data
