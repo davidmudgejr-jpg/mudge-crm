@@ -11,7 +11,7 @@
 
 Same pattern as the lease comp migration engine:
 
-- **`airtablePropertyParser.js`** — CSV row → canonical shape
+- **`airtablePropertyParser.js`** — CSV row → canonical shape (imports `cleanStr`, `cleanNum`, `cleanDate` from `rowParsers.js` to avoid duplication)
 - **`airtablePropertyEngine.js`** — Core engine (cache, match, fan-out, enrich)
 - **`migrate-airtable-properties.js`** — CLI runner with `--dry-run` / `--live`
 
@@ -48,8 +48,8 @@ Reusable: the engine function can be called from the CLI script, agent API endpo
 | Building Class | building_class | cleanStr |
 | Year Built | year_built | cleanNum → int |
 | Year Renovated | year_renovated | cleanNum → int |
-| RBA | square_footage / rba | cleanNum |
-| Number Of Stories | number_of_stories | cleanNum → int |
+| RBA | rba | cleanNum |
+| Number Of Stories | number_of_stories | cleanNum → int (note: schema also has `stories` from migration 004 — use `number_of_stories`) |
 | Land Area (AC) | land_area_ac | cleanNum |
 | Land SF | land_sf | cleanNum |
 | FAR | far | cleanNum |
@@ -64,35 +64,34 @@ Reusable: the engine function can be called from the CLI script, agent API endpo
 | Number Of Cranes | number_of_cranes | cleanNum → int |
 | Construction Material | construction_material | cleanStr |
 | Rail Lines | rail_lines | cleanStr |
-| Number Of Parking Spaces | number_of_parking_spaces | cleanNum → int |
+| Number Of Parking Spaces | number_of_parking_spaces | cleanNum → int (note: schema also has `parking_spaces` from migration 004 — use `number_of_parking_spaces`) |
 | Parking Ratio | parking_ratio | cleanNum |
 | Features | features | cleanStr |
 | Last Sale Date | last_sale_date | cleanDate |
 | Last Sale Price | last_sale_price | cleanNum (strip $, commas) |
 | Price PSF | price_psf | cleanNum |
-| For Sale Status | for_sale_status | cleanStr |
-| Rent/SF/Mo | rent_sf_mo | cleanNum |
+| Rent/SF/Mo | rent_psf_mo | cleanNum |
 | Rate Type | rate_type | cleanStr |
 | Debt Date | debt_date | cleanDate |
 | Loan Amount | loan_amount | cleanNum |
-| Contacted? | contacted | parse as array |
+| Contacted? | contacted | Split comma-separated multi-select into TEXT[] (e.g. "Contacted Owner, Sent Mailer" → `{'Contacted Owner','Sent Mailer'}`) |
 | Building Park | building_park | cleanStr |
 | County | county | cleanStr |
 | Owner Type | owner_type | cleanStr |
-| Costar | costar_id | cleanStr (reference link) |
-| Landvision | landvision_id | cleanStr (reference link) |
-| Heating | heating | overflow JSONB |
-| Sewer | sewer | overflow JSONB |
-| Water | water | overflow JSONB |
-| Gas | gas | overflow JSONB |
-| Max Building Contiguous Space | max_contiguous_sf | cleanNum |
+| Costar | costar_url | cleanStr (URL/reference link) |
+| Landvision | landvision_url | cleanStr (URL/reference link) |
+| Heating | heating | cleanStr (real TEXT column) |
+| Sewer | sewer | cleanStr (real TEXT column) |
+| Water | water | cleanStr (real TEXT column) |
+| Gas | gas | cleanStr (real TEXT column) |
+| Max Building Contiguous Space | overflow JSONB | cleanNum (no dedicated column — store in overflow) |
 
 ### → Contacts table
 
 | CSV Column | DB Role | Transform |
 |-----------|---------|-----------|
-| Owner Contact | role='owner' | Split "First Last" → first_name + last_name |
-| Broker Contact | role='broker' | Split "First Last" → first_name + last_name |
+| Owner Contact | role='owner' | Store as `full_name` (matching leaseCompEngine pattern). Split into first_name if schema supports it. |
+| Broker Contact | role='broker' | Store as `full_name` (matching leaseCompEngine pattern). Split into first_name if schema supports it. |
 
 **Skipped phone fields** (deferred to contacts CSV import):
 - Owner Phone, True Owner Phone, Recorded Owner Phone
@@ -101,8 +100,9 @@ Reusable: the engine function can be called from the CLI script, agent API endpo
 
 | CSV Column | DB Role | Transform |
 |-----------|---------|-----------|
-| (Company) Owner | role='owner' | normalizeCompanyName, single value |
-| (Company) Tenants | role='tenant' | May be comma-separated → split, match/create each |
+| (Company) Owner | junction role='owner' | normalizeCompanyName, single value. Set `company_type='owner'` on companies table + `role='owner'` on property_companies junction. |
+| (Company) Tenants | junction role='tenant' | Comma-separated → split, match/create each. Set `company_type='tenant'` on companies table + `role='tenant'` on property_companies junction. |
+| Industry Type (from (Company) Tenants) 2 | companies.industry_type | Enrich tenant company records with industry type (fill blank only) |
 
 ### → Interactions table (from Notes)
 
@@ -112,7 +112,7 @@ Reusable: the engine function can be called from the CLI script, agent API endpo
 
 Parsing rules:
 1. Split on newlines, semicolons, or `" - "` preceded by a date pattern
-2. Date patterns: `M/D/YY`, `MM/DD/YYYY`, `YYYY-MM-DD`, `Mon DD, YYYY`
+2. Date patterns: `M/D/YY`, `MM/DD/YYYY`, `YYYY-MM-DD`, `Mon DD, YYYY` (two-digit years: `24`→`2024`, `99`→`1999`)
 3. If date found → use as `interaction_date`; otherwise use import timestamp
 4. `interaction_type` = `'note'`
 5. `source` = `'airtable_import'`
@@ -131,7 +131,6 @@ Parsing rules:
 | Recorded Owner Contact | Redundant with Owner Contact |
 | True Owner Name, True Owner Contact | Redundant |
 | Jr Deals copy | Linked field reference — logged but not auto-linked |
-| Industry Type (from (Company) Tenants) 2 | Derived field |
 | Target for.. | UI-only field |
 | Zoning map | Link/image, not importable |
 
@@ -145,7 +144,7 @@ Parsing rules:
 - **Fuzzy ≥95%**: Auto-match
 - **Fuzzy 90-94%**: Auto-match + flag ⚠️ REVIEW
 - **<90%**: Create new property
-- Cross-city guard: fuzzy match requires same city or zip prefix
+- Cross-city guard: fuzzy match requires same city (matching leaseCompEngine behavior)
 
 ### Company Matching
 - `normalizeCompanyName()` strips Inc/LLC/Corp/Ltd
@@ -229,7 +228,7 @@ processAirtableProperties(rows, pool, { dryRun })
   │     ├── findOrCreateContact()     // Owner Contact → role='owner'
   │     ├── findOrCreateContact()     // Broker Contact → role='broker'
   │     ├── upsertJunctions()         // property_companies, property_contacts
-  │     ├── parseAndInsertNotes()     // Notes → interactions + junction links
+  │     ├── parseAndInsertNotes()     // Notes → interactions + junction links (dedup by notes text per property)
   │     └── RELEASE row_N
   │
   ├── generateReport()
@@ -262,3 +261,5 @@ After import, report missing fields critical for CRM features:
 | Zoning | Use analysis |
 
 Format: counts + percentages, same as lease comp gap report.
+
+**Note:** The Airtable CSV has no lat/long columns, so 100% of newly created properties will be missing geocoordinates. A follow-up geocoding step (CoStar pull or geocoding API) will be needed for map features.
