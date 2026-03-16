@@ -2,6 +2,11 @@
 // Legacy entries (Call, Email, Note, LinkedIn, Other) kept for old data display
 
 const TYPE_ICONS = {
+  // ── Lead ─────────────────────────────────────────────────────────
+  Lead: {
+    icon: 'M13 10V3L4 14h7v7l9-11h-7z',
+    color: 'text-orange-400 bg-orange-400/15',
+  },
   // ── Phone ────────────────────────────────────────────────────────
   'Phone Call': {
     icon: 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z',
@@ -117,6 +122,7 @@ export function getTypeInfo(type) {
 
 // The 17 active interaction types (used in dropdowns/filters)
 export const INTERACTION_TYPES = [
+  'Lead',
   'Phone Call', 'Cold Call', 'Voicemail',
   'Outbound Email', 'Inbound Email', 'Cold Email', 'Check in Email', 'Email Campaign',
   'Text', 'Meeting', 'Tour',

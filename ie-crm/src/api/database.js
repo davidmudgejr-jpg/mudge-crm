@@ -68,12 +68,12 @@ const ALLOWED_COLS = {
     'deal_dead_reason', 'notes', 'priority_deal',
     'increases', 'escrow_url', 'surveys_brochures_url',
     'run_by', 'other_broker', 'industry', 'deadline', 'fell_through_reason',
-    'created_at', 'modified',
+    'created_at', 'modified', 'lead_count',
   ]),
   interactions: new Set([
     'interaction_id', 'airtable_id', 'type', 'subject', 'date',
     'notes', 'email_heading', 'email_body',
-    'follow_up', 'follow_up_notes', 'lead_source', 'team_member',
+    'follow_up', 'follow_up_notes', 'lead_source', 'lead_status', 'lead_interest', 'team_member',
     'email_url', 'email_id',
     'created_at',
   ]),
@@ -323,7 +323,7 @@ export async function getDeals({ limit = 200, offset = 0, orderBy = 'created_at'
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'deals', 'created_at');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT * FROM deal_formulas ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+  const sql = `SELECT df.*, (SELECT COUNT(*) FROM interaction_deals id2 JOIN interactions i2 ON i2.interaction_id = id2.interaction_id WHERE id2.deal_id = df.deal_id AND i2.type = 'Lead') AS lead_count FROM deal_formulas df ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -462,10 +462,27 @@ export async function getCompanyInteractions(companyId) {
 
 export async function getDealInteractions(dealId) {
   return query(`
-    SELECT i.* FROM interactions i
+    SELECT i.*, c.contact_id AS linked_contact_id, c.full_name AS linked_contact_name
+    FROM interactions i
     JOIN interaction_deals id ON i.interaction_id = id.interaction_id
+    LEFT JOIN interaction_contacts ic ON ic.interaction_id = i.interaction_id
+    LEFT JOIN contacts c ON c.contact_id = ic.contact_id
     WHERE id.deal_id = $1
     ORDER BY i.date DESC
+  `, [dealId]);
+}
+
+export async function getDealLeads(dealId) {
+  return query(`
+    SELECT i.interaction_id, i.type, i.subject, i.notes, i.date,
+           i.lead_source, i.lead_status, i.lead_interest,
+           c.contact_id, c.full_name AS contact_name
+    FROM interactions i
+    JOIN interaction_deals id ON id.interaction_id = i.interaction_id
+    LEFT JOIN interaction_contacts ic ON ic.interaction_id = i.interaction_id
+    LEFT JOIN contacts c ON c.contact_id = ic.contact_id
+    WHERE id.deal_id = $1 AND i.type = 'Lead'
+    ORDER BY i.date DESC, i.created_at DESC
   `, [dealId]);
 }
 

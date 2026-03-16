@@ -46,8 +46,20 @@ export default function ActivitySection({ interactions, onNewInteraction, onSele
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="text-xs font-medium">
-                    {typeInfo.displayName}{int.email_heading ? ` — ${int.email_heading}` : ''}
+                    {typeInfo.displayName}{int.subject ? ` — ${int.subject}` : int.email_heading ? ` — ${int.email_heading}` : ''}
                   </div>
+                  {int.linked_contact_name && (
+                    <span
+                      role="link"
+                      onClick={(e) => { e.stopPropagation(); openSlideOver('contact', int.linked_contact_id); }}
+                      className="inline-flex items-center gap-1 text-[11px] text-crm-accent hover:text-crm-accent-hover mt-0.5 cursor-pointer"
+                    >
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      {int.linked_contact_name}
+                    </span>
+                  )}
                   {int.notes && (
                     <div className="text-xs text-crm-muted mt-0.5 line-clamp-2">{int.notes.split(/\n\n---\s/)[0].trim()}</div>
                   )}

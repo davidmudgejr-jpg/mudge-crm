@@ -12,6 +12,7 @@ import { formatDatePacific } from '../utils/timezone';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
 import ActivitySection from '../components/shared/ActivitySection';
 import TasksSection from '../components/shared/TasksSection';
+import LeadsSection from '../components/shared/LeadsSection';
 
 export const STATUSES = ['Prospecting', 'Active', 'Under Contract', 'Closed', 'Dead'];
 export const DEAL_TYPES = ['Lease', 'Sale', 'Acquisition', 'Disposition', 'Investment', 'Development'];
@@ -171,6 +172,8 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
       </Section>
 
       <ActivitySection interactions={interactions} onNewInteraction={() => setShowNewInteraction(true)} />
+
+      <LeadsSection dealId={resolvedId} onAddLead={() => setShowNewInteraction(true)} onRefresh={loadData} />
 
       <TasksSection tasks={tasks} />
 

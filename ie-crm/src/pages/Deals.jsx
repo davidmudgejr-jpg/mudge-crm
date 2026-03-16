@@ -67,6 +67,14 @@ const ALL_COLUMNS = [
   { key: 'priority_deal', label: 'Priority', defaultWidth: 70, editType: 'boolean',
     renderCell: (val) => val ? <span className="text-crm-success">Yes</span> : <span className="text-crm-muted">No</span>,
   },
+  { key: 'lead_count', label: 'Leads', defaultWidth: 65, format: 'number',
+    renderCell: (val) => {
+      const n = parseInt(val) || 0;
+      return n > 0
+        ? <span className="text-xs font-medium text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded-full">🔥 {n}</span>
+        : <span className="text-crm-muted text-xs">0</span>;
+    },
+  },
   // Hidden by default
   { key: 'deal_source', label: 'Source', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: DEAL_SOURCE_OPTIONS, defaultVisible: false },
   { key: 'term', label: 'Term (mo)', defaultWidth: 80, format: 'number', defaultVisible: false },
