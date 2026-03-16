@@ -39,6 +39,8 @@ const ALLOWED_COLS = {
     'owner_user_or_investor', 'out_of_area_owner', 'office_courtesy',
     // migration 004
     'units', 'stories', 'parking_spaces', 'price_per_sqft', 'noi', 'owner_email', 'owner_mailing_address',
+    // migration 006 — TPE-related columns
+    'owner_call_status', 'tenant_call_status', 'has_lien_or_delinquency', 'costar_star_rating',
   ]),
   contacts: new Set([
     'contact_id', 'airtable_id', 'full_name', 'first_name', 'type', 'title',
