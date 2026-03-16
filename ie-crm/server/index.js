@@ -967,6 +967,78 @@ app.get('/api/settings/env', (req, res) => {
 });
 
 // ============================================================
+// TPE CONFIG ROUTES
+// ============================================================
+
+// GET /api/ai/tpe-config — fetch all config values
+app.get('/api/ai/tpe-config', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const result = await pool.query(
+      'SELECT config_category, config_key, config_value, description FROM tpe_config ORDER BY config_category, config_key'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/ai/tpe-config — update one or more config values
+app.patch('/api/ai/tpe-config', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const updates = Array.isArray(req.body) ? req.body : [req.body];
+    const results = [];
+    for (const { config_key, config_value } of updates) {
+      if (!config_key || config_value == null) continue;
+      const r = await pool.query(
+        'UPDATE tpe_config SET config_value = $1 WHERE config_key = $2 RETURNING *',
+        [config_value, config_key]
+      );
+      if (r.rows.length === 0) {
+        return res.status(404).json({ error: `Config key not found: ${config_key}` });
+      }
+      results.push(r.rows[0]);
+    }
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/ai/tpe-config/reset — restore all config values to seed defaults
+app.post('/api/ai/tpe-config/reset', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const defaults = {
+      lease_12mo_points: 30, lease_18mo_points: 22, lease_24mo_points: 15, lease_36mo_points: 8,
+      entity_individual_points: 8, entity_trust_points: 10, hold_15yr_points: 10, hold_10yr_points: 7, hold_7yr_points: 4, owner_user_bonus: 7, ownership_cap: 25,
+      age_70_points: 20, age_65_points: 15, age_60_points: 10, age_55_points: 5,
+      growth_30pct_points: 15, growth_20pct_points: 10, growth_10pct_points: 5,
+      balloon_high_points: 10, balloon_medium_points: 7, balloon_low_points: 4, lien_points: 5, stress_cap: 10,
+      sale_price_psf: 250, lease_rate_small: 1.15, lease_rate_mid: 1.00, lease_rate_large: 0.90, lease_term_months: 60,
+      sale_commission_5m: 0.03, sale_commission_10m: 0.02, sale_commission_over10m: 0.01,
+      lease_new_commission_rate: 0.04, lease_renewal_commission_rate: 0.02, commission_divisor: 2500,
+      time_mult_6mo: 1.20, time_mult_12mo: 1.10, time_mult_24mo: 1.00, time_mult_sale: 0.85,
+      tpe_weight: 0.70, ecv_weight: 0.30,
+      matured_points: 25, mature_30d_points: 20, mature_90d_points: 15, mature_over90d_points: 10,
+      ltv_85_bonus: 5, ltv_75_bonus: 3, ltv_65_bonus: 1, duration_25yr_bonus: 3, duration_4yr_bonus: 1,
+      purpose_acquisition_bonus: 2, purpose_construction_bonus: 2,
+      auction_points: 25, matured_distress_points: 25, nod_points: 20,
+      mature_1mo_points: 22, mature_3mo_points: 18, mature_6mo_points: 15, mature_9mo_points: 12, mature_12mo_points: 10,
+      tier_a_threshold: 70, tier_b_threshold: 40,
+    };
+    for (const [key, value] of Object.entries(defaults)) {
+      await pool.query('UPDATE tpe_config SET config_value = $1 WHERE config_key = $2', [value, key]);
+    }
+    const result = await pool.query('SELECT * FROM tpe_config ORDER BY config_category, config_key');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // SERVE STATIC FRONTEND (production)
 // ============================================================
 const distPath = path.join(__dirname, '..', 'dist');
