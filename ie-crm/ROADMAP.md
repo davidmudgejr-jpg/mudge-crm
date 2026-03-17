@@ -8,18 +8,22 @@ Last updated: March 2026
 ## Current State (as of March 2026)
 
 ### Already Built
-- 6 core tabs: Properties, Contacts, Companies, Deals, Activity, Campaigns
-- Consistent list view with toggleable columns across all tabs
-- Slide-out detail panel on every record
+- 12 pages: Properties, Contacts, Companies, Deals, Activity, Campaigns, Action Items, Comps (Lease/Sale), TPE Living Database, TPE Enrichment, Import, Settings
+- Consistent list view with toggleable columns, inline editing, activity column across all tabs
+- Slide-out detail panel on every record with linked records, activity history, notes, tasks
 - Quick Note on every record (saves to interactions table)
 - Activity/Interactions log — polymorphic, surfaces on all related records
 - Cross-linking working: Properties <> Contacts <> Companies <> Deals <> Campaigns
 - New record modals with consistent pattern across all tabs
-- Claude AI panel stubbed in on Properties (needs ANTHROPIC_API_KEY set)
+- Claude AI panel with schema-aware SQL generation, file attachments, undo log
+- CSV Import Engine — auto-detect target table, address normalization, composite matching, batch insert
+- Transaction Probability Engine — SQL VIEW scoring all 461 properties, TPE Living Database + Enrichment UI
+- Custom Saved Views — save/load/delete filter+sort+column configs per entity type
+- DB triggers — comp auto-sync (lease→company lease_exp, sale→property sale data)
+- Colored page header icons on all 12 pages (unique colors, matching sidebar)
 - Settings tab with connection status, record counts, environment variable visibility
 - GitHub > Railway (backend) + Vercel (frontend) auto-deploy pipeline working
-- Multi-machine workflow: push to GitHub, changes live everywhere
-- Column menu fix: Rename/Hide/Delete with system field protection (8 files, uncommitted)
+- 18 database migrations applied to Neon PostgreSQL
 
 ### Fully Designed (schema mapped, not yet built)
 - **Action Items** — Apple Reminders-inspired task system with 4 junction tables, Houston AI source separation
@@ -30,7 +34,8 @@ Last updated: March 2026
 - Full schema blueprint in HANDOFF.md
 
 ### Not Yet Started
-- Smart Filters & Saved Lists
+- AI Ops Dashboard — agent status, approval queue, log viewer (sandbox tables + endpoints ready)
+- Smart Filter Builder — visual AND/OR multi-column filter panel (saved views infra exists)
 - Report Generation (BOV reports, comp sheets, call lists)
 - Maps & GIS
 - Role-Based Access
@@ -116,32 +121,30 @@ Last updated: March 2026
 - [ ] Comp history visible inside Property detail panel
 - [ ] Sale comp auto-updates property last_sale_date/last_sale_price when more recent
 
-### 1E — Transaction Probability Engine (TPE)
+### 1E — Transaction Probability Engine (TPE) ✅
 *AI-powered property scoring — the competitive edge. Full spec (5 models, all weights) in HANDOFF.md.*
 
 **Tables:**
-- [ ] `loan_maturities` — confirmed RCA data: lender, amount, maturity_date, LTV, purpose, duration, rate, months_past_due
-- [ ] `property_distress` — NOD/Auction/REO: distress_type, filing_date, amount, auction_date, opening_bid, delinquent tax
-- [ ] `tenant_growth` — CoStar/Vibe: headcount current/previous, growth_rate, growth_prospect_score
-- [ ] `debt_stress` — estimated balloon data: 3 balloon scenarios (5yr/7yr/10yr), confidence level (HIGH/MEDIUM/LOW)
-- [ ] `tpe_config` — all scoring weights, thresholds, market assumptions (editable, not hardcoded)
-- [ ] Properties additions: owner_age_est, owner_entity_type, hold_duration_years, has_lien_or_delinquency, owner_user_or_investor, out_of_area_owner
+- [x] `loan_maturities` — confirmed RCA data: lender, amount, maturity_date, LTV, purpose, duration, rate, months_past_due
+- [x] `property_distress` — NOD/Auction/REO: distress_type, filing_date, amount, auction_date, opening_bid, delinquent tax
+- [x] `tenant_growth` — CoStar/Vibe: headcount current/previous, growth_rate, growth_prospect_score
+- [ ] `debt_stress` — estimated balloon data: 3 balloon scenarios (5yr/7yr/10yr), confidence level (HIGH/MEDIUM/LOW) *(deferred — not blocking scoring)*
+- [x] `tpe_config` — all scoring weights, thresholds, market assumptions (editable, not hardcoded)
+- [x] Properties additions: date_of_birth on contacts (replaces owner_age_est), costar_star_rating, has_lien_or_delinquency, owner_call_status, tenant_call_status
 
-**SQL VIEW `property_tpe_scores`:**
-- [ ] Model 1: Transaction Probability (100pts) — Lease (30) + Ownership (25) + Owner Age (20) + Growth (15) + Stress (10)
-- [ ] Model 2: Expected Commission Value — tiered lease rates by SF, sale commission, time multiplier
-- [ ] Model 3: Blended Priority — 70% TPE + 30% ECV, normalized commission scale ($250K=100)
-- [ ] Model 4: Confirmed Loan Maturity boost — timing tiers (25/20/15/10) + LTV/duration/purpose bonuses (max 35pts)
-- [ ] Model 5: Distress scoring — expanded tiers (Auction 25, NOD 20, maturity timing 10-22)
-- [ ] Office Courtesy — computed from lease_comps rep data (owner_courtesy + tenant_courtesy), NOT stored
-- [ ] All point values read from `tpe_config` table, not hardcoded in VIEW
+**SQL VIEW `property_tpe_scores`:** ✅ (7 CTEs, all 461 properties scoring)
+- [x] Model 1: Transaction Probability (100pts) — Lease (30) + Ownership (25) + Owner Age (20) + Growth (15) + Stress (10)
+- [x] Model 2: Expected Commission Value — tiered lease rates by SF, sale commission, time multiplier
+- [x] Model 3: Blended Priority — 70% TPE + 30% ECV, normalized commission scale ($250K=100)
+- [x] Model 4: Confirmed Loan Maturity boost — timing tiers (25/20/15/10) + LTV/duration/purpose bonuses (max 35pts)
+- [x] Model 5: Distress scoring — expanded tiers (Auction 25, NOD 20, maturity timing 10-22)
+- [x] All point values read from `tpe_config` table, not hardcoded in VIEW
 
-**UI:**
-- [ ] TPE score columns visible in Properties table (Total Score, Blended Priority, Tier, Likely Transaction)
-- [ ] Score Breakdown Card in Property detail view — 5 category bar chart + Blended Priority + Est. Commission
-- [ ] Action Intelligence — computed `call_target`, `call_reasons` (TEXT[]), courtesy warnings
-- [ ] "Who To Call & Why" section with plain-English reasons auto-generated from live data
-- [ ] TPE tier labels (🔴🟠🟡🟢) with coaching notes
+**UI:** ✅
+- [x] TPE Living Database page (`/tpe`) — scored properties table with tier badges, stat cards, sorting
+- [x] TPE Enrichment page (`/tpe/enrichment`) — data gap analysis, projected tier improvements, filter by gap type
+- [x] TpeDetailPanel — score breakdown, category bars, tier badge, CoStar star rating display
+- [x] TPE tier labels (A/B/C/D) with color-coded badges (emerald/blue/yellow/red)
 - [ ] TPE Settings page (under Settings) — editable table of all weights from `tpe_config`
 
 ### 1F — Interaction Type Expansion

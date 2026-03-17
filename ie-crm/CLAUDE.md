@@ -58,7 +58,7 @@ ie-crm/
 │   │       ├── CommandPalette.jsx    # Cmd+K command palette
 │   │       ├── ColumnToggleMenu.jsx  # Column visibility/rename/delete
 │   │       └── ContextMenu.jsx       # Right-click context menu
-│   ├── pages/                # Route pages (8 tabs)
+│   ├── pages/                # Route pages (12 pages)
 │   │   ├── Properties.jsx    # Properties with role-specific linked columns
 │   │   ├── Contacts.jsx
 │   │   ├── Companies.jsx
@@ -67,6 +67,8 @@ ie-crm/
 │   │   ├── Campaigns.jsx
 │   │   ├── ActionItems.jsx   # Apple Reminders-style task management
 │   │   ├── Comps.jsx         # Lease/Sale toggle with source color-coding
+│   │   ├── TPE.jsx           # TPE Living Database — scored properties, tier badges
+│   │   ├── TPEEnrichment.jsx # Data gap analysis — missing data pills, projected tiers
 │   │   ├── Import.jsx        # CSV import with matching + auto-linking
 │   │   └── Settings.jsx
 │   ├── hooks/
@@ -85,7 +87,7 @@ ie-crm/
 │   │   ├── quickAddFields.js # Fields for quick-add modals
 │   │   └── zIndex.js         # Z-index layer system
 │   └── index.css             # CSS variables for CRM theme tokens
-├── migrations/               # PostgreSQL migration files (001-008)
+├── migrations/               # PostgreSQL migration files (001-018)
 ├── schema.sql                # Base schema (run migrations on top)
 └── electron/                 # Legacy Electron packaging (not primary deployment)
 ```
@@ -154,6 +156,14 @@ User-supplied data always goes through parameterized queries (`$1`, `$2`, etc.).
 
 - `deal_formulas` — Commission calculations: team_gross, jr_gross, jr_net (geometric series for leases)
 - `property_tpe_scores` — Transaction Probability Engine: 5-model scoring with configurable weights from `tpe_config` table
+
+### DB Triggers (auto-sync)
+
+- `trg_sync_lease_exp` — AFTER INSERT/UPDATE on `lease_comps`: updates `companies.lease_exp` to MAX(expiration_date) across all comps for that company
+- `trg_sync_sale_data` — AFTER INSERT/UPDATE on `sale_comps`: updates `properties.last_sale_date` and `last_sale_price` if the comp is more recent
+- `trg_resync_lease_exp_on_delete` — AFTER DELETE on `lease_comps`: recalculates company lease_exp from remaining comps
+- `trg_resync_sale_data_on_delete` — AFTER DELETE on `sale_comps`: recalculates property sale data from remaining comps
+- `trg_normalize_address` — BEFORE INSERT/UPDATE on `properties`: auto-computes `normalized_address` for import matching
 
 ### Formula Columns
 
