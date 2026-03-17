@@ -20,6 +20,7 @@ import Import from './pages/Import';
 import Settings from './pages/Settings';
 import TPE from './pages/TPE';
 import TPEEnrichment from './pages/TPEEnrichment';
+import AIOps from './pages/AIOps';
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
@@ -100,6 +101,7 @@ function AppShell() {
           <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
           <Route path="/action-items" element={<ActionItems onCountChange={setRowCount} />} />
           <Route path="/comps" element={<Comps onCountChange={setRowCount} />} />
+          <Route path="/ai-ops" element={<AIOps />} />
           <Route path="/import" element={<Import />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
