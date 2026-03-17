@@ -888,7 +888,228 @@ CSV fields mapped to boolean columns should handle non-standard values:
 
 ---
 
-## Phase 17: Final Report
+## Phase 17: Custom Saved Views
+
+The saved views feature adds Airtable-style custom views to every entity tab. Each view stores filters, sort order, and column visibility. Views persist in a `saved_views` PostgreSQL table with localStorage caching.
+
+### Key Files
+| File | Purpose |
+|---|---|
+| `ie-crm/migrations/017_saved_views.sql` | Table schema + partial unique index |
+| `ie-crm/src/utils/filterCompiler.js` | Compiles filter conditions → parameterized SQL |
+| `ie-crm/src/hooks/useViewEngine.js` | Central hook: views, filters, sort, columns, cache |
+| `ie-crm/src/components/shared/ViewBar.jsx` | Tab strip for switching views |
+| `ie-crm/src/components/shared/FilterBar.jsx` | Active filter pills |
+| `ie-crm/src/components/shared/FilterBuilder.jsx` | Modal filter editor |
+| `ie-crm/src/api/views.js` | REST client for view CRUD |
+| `ie-crm/server/index.js` | REST endpoints: GET/POST/PATCH/DELETE `/api/views` |
+
+### 17.1 Schema Verification
+
+- [ ] `saved_views` table exists with columns: `view_id`, `entity_type`, `view_name`, `filters`, `filter_logic`, `sort_column`, `sort_direction`, `visible_columns`, `is_default`, `position`, `created_at`, `updated_at`
+- [ ] Partial unique index `idx_saved_views_one_default_per_entity` exists (enforces one default per entity type)
+- [ ] Index `idx_saved_views_entity` exists on `(entity_type, position)`
+
+### 17.2 REST API Endpoints
+
+Test each endpoint via the browser or direct `fetch`:
+
+**GET /api/views?entity_type=properties**
+- [ ] Returns an empty array when no views exist
+- [ ] Returns 400 for invalid entity_type (e.g., `?entity_type=users`)
+- [ ] Returns 503 when database is not connected
+
+**POST /api/views** — Create a view
+- [ ] Create: `{ entity_type: "properties", view_name: "[TEST] Industrial Ontario", filters: [{ column: "property_type", operator: "equals", value: "Industrial" }, { column: "city", operator: "equals", value: "Ontario" }], filter_logic: "AND" }`
+- [ ] Returns 201 with the created view including `view_id`
+- [ ] Returns 400 for missing entity_type or view_name
+
+**PATCH /api/views/:viewId** — Update a view
+- [ ] Update the test view's name to `"[TEST] Industrial Riverside"`
+- [ ] Returns the updated view with `updated_at` changed
+- [ ] Returns 404 for non-existent viewId
+- [ ] Test `{ is_default: true }` — sets the view as default via transaction
+
+**DELETE /api/views/:viewId** — Delete a view
+- [ ] Deletes the test view
+- [ ] Returns `{ deleted: true }`
+- [ ] Returns 404 for already-deleted viewId
+
+### 17.3 ViewBar Component (All 6 Tabs)
+
+Navigate to each tab and verify the ViewBar renders:
+
+- [ ] **Properties** — "All Properties" tab visible as default active tab
+- [ ] **Contacts** — "All Contacts" tab visible
+- [ ] **Companies** — "All Companies" tab visible
+- [ ] **Deals** — "All Deals" tab visible
+- [ ] **Interactions** — "All Interactions" tab visible (note: this tab may use a timeline layout)
+- [ ] **Campaigns** — "All Campaigns" tab visible
+- [ ] **"+ New View" button** — visible on all tabs
+
+### 17.4 Create a Saved View via UI
+
+On the **Properties** tab:
+
+1. [ ] Click **"+ New View"** → FilterBuilder modal opens
+2. [ ] Select column **"property_type"**, operator **"equals"**, value **"Industrial"**
+3. [ ] Click **"+ Add condition"** to add a second filter
+4. [ ] Select column **"rba"**, operator **"between"**, value **[10000, 50000]**
+5. [ ] Leave logic toggle on **AND**
+6. [ ] Click **"Apply Filters"** → modal closes
+7. [ ] **FilterBar** appears with 2 filter pills: `property type = Industrial` and `rba 10,000–50,000`
+8. [ ] Table shows only matching properties (or empty if none match)
+9. [ ] **"Save as View"** button appears in FilterBar
+10. [ ] Click "Save as View" → name input appears → type `"[TEST] Industrial 10-50K"` → press Enter
+11. [ ] New view tab appears in ViewBar: `[TEST] Industrial 10-50K`
+
+### 17.5 Switch Between Views
+
+- [ ] Click **"All Properties"** tab → filters clear, all records show
+- [ ] Click **"[TEST] Industrial 10-50K"** tab → filters re-apply, filtered records show
+- [ ] "Showing N of M" counter in FilterBar shows correct numbers (N < M when filtered)
+
+### 17.6 Modify & Save a View
+
+- [ ] With `[TEST] Industrial 10-50K` active, click **"+ Add Filter"** in FilterBar → FilterBuilder opens with existing filters pre-populated
+- [ ] Add a new condition: `city equals Ontario`
+- [ ] Apply → filter pills update to show 3 conditions
+- [ ] **Dirty indicator** — small dot appears on the view tab + "Save" button appears
+- [ ] Click **"Save"** → changes persist
+- [ ] Navigate away and back → view still has 3 filters
+
+### 17.7 View Context Menu (Right-Click)
+
+- [ ] **Right-click** on the `[TEST] Industrial 10-50K` tab → context menu appears
+- [ ] **Rename** — click Rename → inline input appears → type new name → press Enter → name updates
+- [ ] **Duplicate** — creates a copy with "(copy)" suffix
+- [ ] **Set as Default** — view becomes default (loads on tab first visit)
+- [ ] **Delete** — removes the view, reverts to "All" tab
+
+### 17.8 Filter Pill Removal
+
+- [ ] Click the **✕** on any filter pill → that condition is removed
+- [ ] Remaining filters stay active
+- [ ] Removing all pills clears the filter → shows all records
+
+### 17.9 Sort Integration
+
+- [ ] Click a column header to sort → sort order changes
+- [ ] With a saved view active, changing sort shows the dirty indicator
+- [ ] Save the view → sort order persists when switching back to this view
+
+### 17.10 Filter Operators
+
+Test various operators work correctly from the FilterBuilder:
+
+- [ ] **equals** — exact match (text or select)
+- [ ] **contains** — partial text match (ILIKE)
+- [ ] **between** — shows two value inputs, filters numeric range
+- [ ] **is_empty** — no value input needed, shows records with NULL values
+- [ ] **is_not_empty** — shows records with non-NULL values
+- [ ] **gt / lt** — greater/less than for numbers and dates
+- [ ] **before / after** — date pickers appear for date columns
+
+### 17.11 localStorage Cache
+
+- [ ] Create a saved view → refresh the page → view tabs appear instantly (from localStorage cache before server response)
+- [ ] The last active view is remembered across page refreshes (stored via `views_properties_active` key)
+
+### 17.12 Security Validation
+
+- [ ] Filters with unknown column names (not in columnDefs) produce no WHERE clause (silently ignored)
+- [ ] Filters with unknown operators produce no WHERE clause
+- [ ] The `queryWithFilters` function rejects invalid table names with an error
+
+### 17.13 Existing Search Coexistence
+
+- [ ] The search bar on Properties still works independently
+- [ ] Typing in the search bar overrides view filters temporarily (uses the legacy `getProperties` path)
+- [ ] Clearing the search bar restores view filters
+
+---
+
+## Phase 18: TPE Living Database
+
+The TPE (Transaction Probability Engine) scores properties 0–100 based on lease expiration, owner characteristics, market stress, and estimated commission value. It includes a tunable config panel and data gap tracking.
+
+### Key Files
+| File | Purpose |
+|---|---|
+| `ie-crm/migrations/015_tpe_living_database.sql` | Scoring VIEW with temporal decay + config table |
+| `ie-crm/migrations/016_tpe_data_gaps.sql` | Data gap analysis VIEW |
+| `ie-crm/src/pages/TPEEnrichment.jsx` | Main TPE dashboard page |
+| `ie-crm/src/components/tpe/TpeDetailPanel.jsx` | Property TPE detail slide-over |
+| `ie-crm/src/components/tpe/QuickTuneDrawer.jsx` | Config tuning panel |
+| `ie-crm/server/index.js` | TPE config + data gap endpoints |
+
+### 18.1 TPE Schema Verification
+
+- [ ] `tpe_config` table exists with `config_key`, `config_value`, `config_category`, `config_label` columns
+- [ ] `property_tpe_scores` VIEW exists (returns properties with `tpe_score`, `tier`, `call_reason`, etc.)
+- [ ] `property_data_gaps` VIEW exists (returns data gap analysis per property)
+- [ ] Config has tier threshold keys: `tier_a_threshold`, `tier_b_threshold`, `tier_c_threshold`
+
+### 18.2 TPE Dashboard
+
+Navigate to the TPE Enrichment page:
+
+- [ ] **Page loads** without errors
+- [ ] **Score distribution** — shows properties distributed across tiers A/B/C/D
+- [ ] **Stats summary** — shows total scored properties, average score, tier counts
+- [ ] **Property list** — shows scored properties with columns: address, city, score, tier, call reason
+
+### 18.3 TPE Detail Panel
+
+Click a property in the TPE list:
+
+- [ ] **TpeDetailPanel opens** as a slide-over
+- [ ] **Score breakdown** — shows individual component scores (lease, ownership, age, stress, etc.)
+- [ ] **Call reason** — displays the top reason for contacting this owner
+- [ ] **Projected tier** — uses dynamic tier thresholds from config (not hardcoded 50/40/30)
+- [ ] **Linked owner/company** — clicking opens their detail panel ON TOP (not replacing TPE panel)
+- [ ] **Back navigation** — closing the owner/company panel returns to the TPE detail (not closing everything)
+
+### 18.4 TPE Config (QuickTuneDrawer)
+
+Open the config/tuning panel:
+
+- [ ] **Config loads** — all configuration values display with correct labels
+- [ ] **Edit a value** — change a scoring weight → save → verify score changes
+- [ ] **Blend weights** — TPE weight + ECV weight save atomically (single batch PATCH)
+- [ ] **Reset defaults** — POST /api/ai/tpe-config/reset restores all values
+
+### 18.5 Data Gaps
+
+- [ ] **Gap endpoint** — GET /api/ai/tpe-gaps returns properties with missing data
+- [ ] **Gap stats** — GET /api/ai/tpe-gaps/stats returns counts by gap type
+- [ ] **Fetch error handling** — bad responses show user-friendly error (not silent failure)
+
+### 18.6 TPE Scoring Logic Verification
+
+Run a SQL query to spot-check scoring:
+```sql
+SELECT property_address, city, tpe_score, tier, call_reason,
+       lease_exp_score, ownership_score, age_score, stress_score
+FROM property_tpe_scores
+ORDER BY tpe_score DESC
+LIMIT 10;
+```
+
+- [ ] Scores are in 0–100 range
+- [ ] Tiers match thresholds (A ≥ tier_a, B ≥ tier_b, C ≥ tier_c, D below tier_c)
+- [ ] Call reasons are not NULL (COALESCE handles missing data with '?' placeholder)
+- [ ] Properties with expired leases have non-zero lease_exp_score
+- [ ] Distress types (Auction, NOD, Matured) don't decay over time
+
+### 18.7 Pool Guards
+
+- [ ] All TPE API endpoints return 503 with "Database not connected" when pool is null
+- [ ] Both `/api/ai/tpe-gaps` and `/api/ai/tpe-gaps/stats` have pool guards
+
+---
+
+## Phase 19: Final Report
 
 After all tests complete, produce a report in this format:
 
@@ -978,6 +1199,34 @@ After all tests complete, produce a report in this format:
 ## Boolean Coercion (Phase 16) — if implemented
 - Standard values coerced correctly: PASS/FAIL/SKIPPED
 - Emoji/text values handled: PASS/FAIL/SKIPPED
+
+## Custom Saved Views (Phase 17)
+- saved_views table + indexes exist: PASS/FAIL
+- REST API CRUD endpoints work: PASS/FAIL
+- ViewBar renders on all 6 tabs: PASS/FAIL
+- Create view via FilterBuilder UI: PASS/FAIL
+- Switch between views: PASS/FAIL
+- "Showing N of M" counter correct: PASS/FAIL
+- Filter pill removal works: PASS/FAIL
+- View context menu (rename/duplicate/delete/set default): PASS/FAIL
+- Sort integration with dirty indicator: PASS/FAIL
+- All filter operators work (equals, contains, between, is_empty, gt, lt, before, after): PASS/FAIL
+- localStorage cache persists views across refresh: PASS/FAIL
+- Security: unknown columns/operators silently ignored: PASS/FAIL
+- Existing search bar coexists with view filters: PASS/FAIL
+
+## TPE Living Database (Phase 18)
+- tpe_config table exists: PASS/FAIL
+- property_tpe_scores VIEW works: PASS/FAIL
+- property_data_gaps VIEW works: PASS/FAIL
+- TPE dashboard loads with score distribution: PASS/FAIL
+- TpeDetailPanel shows score breakdown + call reason: PASS/FAIL
+- Dynamic tier thresholds (not hardcoded): PASS/FAIL
+- SlideOver back-navigation from linked owner/company: PASS/FAIL
+- QuickTuneDrawer config editing + atomic blend save: PASS/FAIL
+- Data gap endpoints with pool guards: PASS/FAIL
+- Scoring logic: 0-100 range, correct tiers, NULL-safe call reasons: PASS/FAIL
+- Distress types (Auction/NOD/Matured) don't decay: PASS/FAIL
 
 ## Fixes Applied
 1. [file:line] — description of what was broken and how it was fixed
