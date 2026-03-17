@@ -79,7 +79,7 @@ export default function MissionControlRoom({ agents = [], pending = 0, recentLog
     if (!engine || !agents.length) return;
 
     agents.forEach((a) => {
-      const name = (a.name || '').toLowerCase();
+      const name = (a.agent_name || a.name || '').toLowerCase();
       if (name) {
         engine.onHeartbeatUpdate(name, a.status || 'idle');
       }
@@ -91,7 +91,7 @@ export default function MissionControlRoom({ agents = [], pending = 0, recentLog
     .map((cfg) => {
       const state = agentStates[cfg.name] || {};
       const heartbeat = agents.find(
-        (a) => (a.name || '').toLowerCase() === cfg.name
+        (a) => (a.agent_name || a.name || '').toLowerCase() === cfg.name
       );
       return {
         ...cfg,
@@ -116,11 +116,7 @@ export default function MissionControlRoom({ agents = [], pending = 0, recentLog
         <RoomEnvironment />
 
         {/* 2. WallScreens — mounted on left + right walls */}
-        <WallScreens
-          agents={agents}
-          pending={pending}
-          onZoomIn={onZoomIn}
-        />
+        <WallScreens agents={agents} pending={pending} onZoomIn={onZoomIn} />
 
         {/* 3. WorkstationDesks — back desks first (higher y = farther back in iso) */}
         {/* Scout (back-left) */}

@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-17 (TPE Living Database, Saved Views, page icons, enrichment color sync)
-> Previous session: "Built TPE Living Database page with dedicated sidebar nav, stat cards, filter pills, and gap analysis table sorted by potential point gain × tier proximity. Built Custom Saved Views system with save/load/delete for filter+sort+column configurations on all entity pages. Added colored SVG icons to all 12 page headers (matching sidebar icons, unique colors per page). Synced enrichment stat card colors with table pill colors via shared GAP_COLORS map. Fixed color collisions (TPE→orange, Companies→pink). Merged feature/tpe-view branch into main. Resolved git stash conflict in server/index.js (sandbox routes reinserted). Full test pass on all pages."
-> Next task: **Build dedicated Lease Comp Import Wizard** — David to provide Excel examples first. Then build AI Ops dashboard page. Then Smart Filters (Phase 2A).
+> Updated: 2026-03-17 (comp auto-sync triggers, schema refresh, CoStar rating, cleanup)
+> Previous session: "Built TPE Living Database + Enrichment pages, Custom Saved Views, page header icons (12 unique colors). Then cleaned up 4 stale items: (1) Migration 018 — DB triggers auto-sync lease comp expiration→companies.lease_exp and sale comp sale data→properties.last_sale_date/price. Delete triggers recalculate. (2) Refreshed schema.sql from live Neon DB (46 tables, 100 indexes, 8 triggers — was stale since migrations 001-017). (3) Added CoStar Star Rating to Properties page columns. (4) Updated HANDOFF.md next steps — marked completed items, reordered priorities."
+> Next task: **AI Ops Dashboard page** — agent status cards, approval queue, log viewer, system health. Sandbox tables + 11 API endpoints already deployed. Then Smart Filters (Phase 2A).
 
 ---
 
@@ -1333,7 +1333,7 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 18. ~~**Build `property_tpe_scores` SQL VIEW**~~ ✅ DONE — 7 CTEs, all 461 properties scoring, tier labels A-D. TPE Living Database + Enrichment pages built with full UI.
 19. ~~**Build formula computation (deals)**~~ ✅ DONE — `deal_formulas` VIEW with geometric series commission calc
 20. **Build dedicated Lease Comp Import Wizard** — David to provide Excel examples first. Need data fan-out mapping (one row → properties + companies + contacts + lease_comps + junctions).
-21. **Build AI Ops Dashboard page** — agent status cards, approval queue, log viewer, system health
+21. **Build AI Ops Dashboard page** — "Mission Control" isometric room with zoom-through navigation, 7 detail views, agent characters. Full spec + plan written (see `docs/superpowers/specs/2026-03-17-ai-ops-dashboard-design.md` and `docs/superpowers/plans/2026-03-17-ai-ops-dashboard.md`). **IN PROGRESS**
 22. **Smart Filters & Saved Lists (Phase 2A)** — filter pills, slide-in filter builder, auto-updating lists
 23. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
 24. **Populate TPE input data** — date_of_birth on contacts, lease_exp on companies, loan_maturities, tenant_growth, property_distress records
@@ -1592,6 +1592,7 @@ Add a trigger or computed column: whenever `property_address` changes, `normaliz
 
 ## Future Considerations (not now)
 
+- **Houston Voice Agent** — ElevenLabs Pro ($100/mo) voice for Houston AI boss. Join Zoom calls as 4th team member (David, dad, Sarah + Houston). Wake word "Hey Houston" via Picovoice Porcupine. Zoom Meeting SDK or Recall.ai audio bridge. Could query dashboard data live ("Hey Houston, what's the pipeline looking like?"). Ties into Elowen personal AI assistant concept.
 - Houston AI agent — auto-generate action items from TPE score changes, lease expiry alerts
 - IAR Hot Sheet automation (daily PDF → parse → update comps + property availability)
 - Email automation / webhook capture (auto-log emails as Interactions)

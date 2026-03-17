@@ -144,13 +144,18 @@ const COST_POINTS     = '85,268 205,200 205,164 85,232';
 const AGENT_POINTS  = '660,140 815,220 815,168 660,88';
 const ALERT_POINTS  = '695,200 815,264 815,232 695,168';
 
-export function WallScreens({ agents = [], pending = 0, pipeline = null, onZoomIn }) {
+export function WallScreens({ agents = [], pending = [], pipeline = null, onZoomIn }) {
   const hasError = agents.some(a => a.status === 'error');
+
+  // pending is an array of {table_name, count} — compute total
+  const pendingTotal = Array.isArray(pending)
+    ? pending.reduce((sum, p) => sum + (parseInt(p.count) || 0), 0)
+    : (parseInt(pending) || 0);
 
   // Pipeline display values
   const pipelineText = pipeline
-    ? `Scout:${pipeline.scout ?? 0} → Enrich:${pipeline.enrich ?? 0} → Match:${pipeline.match ?? 0} → Review:${pipeline.review ?? 0}`
-    : `Scout:18 → Enrich:12 → Match:0 → Review:${pending}`;
+    ? `Scout:${pipeline.scout ?? 0} > Enrich:${pipeline.enrich ?? 0} > Match:${pipeline.match ?? 0} > Review:${pipeline.review ?? 0}`
+    : `Scout:18 > Enrich:12 > Match:0 > Review:${pendingTotal}`;
 
   return (
     <g>
@@ -182,7 +187,7 @@ export function WallScreens({ agents = [], pending = 0, pipeline = null, onZoomI
           opacity={0.8}
           transform="skewX(18)"
         >
-          Scout → Enrich → Match → Review
+          {"Scout > Enrich > Match > Review"}
         </text>
         {/* Values */}
         <text
@@ -194,7 +199,7 @@ export function WallScreens({ agents = [], pending = 0, pipeline = null, onZoomI
           opacity={0.9}
           transform="skewX(18)"
         >
-          {pending} pending approval
+          {pendingTotal} pending approval
         </text>
         <text
           x={108} y={145}
@@ -307,7 +312,7 @@ export function WallScreens({ agents = [], pending = 0, pipeline = null, onZoomI
                 opacity={0.85}
                 transform="skewX(-18)"
               >
-                {agent.agent_name} — {agent.status}
+                {`${agent.agent_name} - ${agent.status}`}
               </text>
             </g>
           ))
@@ -345,7 +350,7 @@ export function WallScreens({ agents = [], pending = 0, pipeline = null, onZoomI
             ? `${agents.filter(a => a.status === 'error').length} agent error(s)`
             : 'All clear'}
         </text>
-        {pending > 0 && (
+        {pendingTotal > 0 && (
           <text
             x={704} y={202}
             fill="#fbbf24"
@@ -354,7 +359,7 @@ export function WallScreens({ agents = [], pending = 0, pipeline = null, onZoomI
             opacity={0.8}
             transform="skewX(-18)"
           >
-            {pending} pending review
+            {pendingTotal} pending review
           </text>
         )}
       </WallScreen>
