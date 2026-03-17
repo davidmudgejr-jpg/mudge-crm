@@ -171,16 +171,18 @@ export default function Contacts({ onCountChange }) {
         setTotalCount(count);
         if (onCountChange) onCountChange(count);
       } else {
-        const result = await queryWithFilters('contacts', {
-          ...view.sqlFilters,
-          orderBy: view.sort.column,
-          order: view.sort.direction,
-          limit: 500,
-        });
+        const [result, total] = await Promise.all([
+          queryWithFilters('contacts', {
+            ...view.sqlFilters,
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('contacts', {}),
+        ]);
         setRows(result.rows || []);
-        const filtered = result.rows?.length || 0;
-        setTotalCount(filtered);
-        if (onCountChange) onCountChange(filtered);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch contacts:', err);

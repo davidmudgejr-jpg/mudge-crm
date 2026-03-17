@@ -118,16 +118,18 @@ export default function Companies({ onCountChange }) {
         setTotalCount(count);
         if (onCountChange) onCountChange(count);
       } else {
-        const result = await queryWithFilters('companies', {
-          ...view.sqlFilters,
-          orderBy: view.sort.column,
-          order: view.sort.direction,
-          limit: 500,
-        });
+        const [result, total] = await Promise.all([
+          queryWithFilters('companies', {
+            ...view.sqlFilters,
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('companies', {}),
+        ]);
         setRows(result.rows || []);
-        const filtered = result.rows?.length || 0;
-        setTotalCount(filtered);
-        if (onCountChange) onCountChange(filtered);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch companies:', err);

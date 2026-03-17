@@ -55,10 +55,9 @@ export default function FilterBar({
   if (conditions.length === 0) return null;
 
   const removeFilter = (index) => {
-    if (Array.isArray(filters)) {
-      const next = filters.filter((_, i) => i !== index);
-      updateFilters(next, filterLogic);
-    }
+    // Rebuild from flattened conditions (works for both flat arrays and compound objects)
+    const next = conditions.filter((_, i) => i !== index);
+    updateFilters(next, filterLogic);
   };
 
   return (

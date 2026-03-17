@@ -293,16 +293,18 @@ export default function Campaigns({ onCountChange }) {
         setTotalCount(filtered.length);
         if (onCountChange) onCountChange(filtered.length);
       } else {
-        const result = await queryWithFilters('campaigns', {
-          ...view.sqlFilters,
-          orderBy: view.sort.column,
-          order: view.sort.direction,
-          limit: 500,
-        });
+        const [result, total] = await Promise.all([
+          queryWithFilters('campaigns', {
+            ...view.sqlFilters,
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('campaigns', {}),
+        ]);
         setRows(result.rows || []);
-        const filtered = result.rows?.length || 0;
-        setTotalCount(filtered);
-        if (onCountChange) onCountChange(filtered);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch campaigns:', err);

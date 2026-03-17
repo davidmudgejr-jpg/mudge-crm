@@ -211,16 +211,18 @@ export default function Properties({ onCountChange }) {
         setTotalCount(count);
         if (onCountChange) onCountChange(count);
       } else {
-        const result = await queryWithFilters('properties', {
-          ...view.sqlFilters,
-          orderBy: view.sort.column,
-          order: view.sort.direction,
-          limit: 500,
-        });
+        const [result, total] = await Promise.all([
+          queryWithFilters('properties', {
+            ...view.sqlFilters,
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('properties', {}),
+        ]);
         setRows(result.rows || []);
-        const filtered = result.rows?.length || 0;
-        setTotalCount(filtered);
-        if (onCountChange) onCountChange(filtered);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch properties:', err);

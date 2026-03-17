@@ -40,6 +40,14 @@ describe('compileFilters', () => {
     });
   });
 
+  it('escapes ILIKE wildcards in contains values', () => {
+    const filters = [{ column: 'city', operator: 'contains', value: '50%' }];
+    expect(compileFilters(filters, COLUMN_DEFS)).toEqual({
+      whereClause: 'WHERE city ILIKE $1',
+      params: ['%50\\%%'],
+    });
+  });
+
   it('compiles between with two params', () => {
     const filters = [{ column: 'rba', operator: 'between', value: [10000, 50000] }];
     expect(compileFilters(filters, COLUMN_DEFS)).toEqual({
