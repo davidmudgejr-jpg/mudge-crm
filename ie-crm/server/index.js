@@ -1060,6 +1060,49 @@ app.post('/api/ai/tpe-config/reset', async (req, res) => {
   }
 });
 
+// ── TPE Data Gap Endpoints ──
+app.get('/api/ai/tpe-gaps', async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+    const gapType = req.query.gap_type;
+    const typeFilters = {
+      age: 'AND age_gap_pts > 0',
+      growth: 'AND growth_gap_pts > 0',
+      stress: 'AND stress_gap_pts > 0',
+      ownership: 'AND ownership_gap_pts > 0',
+    };
+    const typeFilter = typeFilters[gapType] || '';
+    const result = await pool.query(
+      `SELECT * FROM property_data_gaps
+       WHERE total_gap_pts > 0 ${typeFilter}
+       ORDER BY impact_priority DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ai/tpe-gaps/stats', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE age_gap_pts > 0) AS missing_owner_dob,
+        COUNT(*) FILTER (WHERE growth_gap_pts > 0) AS missing_tenant_growth,
+        COUNT(*) FILTER (WHERE stress_gap_pts > 0) AS missing_loan_data,
+        COUNT(*) FILTER (WHERE ownership_gap_pts > 0) AS missing_owner_link,
+        COUNT(*) AS total_properties_with_gaps
+      FROM property_data_gaps
+      WHERE total_gap_pts > 0
+    `);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ============================================================
 // SERVE STATIC FRONTEND (production)
 // ============================================================

@@ -28,6 +28,19 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
   const mult = parseFloat(p.time_multiplier) || 1;
   const finalEcv = Math.max(sale, lease) * mult;
 
+  // Inline gap calculations (no extra API call)
+  const gaps = [
+    { key: 'age', pts: (parseFloat(p.age_score) || 0) === 0 && !p.owner_age_years ? 20 : 0, action: 'Get owner date of birth', context: 'If owner is 65+, age signal activates', label: 'Age Signal', color: 'yellow' },
+    { key: 'growth', pts: (parseFloat(p.growth_score) || 0) === 0 && !p.growth_rate ? 15 : 0, action: 'Get tenant headcount data', context: '30%+ growth adds full growth signal', label: 'Growth Signal', color: 'blue' },
+    { key: 'stress', pts: (parseFloat(p.stress_score) || 0) === 0 && !p.balloon_confidence && !p.has_lien_or_delinquency ? 15 : 0, action: 'Get loan/debt stress data', context: 'Balloon or lien info adds stress signal', label: 'Stress Signal', color: 'red' },
+    { key: 'ownership', pts: (parseFloat(p.ownership_score) || 0) < 10 && !p.owner_name ? 30 : 0, action: 'Link owner contact', context: 'Owner entity + hold period activates ownership signal', label: 'Ownership', color: 'purple' },
+  ];
+  const activeGaps = gaps.filter(g => g.pts > 0);
+  const totalGapPts = activeGaps.reduce((sum, g) => sum + g.pts, 0);
+  const blended = parseFloat(p.blended_priority) || 0;
+  const projectedScore = blended + totalGapPts * 0.7;
+  const projectedTier = projectedScore >= 50 ? 'A' : projectedScore >= 40 ? 'B' : projectedScore >= 30 ? 'C' : 'D';
+
   // Score breakdown annotations
   const annotations = {
     lease: p.lease_expiration ? `Expires ${formatDateCompact(p.lease_expiration)}` : 'No lease data',
@@ -77,6 +90,45 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
             </>
           )}
         </div>
+
+        {/* Gap Hints — Unlock Points */}
+        {totalGapPts > 0 && (
+          <div className="bg-gradient-to-br from-crm-card to-crm-deep border border-yellow-500/30 rounded-lg p-3.5">
+            <div className="flex justify-between items-center mb-2.5">
+              <span className="text-[10px] uppercase tracking-widest text-yellow-400 font-semibold">
+                Unlock Up To +{totalGapPts} Points
+              </span>
+              {projectedTier !== (p.tpe_tier || 'D') && (
+                <span className="text-[10px] text-crm-muted">
+                  Could reach {projectedTier}-tier
+                </span>
+              )}
+            </div>
+            {activeGaps.map((gap) => (
+              <div key={gap.key} className="flex items-center gap-2.5 py-2 border-b border-crm-border/50 last:border-0">
+                <span className={`bg-${gap.color}-500/15 text-${gap.color}-400 text-[11px] font-bold px-2 py-0.5 rounded whitespace-nowrap`}>
+                  +{gap.pts} pts
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] text-crm-text">{gap.action}</div>
+                  <div className="text-[11px] text-crm-muted">{gap.context}</div>
+                </div>
+                <span className="text-[10px] text-crm-muted whitespace-nowrap">{gap.label}</span>
+              </div>
+            ))}
+            {gaps.filter(g => g.pts === 0).map((gap) => (
+              <div key={gap.key} className="flex items-center gap-2.5 py-2 border-b border-crm-border/50 last:border-0 opacity-40">
+                <span className="bg-emerald-500/15 text-emerald-400 text-[11px] font-bold px-2 py-0.5 rounded whitespace-nowrap">
+                  +0 pts
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px] text-crm-text">{gap.label} data loaded</div>
+                </div>
+                <span className="text-[10px] text-emerald-400 whitespace-nowrap">✓ Complete</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Commission Estimate */}
         <div className="space-y-2">
