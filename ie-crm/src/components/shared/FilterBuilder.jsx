@@ -123,7 +123,7 @@ function ConditionRow({ condition, index, columnDefs, onChange, onRemove }) {
         onClick={() => onRemove(index)}
         className="text-crm-muted/40 hover:text-crm-muted text-sm px-1"
       >
-        \u2715
+        ✕
       </button>
     </div>
   );

@@ -76,7 +76,7 @@ export default function FilterBar({
             onClick={() => removeFilter(i)}
             className="opacity-50 hover:opacity-100 transition-opacity ml-0.5"
           >
-            \u2715
+            ✕
           </button>
         </span>
       ))}
