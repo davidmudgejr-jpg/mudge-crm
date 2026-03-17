@@ -263,7 +263,7 @@ scores AS (
     -- Category 5: Debt/Stress (0-10, stacking with cap)
     LEAST(
       COALESCE(
-        CASE bd.balloon_confidence
+        CASE TRIM(bd.balloon_confidence)
           WHEN 'HIGH' THEN c.balloon_high
           WHEN 'MEDIUM' THEN c.balloon_med
           WHEN 'LOW' THEN c.balloon_low

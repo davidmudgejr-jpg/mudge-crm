@@ -428,8 +428,10 @@ scores AS (
           ELSE 0
         END
     END
-    -- Apply temporal decay multiplier
+    -- Apply temporal decay multiplier (only for non-active distress types;
+    -- Auction/NOD/Matured are active proceedings that don't decay with age)
     * CASE
+        WHEN bdist.distress_type IN ('Auction', 'NOD', 'Matured') THEN 1
         WHEN bdist.months_since_distress > 12 THEN 0
         WHEN bdist.months_since_distress > 6 THEN COALESCE(c.dist_decay_pct, 50) / 100.0
         ELSE 1
@@ -437,7 +439,12 @@ scores AS (
     ) AS distress_score,
 
     -- Pass growth_rate for display
-    bg.growth_pct AS growth_rate
+    bg.growth_pct AS growth_rate,
+
+    -- Tier thresholds (pass through so outer SELECT doesn't need CROSS JOIN cfg)
+    c.tier_a,
+    c.tier_b,
+    c.tier_c
 
   FROM properties p
   CROSS JOIN cfg c
@@ -484,13 +491,13 @@ SELECT
   CASE
     WHEN LEAST(s.lease_score + s.ownership_score + s.age_score + s.growth_score + s.stress_score + s.maturity_boost + s.distress_score, 100) * s.tpe_w
        + LEAST(GREATEST(s.sale_commission_est, s.lease_commission_est) * s.time_multiplier / NULLIF(s.comm_divisor, 0), 100) * s.ecv_w
-       >= cfg.tier_a THEN 'A'
+       >= s.tier_a THEN 'A'
     WHEN LEAST(s.lease_score + s.ownership_score + s.age_score + s.growth_score + s.stress_score + s.maturity_boost + s.distress_score, 100) * s.tpe_w
        + LEAST(GREATEST(s.sale_commission_est, s.lease_commission_est) * s.time_multiplier / NULLIF(s.comm_divisor, 0), 100) * s.ecv_w
-       >= cfg.tier_b THEN 'B'
+       >= s.tier_b THEN 'B'
     WHEN LEAST(s.lease_score + s.ownership_score + s.age_score + s.growth_score + s.stress_score + s.maturity_boost + s.distress_score, 100) * s.tpe_w
        + LEAST(GREATEST(s.sale_commission_est, s.lease_commission_est) * s.time_multiplier / NULLIF(s.comm_divisor, 0), 100) * s.ecv_w
-       >= cfg.tier_c THEN 'C'
+       >= s.tier_c THEN 'C'
     ELSE 'D'
   END AS tpe_tier,
 
@@ -500,8 +507,8 @@ SELECT
   CASE
     WHEN s.distress_score >= 20 THEN 'DISTRESS: ' || COALESCE(s.distress_type, 'Unknown') || ' — immediate outreach'
     WHEN s.maturity_boost >= 20 THEN 'LOAN MATURING: ' || TO_CHAR(s.maturity_date, 'Mon YYYY') || ' — refi/sell pressure'
-    WHEN s.age_score >= 15 THEN 'OWNER AGE: Est. ' || s.owner_age_years || ' yrs — succession planning'
-    WHEN s.ownership_score >= 15 THEN 'LONG HOLD: ' || ROUND(s.hold_years::numeric, 0) || ' years — equity harvesting'
+    WHEN s.age_score >= 15 THEN 'OWNER AGE: Est. ' || COALESCE(s.owner_age_years::text, '?') || ' yrs — succession planning'
+    WHEN s.ownership_score >= 15 THEN 'LONG HOLD: ' || COALESCE(ROUND(s.hold_years::numeric, 0)::text, '?') || ' years — equity harvesting'
     WHEN s.stress_score >= 5 THEN 'DEBT STRESS: Balloon or lien — motivated seller'
     -- Post-maturity decay signals (lower threshold)
     WHEN s.maturity_boost > 0 AND s.maturity_date IS NOT NULL AND s.maturity_date <= NOW()
@@ -539,16 +546,15 @@ SELECT
     WHEN s.distress_score >= 20 THEN 'DISTRESS: ' || COALESCE(s.distress_type, 'Unknown') || ' — immediate outreach'
     WHEN s.maturity_boost >= 20 THEN 'LOAN MATURING: ' || TO_CHAR(s.maturity_date, 'Mon YYYY') || ' — refi/sell pressure'
     WHEN s.lease_score >= 22 THEN 'LEASE EXPIRING: ' || TO_CHAR(s.lease_expiration, 'Mon YYYY') || ' — tenant decision window'
-    WHEN s.age_score >= 15 THEN 'OWNER AGE: Est. ' || s.owner_age_years || ' years — succession planning'
-    WHEN s.ownership_score >= 15 THEN 'LONG HOLD: ' || ROUND(s.hold_years::numeric, 0) || ' years — equity harvesting'
-    WHEN s.growth_score >= 10 THEN 'TENANT GROWTH: ' || s.growth_pct || '% growth — expansion need'
+    WHEN s.age_score >= 15 THEN 'OWNER AGE: Est. ' || COALESCE(s.owner_age_years::text, '?') || ' years — succession planning'
+    WHEN s.ownership_score >= 15 THEN 'LONG HOLD: ' || COALESCE(ROUND(s.hold_years::numeric, 0)::text, '?') || ' years — equity harvesting'
+    WHEN s.growth_score >= 10 THEN 'TENANT GROWTH: ' || COALESCE(ROUND(s.growth_pct::numeric, 0)::text, '?') || '% growth — expansion need'
     WHEN s.stress_score >= 5 THEN 'DEBT STRESS: Balloon or lien — motivated seller'
     WHEN s.lease_score > 0 AND s.months_to_exp < 0 THEN 'MONTH-TO-MONTH: Lease expired — renegotiation window'
     ELSE 'LOW PRIORITY: No strong transaction signals'
   END AS call_reason
 
-FROM scores s
-CROSS JOIN cfg;
+FROM scores s;
 
 COMMENT ON VIEW property_tpe_scores IS 'TPE Living Database — temporal decay, owner/tenant split call reasons, contact lookups. Dynamic weights from tpe_config.';
 

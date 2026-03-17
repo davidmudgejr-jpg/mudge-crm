@@ -1062,6 +1062,7 @@ app.post('/api/ai/tpe-config/reset', async (req, res) => {
 
 // ── TPE Data Gap Endpoints ──
 app.get('/api/ai/tpe-gaps', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
   try {
     const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
     const gapType = req.query.gap_type;
@@ -1086,6 +1087,7 @@ app.get('/api/ai/tpe-gaps', async (req, res) => {
 });
 
 app.get('/api/ai/tpe-gaps/stats', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
   try {
     const result = await pool.query(`
       SELECT
