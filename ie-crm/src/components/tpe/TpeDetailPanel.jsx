@@ -29,6 +29,13 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
   const finalEcv = Math.max(sale, lease) * mult;
 
   // Inline gap calculations (no extra API call)
+  // Color map avoids Tailwind JIT purge of dynamic class names
+  const GAP_COLORS = {
+    yellow: 'bg-yellow-500/15 text-yellow-400',
+    blue: 'bg-blue-500/15 text-blue-400',
+    red: 'bg-red-500/15 text-red-400',
+    purple: 'bg-purple-500/15 text-purple-400',
+  };
   const gaps = [
     { key: 'age', pts: (parseFloat(p.age_score) || 0) === 0 && !p.owner_age_years ? 20 : 0, action: 'Get owner date of birth', context: 'If owner is 65+, age signal activates', label: 'Age Signal', color: 'yellow' },
     { key: 'growth', pts: (parseFloat(p.growth_score) || 0) === 0 && !p.growth_rate ? 15 : 0, action: 'Get tenant headcount data', context: '30%+ growth adds full growth signal', label: 'Growth Signal', color: 'blue' },
@@ -106,7 +113,7 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
             </div>
             {activeGaps.map((gap) => (
               <div key={gap.key} className="flex items-center gap-2.5 py-2 border-b border-crm-border/50 last:border-0">
-                <span className={`bg-${gap.color}-500/15 text-${gap.color}-400 text-[11px] font-bold px-2 py-0.5 rounded whitespace-nowrap`}>
+                <span className={`${GAP_COLORS[gap.color]} text-[11px] font-bold px-2 py-0.5 rounded whitespace-nowrap`}>
                   +{gap.pts} pts
                 </span>
                 <div className="flex-1 min-w-0">
