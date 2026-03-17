@@ -52,7 +52,10 @@ Each signal follows: **Approaching → Peak → Expired → Decay/Transform → 
 | 3-6 months PAST | 4 | STALE LEASE: Expired 3+ months, update tenant status |
 | 6+ months PAST | 0 | Signal fully decayed |
 
-**SQL change**: Add `WHEN months_to_exp < 0 AND months_to_exp >= -3` and `WHEN months_to_exp < -3 AND months_to_exp >= -6` branches to the lease_score CASE statement.
+**SQL change**: The existing `lease_months` CTE filters out expired leases (`co.lease_exp > NOW()`), producing NULL for `months_to_exp` on past-expiry properties. This CTE must be rewritten to **remove the `> NOW()` guard** and allow negative `months_to_exp` values. Then add post-expiry CASE branches:
+- `WHEN months_to_exp < 0 AND months_to_exp >= -3 THEN c.lease_expired_0_3mo_points`
+- `WHEN months_to_exp < -3 AND months_to_exp >= -6 THEN c.lease_expired_3_6mo_points`
+- `WHEN months_to_exp < -6 THEN 0`
 
 #### Loan Maturity Decay
 
@@ -76,7 +79,7 @@ Each signal follows: **Approaching → Peak → Expired → Decay/Transform → 
 | 6-12 months | 50% of original | AGING DISTRESS: Verify if resolved |
 | 12+ months | 0 | Fully decayed |
 
-**SQL change**: Add `months_since_distress` calculation and apply 50% multiplier for 6-12mo, 0 for 12+mo.
+**SQL change**: In the `best_distress` CTE, compute `months_since_distress` as `EXTRACT(EPOCH FROM (NOW() - bdist.event_date)) / 2629800.0` when `event_date < NOW()`. Apply multiplier in the `scored` CTE: `distress_score * CASE WHEN months_since_distress > 12 THEN 0 WHEN months_since_distress > 6 THEN 0.5 ELSE 1 END`.
 
 #### New tpe_config Keys
 
@@ -122,17 +125,47 @@ Replace single `call_reason` with **two separate call reason columns** mapped to
 owner_call_reason    TEXT    -- 'LOAN MATURING: Sep 2026 — refi pressure'
 owner_signal_pts     INT    -- sum of owner-facing signal points
 owner_contact_id     UUID   -- from property_contacts WHERE role = 'owner'
-owner_name           TEXT   -- already exists
+owner_name           TEXT   -- contact full_name
 
 -- Tenant outreach
 tenant_call_reason   TEXT   -- 'LEASE EXPIRING: Sep 2026 — decision window'
 tenant_signal_pts    INT    -- sum of tenant-facing signal points
-tenant_company_id    UUID   -- from property-company link
+tenant_company_id    UUID   -- from property_companies junction
 tenant_name          TEXT   -- company name
 
 -- Backward compatibility
 call_reason          TEXT   -- kept as alias (highest overall signal)
 ```
+
+#### New CTEs for Contact/Company Lookups
+
+```sql
+-- Owner contact lookup (extends existing owner_age CTE)
+owner_contact AS (
+  SELECT DISTINCT ON (pc.property_id)
+    pc.property_id,
+    ct.contact_id AS owner_contact_id,
+    ct.full_name AS owner_name,
+    ct.phone_1 AS owner_phone
+  FROM property_contacts pc
+  JOIN contacts ct ON ct.contact_id = pc.contact_id
+  WHERE LOWER(pc.role) = 'owner'
+  ORDER BY pc.property_id, ct.date_of_birth ASC NULLS LAST
+),
+
+-- Tenant company lookup (via property_companies junction)
+tenant_company AS (
+  SELECT DISTINCT ON (pco.property_id)
+    pco.property_id,
+    co.company_id AS tenant_company_id,
+    co.company_name AS tenant_name
+  FROM property_companies pco
+  JOIN companies co ON co.company_id = pco.company_id
+  ORDER BY pco.property_id, co.lease_exp DESC NULLS LAST
+)
+```
+
+LEFT JOIN both CTEs into the final SELECT. Missing contacts result in NULL values — UI handles gracefully.
 
 #### Owner Call Reason Generation
 
@@ -159,7 +192,7 @@ In `TpeDetailPanel.jsx`, replace the single "Call Reason" box with **two outreac
 - **Owner card** (green border): Shows `owner_call_reason`, `owner_signal_pts`, and a clickable contact chip (`owner_name` → opens contact slide-over via `owner_contact_id`). Phone number shown if available.
 - **Tenant card** (blue border): Shows `tenant_call_reason`, `tenant_signal_pts`, and a clickable company chip (`tenant_name` → opens company slide-over via `tenant_company_id`).
 
-Cards only render if their respective call reason is non-null.
+Cards only render if their respective call reason is non-null. When BOTH are null, show a muted "No active outreach signals" message in place of the cards (mirrors the existing `call_reason` LOW PRIORITY fallback).
 
 #### Table Column Update
 
@@ -181,57 +214,61 @@ For each property, check each scoring model: if the score is 0 (or below thresho
 
 ```sql
 CREATE OR REPLACE VIEW property_data_gaps AS
+WITH cfg AS (
+  -- Pivot tpe_config into columns (same pattern as property_tpe_scores)
+  SELECT
+    MAX(CASE WHEN config_key = 'age_70_points' THEN config_value END) AS age_70,
+    MAX(CASE WHEN config_key = 'growth_30pct_points' THEN config_value END) AS growth_30,
+    MAX(CASE WHEN config_key = 'stress_cap' THEN config_value END) AS stress_cap,
+    MAX(CASE WHEN config_key = 'ownership_cap' THEN config_value END) AS ownership_cap,
+    MAX(CASE WHEN config_key = 'tier_a_threshold' THEN config_value END) AS tier_a,
+    MAX(CASE WHEN config_key = 'tier_b_threshold' THEN config_value END) AS tier_b,
+    MAX(CASE WHEN config_key = 'tier_c_threshold' THEN config_value END) AS tier_c
+  FROM tpe_config
+),
+gaps AS (
+  SELECT
+    t.property_id, t.address, t.tpe_tier, t.blended_priority,
+    t.owner_name, t.tenant_name,
+
+    -- Per-model gap calculations
+    CASE WHEN t.age_score = 0 AND t.owner_age_years IS NULL
+      THEN c.age_70 ELSE 0 END AS age_gap_pts,
+    CASE WHEN t.growth_score = 0 AND t.growth_pct IS NULL
+      THEN c.growth_30 ELSE 0 END AS growth_gap_pts,
+    CASE WHEN t.stress_score = 0 AND NOT EXISTS (
+      SELECT 1 FROM debt_stress ds WHERE ds.property_id = t.property_id
+    ) THEN c.stress_cap ELSE 0 END AS stress_gap_pts,
+    CASE WHEN t.ownership_score < 10 AND t.owner_name IS NULL
+      THEN c.ownership_cap ELSE 0 END AS ownership_gap_pts,
+
+    -- Tier thresholds for next-tier calc
+    c.tier_a, c.tier_b, c.tier_c
+  FROM property_tpe_scores t
+  CROSS JOIN cfg c
+)
 SELECT
-  t.property_id,
-  t.address,
-  t.tpe_tier,
-  t.blended_priority,
-
-  -- Age gap: score is 0 AND owner has no DOB and no static age
-  CASE WHEN t.age_score = 0 AND t.owner_age_years IS NULL
-    THEN cfg_age_70.config_value  -- max possible = 20
-    ELSE 0
-  END AS age_gap_pts,
-
-  -- Growth gap: score is 0 AND company has no headcount
-  CASE WHEN t.growth_score = 0 AND t.growth_pct IS NULL
-    THEN cfg_growth_30.config_value  -- max possible = 15
-    ELSE 0
-  END AS growth_gap_pts,
-
-  -- Stress gap: score is 0 AND no debt_stress row for this property
-  CASE WHEN t.stress_score = 0 AND NOT EXISTS (
-    SELECT 1 FROM debt_stress ds WHERE ds.property_id = t.property_id
-  )
-    THEN cfg_stress_cap.config_value  -- max possible = 15
-    ELSE 0
-  END AS stress_gap_pts,
-
-  -- Ownership gap: score < threshold AND no owner linked
-  CASE WHEN t.ownership_score < 10 AND t.owner_name IS NULL
-    THEN cfg_own_cap.config_value  -- max possible = 30
-    ELSE 0
-  END AS ownership_gap_pts,
-
-  -- Total potential gain
-  (age_gap + growth_gap + stress_gap + ownership_gap) AS total_gap_pts,
-
-  -- Next tier info
-  CASE t.tpe_tier
-    WHEN 'D' THEN cfg_tier_c.config_value - t.blended_priority
-    WHEN 'C' THEN cfg_tier_b.config_value - t.blended_priority
-    WHEN 'B' THEN cfg_tier_a.config_value - t.blended_priority
+  g.*,
+  (g.age_gap_pts + g.growth_gap_pts + g.stress_gap_pts + g.ownership_gap_pts) AS total_gap_pts,
+  CASE g.tpe_tier
+    WHEN 'D' THEN g.tier_c - g.blended_priority
+    WHEN 'C' THEN g.tier_b - g.blended_priority
+    WHEN 'B' THEN g.tier_a - g.blended_priority
     ELSE 0
   END AS pts_to_next_tier,
-
-  -- Impact priority = properties closest to tier jump with biggest gaps
-  -- Higher = more actionable
-  total_gap_pts * (1.0 / GREATEST(pts_to_next_tier, 1)) AS impact_priority
-
-FROM property_tpe_scores t
-CROSS JOIN ... (config lookups)
-WHERE total_gap_pts > 0;
+  (g.age_gap_pts + g.growth_gap_pts + g.stress_gap_pts + g.ownership_gap_pts)
+    * (1.0 / GREATEST(
+      CASE g.tpe_tier
+        WHEN 'D' THEN g.tier_c - g.blended_priority
+        WHEN 'C' THEN g.tier_b - g.blended_priority
+        WHEN 'B' THEN g.tier_a - g.blended_priority
+        ELSE 1
+      END, 1)) AS impact_priority
+FROM gaps g
+WHERE (g.age_gap_pts + g.growth_gap_pts + g.stress_gap_pts + g.ownership_gap_pts) > 0;
 ```
+
+**Note**: Uses CTE `gaps` to compute per-model gap values, then outer SELECT computes `total_gap_pts` and `impact_priority` (PostgreSQL does not allow referencing column aliases within the same SELECT).
 
 #### Per-Property Gap Hints (Detail Panel)
 
@@ -268,13 +305,20 @@ New tab or view accessible from TPE page. Shows:
 ```javascript
 app.get('/api/ai/tpe-gaps', async (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
-  const gap_type = req.query.gap_type; // optional filter: 'age', 'growth', 'stress', 'ownership'
+  const gap_type = req.query.gap_type; // optional: 'age', 'growth', 'stress', 'ownership'
+  // Filter by specific gap column being > 0 (no gap_type column in VIEW)
+  const typeFilter = {
+    age: 'AND age_gap_pts > 0',
+    growth: 'AND growth_gap_pts > 0',
+    stress: 'AND stress_gap_pts > 0',
+    ownership: 'AND ownership_gap_pts > 0',
+  }[gap_type] || '';
   const result = await pool.query(
     `SELECT * FROM property_data_gaps
-     WHERE ($1::text IS NULL OR gap_type = $1)
+     WHERE total_gap_pts > 0 ${typeFilter}
      ORDER BY impact_priority DESC
-     LIMIT $2`,
-    [gap_type || null, limit]
+     LIMIT $1`,
+    [limit]
   );
   res.json(result.rows);
 });
