@@ -1045,6 +1045,10 @@ app.post('/api/ai/tpe-config/reset', async (req, res) => {
       auction_points: 25, matured_distress_points: 25, nod_points: 20,
       mature_1mo_points: 22, mature_3mo_points: 18, mature_6mo_points: 15, mature_9mo_points: 12, mature_12mo_points: 10,
       tier_a_threshold: 50, tier_b_threshold: 40, tier_c_threshold: 30,
+      // Living database: temporal decay keys
+      lease_expired_0_3mo_points: 8, lease_expired_3_6mo_points: 4,
+      maturity_past_0_3mo_points: 15, maturity_past_3_6mo_points: 8, maturity_past_6_12mo_points: 3,
+      distress_decay_6_12mo_pct: 50,
     };
     for (const [key, value] of Object.entries(defaults)) {
       await pool.query('UPDATE tpe_config SET config_value = $1 WHERE config_key = $2', [value, key]);

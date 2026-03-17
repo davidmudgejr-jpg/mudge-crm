@@ -101,12 +101,64 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
           </div>
         </div>
 
-        {/* Call Reason */}
-        {p.call_reason && (
-          <div className="bg-crm-accent/10 border border-crm-accent/20 rounded-lg p-3">
-            <div className="text-[10px] uppercase tracking-wider text-crm-accent font-semibold mb-1">Call Reason</div>
-            <div className="text-sm">{p.call_reason}</div>
+        {/* Owner/Tenant Outreach Cards */}
+        {(p.owner_call_reason || p.tenant_call_reason) ? (
+          <div className="space-y-2.5">
+            <h3 className="text-[11px] uppercase tracking-wider text-crm-muted font-semibold">Outreach Signals</h3>
+
+            {/* Owner Card */}
+            {p.owner_call_reason && (
+              <div className="bg-crm-card border border-emerald-500/40 rounded-lg p-3.5">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] uppercase tracking-widest text-emerald-400 font-semibold">👤 Owner Outreach</span>
+                  <span className="text-[11px] font-bold text-emerald-400">{Math.round(parseFloat(p.owner_signal_pts) || 0)} pts</span>
+                </div>
+                <div className="text-sm text-crm-text mb-2.5">{p.owner_call_reason}</div>
+                <div className="flex gap-1.5 flex-wrap">
+                  {p.owner_contact_id ? (
+                    <button
+                      onClick={() => { onClose(); openSlideOver('contact', p.owner_contact_id); }}
+                      className="bg-crm-deep border border-emerald-500/40 text-emerald-400 px-2.5 py-1 rounded-full text-[11px] hover:bg-emerald-500/10 transition-colors cursor-pointer"
+                    >
+                      🔗 {p.owner_name || 'Owner'}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-crm-muted italic">No owner contact linked</span>
+                  )}
+                  {p.owner_phone && (
+                    <span className="bg-crm-deep border border-crm-border text-crm-muted px-2.5 py-1 rounded-full text-[11px]">
+                      {p.owner_phone}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Tenant Card */}
+            {p.tenant_call_reason && (
+              <div className="bg-crm-card border border-blue-400/40 rounded-lg p-3.5">
+                <div className="flex justify-between items-center mb-2">
+                  <span className="text-[10px] uppercase tracking-widest text-blue-400 font-semibold">🏢 Tenant Outreach</span>
+                  <span className="text-[11px] font-bold text-blue-400">{Math.round(parseFloat(p.tenant_signal_pts) || 0)} pts</span>
+                </div>
+                <div className="text-sm text-crm-text mb-2.5">{p.tenant_call_reason}</div>
+                <div className="flex gap-1.5 flex-wrap">
+                  {p.tenant_company_id ? (
+                    <button
+                      onClick={() => { onClose(); openSlideOver('company', p.tenant_company_id); }}
+                      className="bg-crm-deep border border-blue-400/40 text-blue-400 px-2.5 py-1 rounded-full text-[11px] hover:bg-blue-500/10 transition-colors cursor-pointer"
+                    >
+                      🔗 {p.tenant_name || 'Tenant'}
+                    </button>
+                  ) : (
+                    <span className="text-[11px] text-crm-muted italic">No tenant company linked</span>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
+        ) : (
+          <div className="text-sm text-crm-muted italic py-2">No active outreach signals</div>
         )}
 
         {/* Quick Info */}
