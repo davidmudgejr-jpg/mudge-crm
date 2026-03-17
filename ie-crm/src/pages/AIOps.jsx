@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import React, { useState, useEffect } from 'react';
 import useAgentHeartbeats from '../hooks/useAgentHeartbeats';
 import RoomBreadcrumb from '../components/ai-ops/RoomBreadcrumb';
 import MissionControlRoom from '../components/ai-ops/MissionControlRoom';
+import ZoomTransition from '../components/ai-ops/ZoomTransition';
 
 const DETAIL_VIEWS = {};
 
@@ -25,6 +25,14 @@ export default function AIOps() {
     setActiveView(null);
   };
 
+  useEffect(() => {
+    const handler = (e) => {
+      if (e.key === 'Escape' && activeView) handleZoomOut();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [activeView]);
+
   return (
     <div className="fixed inset-0 bg-[#04040a] overflow-hidden">
       {stale && (
@@ -35,34 +43,20 @@ export default function AIOps() {
 
       <RoomBreadcrumb activeView={activeView} onBack={handleZoomOut} />
 
-      <AnimatePresence mode="wait">
-        {activeView === null ? (
-          <motion.div
-            key="room"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0, scale: 1.5 }}
-            transition={{ duration: 0.4 }}
-            className="w-full h-full"
-            style={{ transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%` }}
-          >
-            <MissionControlRoom
-              agents={agents}
-              pending={pending}
-              recentLogs={recentLogs}
-              onZoomIn={handleZoomIn}
-            />
-          </motion.div>
-        ) : (
-          <motion.div
-            key={activeView}
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-            className="w-full h-full overflow-auto p-8"
-          >
-            <div className="max-w-5xl mx-auto">
+      <ZoomTransition
+        activeView={activeView}
+        zoomOrigin={zoomOrigin}
+        roomContent={
+          <MissionControlRoom
+            agents={agents}
+            pending={pending}
+            recentLogs={recentLogs}
+            onZoomIn={handleZoomIn}
+          />
+        }
+        detailContent={
+          activeView ? (
+            <div className="max-w-6xl mx-auto">
               <h2 className="text-xl font-bold text-white mb-4">
                 {activeView.startsWith('agent-') ? `Agent: ${activeView.replace('agent-', '')}` : activeView}
               </h2>
@@ -75,9 +69,9 @@ export default function AIOps() {
                 )}
               </pre>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+          ) : null
+        }
+      />
     </div>
   );
 }
