@@ -3,8 +3,22 @@ import useAgentHeartbeats from '../hooks/useAgentHeartbeats';
 import RoomBreadcrumb from '../components/ai-ops/RoomBreadcrumb';
 import MissionControlRoom from '../components/ai-ops/MissionControlRoom';
 import ZoomTransition from '../components/ai-ops/ZoomTransition';
+import PipelineDashboard from '../components/ai-ops/detail-views/PipelineDashboard';
+import AgentDossier from '../components/ai-ops/detail-views/AgentDossier';
+import ApprovalQueue from '../components/ai-ops/detail-views/ApprovalQueue';
+import LogViewer from '../components/ai-ops/detail-views/LogViewer';
+import CostBreakdown from '../components/ai-ops/detail-views/CostBreakdown';
+import TerritoryIntel from '../components/ai-ops/detail-views/TerritoryIntel';
+import SystemHealth from '../components/ai-ops/detail-views/SystemHealth';
 
-const DETAIL_VIEWS = {};
+const DETAIL_VIEWS = {
+  pipeline:        PipelineDashboard,
+  'approval-queue': ApprovalQueue,
+  logs:            LogViewer,
+  costs:           CostBreakdown,
+  territory:       TerritoryIntel,
+  health:          SystemHealth,
+};
 
 export default function AIOps() {
   const [activeView, setActiveView] = useState(null);
@@ -57,17 +71,18 @@ export default function AIOps() {
         detailContent={
           activeView ? (
             <div className="max-w-6xl mx-auto">
-              <h2 className="text-xl font-bold text-white mb-4">
-                {activeView.startsWith('agent-') ? `Agent: ${activeView.replace('agent-', '')}` : activeView}
-              </h2>
-              <pre className="text-crm-muted text-xs bg-crm-card rounded-lg p-4 overflow-auto">
-                {JSON.stringify(
-                  activeView.startsWith('agent-')
-                    ? agents.find(a => a.agent_name === activeView.replace('agent-', ''))
-                    : { view: activeView, pending, recentLogs: recentLogs?.slice(0, 5) },
-                  null, 2
-                )}
-              </pre>
+              {activeView.startsWith('agent-') ? (
+                <AgentDossier
+                  agentName={activeView.replace('agent-', '')}
+                  agents={agents}
+                />
+              ) : DETAIL_VIEWS[activeView] ? (
+                React.createElement(DETAIL_VIEWS[activeView], { agents, pending, recentLogs })
+              ) : (
+                <div className="text-crm-muted text-center py-20">
+                  View not found: {activeView}
+                </div>
+              )}
             </div>
           ) : null
         }
