@@ -39,6 +39,8 @@ const ALLOWED_COLS = {
     'owner_user_or_investor', 'out_of_area_owner', 'office_courtesy',
     // migration 004
     'units', 'stories', 'parking_spaces', 'price_per_sqft', 'noi', 'owner_email', 'owner_mailing_address',
+    // migration 006 — TPE-related columns
+    'owner_call_status', 'tenant_call_status', 'has_lien_or_delinquency', 'costar_star_rating',
   ]),
   contacts: new Set([
     'contact_id', 'airtable_id', 'full_name', 'first_name', 'type', 'title',
@@ -153,6 +155,29 @@ function validateJunction(table, cols) {
   for (const c of cols) {
     if (!ALLOWED_JUNCTION_COLS.has(c)) throw new Error(`Disallowed junction column: ${c}`);
   }
+}
+
+// ============================================================
+// GENERIC FILTERED QUERY (for View Engine)
+// ============================================================
+const VALID_VIEW_TABLES = new Set([
+  'properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns',
+]);
+
+export async function queryWithFilters(table, { whereClause = '', params = [], orderBy, order, limit = 200, offset = 0 } = {}) {
+  if (!VALID_VIEW_TABLES.has(table)) throw new Error(`Invalid table: ${table}`);
+  const safeOrder = sanitizeCol(orderBy, table, 'created_at');
+  const safeDir = sanitizeDir(order);
+  const n = params.length;
+  const sql = `SELECT * FROM ${table} ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${n + 1} OFFSET $${n + 2}`;
+  return query(sql, [...params, limit, offset]);
+}
+
+export async function countWithFilters(table, { whereClause = '', params = [] } = {}) {
+  if (!VALID_VIEW_TABLES.has(table)) throw new Error(`Invalid table: ${table}`);
+  const sql = `SELECT COUNT(*) AS total FROM ${table} ${whereClause}`;
+  const result = await query(sql, params);
+  return parseInt(result.rows?.[0]?.total || '0', 10);
 }
 
 // ============================================================

@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { getCampaigns, getCampaignContacts, query } from '../api/database';
+import { getCampaigns, getCampaignContacts, query, queryWithFilters, countWithFilters } from '../api/database';
 import { bulkOps } from '../api/bridge';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
+import useViewEngine from '../hooks/useViewEngine';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import ViewBar from '../components/shared/ViewBar';
+import FilterBar from '../components/shared/FilterBar';
+import FilterBuilder from '../components/shared/FilterBuilder';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import { useToast } from '../components/shared/Toast';
@@ -22,21 +26,21 @@ const STATUS_COLORS = {
 };
 
 const ALL_COLUMNS = [
-  { key: 'name', label: 'Campaign', defaultWidth: 200 },
+  { key: 'name', label: 'Campaign', defaultWidth: 200, type: 'text', filterable: true },
   {
     key: 'contact_count', label: 'Contacts', defaultWidth: 90,
     renderCell: (val) => (
       <span className={val ? 'text-crm-text' : 'text-crm-muted'}>{val || 0}</span>
     ),
   },
-  { key: 'type', label: 'Type', defaultWidth: 100 },
+  { key: 'type', label: 'Type', defaultWidth: 100, type: 'select', filterable: true, filterOptions: ['Email', 'Direct Mail', 'Cold Call', 'Door Knock', 'SMS', 'Social Media', 'Event'] },
   {
-    key: 'status', label: 'Status', defaultWidth: 90,
+    key: 'status', label: 'Status', defaultWidth: 90, type: 'select', filterable: true, filterOptions: ['Draft', 'Scheduled', 'Active', 'Sent', 'Completed', 'Paused'],
     renderCell: (val) => val ? (
       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLORS[val] || 'bg-crm-border text-crm-muted'}`}>{val}</span>
     ) : <span className="text-crm-muted">--</span>,
   },
-  { key: 'sent_date', label: 'Sent Date', defaultWidth: 100, format: 'date' },
+  { key: 'sent_date', label: 'Sent Date', defaultWidth: 100, type: 'date', filterable: true, format: 'date' },
   { key: 'assignee', label: 'Assignee', defaultWidth: 110 },
   { key: 'notes', label: 'Notes', defaultWidth: 200 },
   { key: 'day_time_hits', label: 'Day/Time Hits', defaultWidth: 120, defaultVisible: false },
@@ -247,9 +251,9 @@ export default function Campaigns({ onCountChange }) {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [orderBy, setOrderBy] = useState('modified');
-  const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
+  const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
+  const view = useViewEngine('campaigns', ALL_COLUMNS, { defaultSort: { column: 'modified', direction: 'DESC' } });
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
@@ -259,52 +263,58 @@ export default function Campaigns({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await getCampaigns({ limit: 500 });
-      let filtered = result.rows || [];
+      if (search || filterType || filterStatus) {
+        const result = await getCampaigns({ limit: 500 });
+        let filtered = result.rows || [];
 
-      // Client-side filtering (getCampaigns doesn't support server-side filters)
-      if (search) {
-        const q = search.toLowerCase();
-        filtered = filtered.filter((r) =>
-          (r.name || '').toLowerCase().includes(q) ||
-          (r.notes || '').toLowerCase().includes(q) ||
-          (r.type || '').toLowerCase().includes(q)
-        );
+        // Client-side filtering (getCampaigns doesn't support server-side filters)
+        if (search) {
+          const q = search.toLowerCase();
+          filtered = filtered.filter((r) =>
+            (r.name || '').toLowerCase().includes(q) ||
+            (r.notes || '').toLowerCase().includes(q) ||
+            (r.type || '').toLowerCase().includes(q)
+          );
+        }
+        if (filterType) filtered = filtered.filter((r) => r.type === filterType);
+        if (filterStatus) filtered = filtered.filter((r) => r.status === filterStatus);
+
+        // Client-side sorting
+        filtered.sort((a, b) => {
+          const aVal = a[view.sort.column];
+          const bVal = b[view.sort.column];
+          if (aVal === null || aVal === undefined) return 1;
+          if (bVal === null || bVal === undefined) return -1;
+          const cmp = typeof aVal === 'string' ? aVal.localeCompare(bVal) : (aVal > bVal ? 1 : -1);
+          return view.sort.direction === 'ASC' ? cmp : -cmp;
+        });
+
+        setRows(filtered);
+        setTotalCount(filtered.length);
+        if (onCountChange) onCountChange(filtered.length);
+      } else {
+        const [result, total] = await Promise.all([
+          queryWithFilters('campaigns', {
+            ...view.sqlFilters,
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('campaigns', {}),
+        ]);
+        setRows(result.rows || []);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       }
-      if (filterType) filtered = filtered.filter((r) => r.type === filterType);
-      if (filterStatus) filtered = filtered.filter((r) => r.status === filterStatus);
-
-      // Client-side sorting
-      filtered.sort((a, b) => {
-        const aVal = a[orderBy];
-        const bVal = b[orderBy];
-        if (aVal === null || aVal === undefined) return 1;
-        if (bVal === null || bVal === undefined) return -1;
-        const cmp = typeof aVal === 'string' ? aVal.localeCompare(bVal) : (aVal > bVal ? 1 : -1);
-        return order === 'ASC' ? cmp : -cmp;
-      });
-
-      setRows(filtered);
-      setTotalCount(filtered.length);
-      if (onCountChange) onCountChange(filtered.length);
     } catch (err) {
       console.error('Failed to fetch campaigns:', err);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [search, filterType, filterStatus, orderBy, order, onCountChange]);
+  }, [search, filterType, filterStatus, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  const handleSort = (key) => {
-    if (orderBy === key) {
-      setOrder(order === 'ASC' ? 'DESC' : 'ASC');
-    } else {
-      setOrderBy(key);
-      setOrder('ASC');
-    }
-  };
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -366,7 +376,12 @@ export default function Campaigns({ onCountChange }) {
       <div className="flex-shrink-0 px-6 py-4 border-b border-crm-border">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="text-lg font-semibold">Campaigns</h1>
+            <h1 className="text-lg font-semibold flex items-center gap-2">
+              <svg className="w-5 h-5 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              Campaigns
+            </h1>
             <p className="text-xs text-crm-muted">{totalCount.toLocaleString()} records</p>
           </div>
           <div className="flex items-center gap-2">
@@ -446,6 +461,40 @@ export default function Campaigns({ onCountChange }) {
         </div>
       </div>
 
+      <ViewBar
+        entityLabel="Campaigns"
+        views={view.views}
+        activeViewId={view.activeViewId}
+        isDirty={view.isDirty}
+        activeView={view.activeView}
+        applyView={view.applyView}
+        resetToAll={view.resetToAll}
+        saveView={view.saveView}
+        renameView={view.renameView}
+        deleteView={view.deleteView}
+        duplicateView={view.duplicateView}
+        setDefault={view.setDefault}
+        onNewView={() => setFilterBuilderOpen(true)}
+      />
+      <FilterBar
+        filters={view.filters}
+        filterLogic={view.filterLogic}
+        updateFilters={view.updateFilters}
+        onAddFilter={() => setFilterBuilderOpen(true)}
+        totalCount={totalCount}
+        filteredCount={rows.length}
+        activeViewId={view.activeViewId}
+        onSaveAsView={(name) => view.saveView(name)}
+      />
+      <FilterBuilder
+        isOpen={filterBuilderOpen}
+        onClose={() => setFilterBuilderOpen(false)}
+        columnDefs={ALL_COLUMNS}
+        initialFilters={view.filters}
+        initialLogic={view.filterLogic}
+        onApply={(filters, logic) => view.updateFilters(filters, logic)}
+      />
+
       {/* Table */}
       <div className="flex-1 overflow-auto">
         {!loading && rows.length === 0 && !search && !filterType && !filterStatus ? (
@@ -458,9 +507,9 @@ export default function Campaigns({ onCountChange }) {
             idField="campaign_id"
             loading={loading}
             onRowClick={(row) => setDetailId(row.campaign_id)}
-            onSort={handleSort}
-            orderBy={orderBy}
-            order={order}
+            onSort={view.handleSort}
+            orderBy={view.sort.column}
+            order={view.sort.direction}
             selected={selected}
             onToggleSelect={toggleSelect}
             onToggleAll={toggleAll}

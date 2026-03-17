@@ -1,14 +1,26 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { getInteractions } from '../api/database';
+import { getInteractions, queryWithFilters, countWithFilters } from '../api/database';
 import TYPE_ICONS, { INTERACTION_TYPES, getTypeInfo } from '../config/typeIcons';
 import InteractionDetail, { formatDate, formatTime } from './InteractionDetail';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
+import useViewEngine from '../hooks/useViewEngine';
+import ViewBar from '../components/shared/ViewBar';
+import FilterBar from '../components/shared/FilterBar';
+import FilterBuilder from '../components/shared/FilterBuilder';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import { todayPacific } from '../utils/timezone';
 import useDetailPanel from '../hooks/useDetailPanel';
 
 const TYPES = INTERACTION_TYPES;
+
+const ALL_COLUMNS = [
+  { key: 'type', label: 'Type', type: 'select', filterable: true, filterOptions: INTERACTION_TYPES },
+  { key: 'date', label: 'Date', type: 'date', filterable: true, format: 'date' },
+  { key: 'email_heading', label: 'Subject', type: 'text', filterable: true },
+  { key: 'team_member', label: 'Team Member', type: 'text', filterable: true },
+  { key: 'notes', label: 'Notes', type: 'text', filterable: true },
+];
 
 export default function Interactions({ onCountChange }) {
   const { addToast } = useToast();
@@ -17,42 +29,47 @@ export default function Interactions({ onCountChange }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
-  const [orderBy, setOrderBy] = useState('date');
-  const [order, setOrder] = useState('DESC');
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
+  const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
+  const view = useViewEngine('interactions', ALL_COLUMNS, { defaultSort: { column: 'date', direction: 'DESC' } });
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const filters = {};
-      if (search) filters.search = search;
-      if (filterType) filters.type = filterType;
-
-      const result = await getInteractions({ limit: 500, orderBy, order, filters });
-      setRows(result.rows || []);
-      const count = result.rows?.length || 0;
-      setTotalCount(count);
-      if (onCountChange) onCountChange(count);
+      if (search || filterType) {
+        const filters = {};
+        if (search) filters.search = search;
+        if (filterType) filters.type = filterType;
+        const result = await getInteractions({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        setRows(result.rows || []);
+        const count = result.rows?.length || 0;
+        setTotalCount(count);
+        if (onCountChange) onCountChange(count);
+      } else {
+        const [result, total] = await Promise.all([
+          queryWithFilters('interactions', {
+            ...view.sqlFilters,
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('interactions', {}),
+        ]);
+        setRows(result.rows || []);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
+      }
     } catch (err) {
       console.error('Failed to fetch interactions:', err);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [search, filterType, orderBy, order, onCountChange]);
+  }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  const handleSort = (key) => {
-    if (orderBy === key) {
-      setOrder(order === 'ASC' ? 'DESC' : 'ASC');
-    } else {
-      setOrderBy(key);
-      setOrder(key === 'date' ? 'DESC' : 'ASC');
-    }
-  };
 
   // Timeline-style view
   return (
@@ -61,7 +78,12 @@ export default function Interactions({ onCountChange }) {
       <div className="flex-shrink-0 px-6 py-4 border-b border-crm-border">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="text-lg font-semibold">Activity</h1>
+            <h1 className="text-lg font-semibold flex items-center gap-2">
+              <svg className="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+              </svg>
+              Activity
+            </h1>
             <p className="text-xs text-crm-muted">
               {`${totalCount.toLocaleString()} interactions`}
             </p>
@@ -110,13 +132,47 @@ export default function Interactions({ onCountChange }) {
           </select>
           {/* Sort toggle */}
           <button
-            onClick={() => handleSort('date')}
+            onClick={() => view.handleSort('date')}
             className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text transition-colors flex items-center gap-1"
           >
-            Date {orderBy === 'date' && <span className="text-crm-accent">{order === 'ASC' ? '↑' : '↓'}</span>}
+            Date {view.sort.column === 'date' && <span className="text-crm-accent">{view.sort.direction === 'ASC' ? '\u2191' : '\u2193'}</span>}
           </button>
         </div>
       </div>
+
+      <ViewBar
+        entityLabel="Activity"
+        views={view.views}
+        activeViewId={view.activeViewId}
+        isDirty={view.isDirty}
+        activeView={view.activeView}
+        applyView={view.applyView}
+        resetToAll={view.resetToAll}
+        saveView={view.saveView}
+        renameView={view.renameView}
+        deleteView={view.deleteView}
+        duplicateView={view.duplicateView}
+        setDefault={view.setDefault}
+        onNewView={() => setFilterBuilderOpen(true)}
+      />
+      <FilterBar
+        filters={view.filters}
+        filterLogic={view.filterLogic}
+        updateFilters={view.updateFilters}
+        onAddFilter={() => setFilterBuilderOpen(true)}
+        totalCount={totalCount}
+        filteredCount={rows.length}
+        activeViewId={view.activeViewId}
+        onSaveAsView={(name) => view.saveView(name)}
+      />
+      <FilterBuilder
+        isOpen={filterBuilderOpen}
+        onClose={() => setFilterBuilderOpen(false)}
+        columnDefs={ALL_COLUMNS}
+        initialFilters={view.filters}
+        initialLogic={view.filterLogic}
+        onApply={(filters, logic) => view.updateFilters(filters, logic)}
+      />
 
       {/* Content Area */}
       <div className="flex-1 overflow-y-auto px-6 py-4">

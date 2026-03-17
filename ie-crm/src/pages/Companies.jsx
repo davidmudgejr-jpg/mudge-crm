@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getCompanies, updateCompany } from '../api/database';
+import { getCompanies, updateCompany, queryWithFilters, countWithFilters } from '../api/database';
 import { bulkOps } from '../api/bridge';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import useLinkedRecords from '../hooks/useLinkedRecords';
 import useDetailPanel from '../hooks/useDetailPanel';
+import useViewEngine from '../hooks/useViewEngine';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import ViewBar from '../components/shared/ViewBar';
+import FilterBar from '../components/shared/FilterBar';
+import FilterBuilder from '../components/shared/FilterBuilder';
 import LinkedChips from '../components/shared/LinkedChips';
 import CompanyDetail from './CompanyDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
@@ -27,14 +31,14 @@ function formatRevenue(val) {
 
 const ALL_COLUMNS = [
   // Default visible
-  { key: 'company_name', label: 'Company', defaultWidth: 180, editable: false },
-  { key: 'company_type', label: 'Type', defaultWidth: 100 },
-  { key: 'industry_type', label: 'Industry', defaultWidth: 100 },
-  { key: 'city', label: 'City', defaultWidth: 90 },
+  { key: 'company_name', label: 'Company', defaultWidth: 180, editable: false, type: 'text', filterable: true },
+  { key: 'company_type', label: 'Type', defaultWidth: 100, type: 'text', filterable: true },
+  { key: 'industry_type', label: 'Industry', defaultWidth: 100, type: 'text', filterable: true },
+  { key: 'city', label: 'City', defaultWidth: 90, type: 'text', filterable: true },
   { key: 'sf', label: 'SF', defaultWidth: 70, format: 'number' },
-  { key: 'employees', label: 'Employees', defaultWidth: 80, format: 'number' },
-  { key: 'revenue', label: 'Revenue', defaultWidth: 90, editType: 'number', renderCell: (val) => formatRevenue(val) },
-  { key: 'lease_exp', label: 'Lease Exp', defaultWidth: 90, format: 'date' },
+  { key: 'employees', label: 'Employees', defaultWidth: 80, type: 'number', filterable: true, format: 'number' },
+  { key: 'revenue', label: 'Revenue', defaultWidth: 90, type: 'number', filterable: true, editType: 'number', renderCell: (val) => formatRevenue(val) },
+  { key: 'lease_exp', label: 'Lease Exp', defaultWidth: 90, type: 'date', filterable: true, format: 'date' },
   { key: 'last_contacted', label: 'Last Contact', defaultWidth: 100, format: 'date' },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags' },
   // Hidden by default
@@ -63,9 +67,9 @@ export default function Companies({ onCountChange }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [orderBy, setOrderBy] = useState('created_at');
-  const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
+  const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
+  const view = useViewEngine('companies', ALL_COLUMNS);
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
@@ -105,27 +109,37 @@ export default function Companies({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const filters = {};
-      if (search) filters.search = search;
-      const result = await getCompanies({ limit: 500, orderBy, order, filters });
-      setRows(result.rows || []);
-      const count = result.rows?.length || 0;
-      setTotalCount(count);
-      if (onCountChange) onCountChange(count);
+      if (search) {
+        const filters = {};
+        if (search) filters.search = search;
+        const result = await getCompanies({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        setRows(result.rows || []);
+        const count = result.rows?.length || 0;
+        setTotalCount(count);
+        if (onCountChange) onCountChange(count);
+      } else {
+        const [result, total] = await Promise.all([
+          queryWithFilters('companies', {
+            ...view.sqlFilters,
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('companies', {}),
+        ]);
+        setRows(result.rows || []);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
+      }
     } catch (err) {
       console.error('Failed to fetch companies:', err);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [search, orderBy, order, onCountChange]);
+  }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  const handleSort = (key) => {
-    if (orderBy === key) setOrder(order === 'ASC' ? 'DESC' : 'ASC');
-    else { setOrderBy(key); setOrder('ASC'); }
-  };
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
@@ -195,7 +209,12 @@ export default function Companies({ onCountChange }) {
       <div className="flex-shrink-0 px-6 py-4 border-b border-crm-border">
         <div className="flex items-center justify-between mb-3">
           <div>
-            <h1 className="text-lg font-semibold">Companies</h1>
+            <h1 className="text-lg font-semibold flex items-center gap-2">
+              <svg className="w-5 h-5 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              Companies
+            </h1>
             <p className="text-xs text-crm-muted">{totalCount.toLocaleString()} records</p>
           </div>
           <div className="flex items-center gap-2">
@@ -245,6 +264,40 @@ export default function Companies({ onCountChange }) {
         </div>
       </div>
 
+      <ViewBar
+        entityLabel="Companies"
+        views={view.views}
+        activeViewId={view.activeViewId}
+        isDirty={view.isDirty}
+        activeView={view.activeView}
+        applyView={view.applyView}
+        resetToAll={view.resetToAll}
+        saveView={view.saveView}
+        renameView={view.renameView}
+        deleteView={view.deleteView}
+        duplicateView={view.duplicateView}
+        setDefault={view.setDefault}
+        onNewView={() => setFilterBuilderOpen(true)}
+      />
+      <FilterBar
+        filters={view.filters}
+        filterLogic={view.filterLogic}
+        updateFilters={view.updateFilters}
+        onAddFilter={() => setFilterBuilderOpen(true)}
+        totalCount={totalCount}
+        filteredCount={rows.length}
+        activeViewId={view.activeViewId}
+        onSaveAsView={(name) => view.saveView(name)}
+      />
+      <FilterBuilder
+        isOpen={filterBuilderOpen}
+        onClose={() => setFilterBuilderOpen(false)}
+        columnDefs={ALL_COLUMNS}
+        initialFilters={view.filters}
+        initialLogic={view.filterLogic}
+        onApply={(filters, logic) => view.updateFilters(filters, logic)}
+      />
+
       <div className="flex-1 overflow-auto">
         {!loading && augmentedRows.length === 0 && !search ? (
           <EmptyState entity="companies" entityLabel="Companies" onAdd={() => setShowQuickAdd(true)} addLabel="+ New Company" />
@@ -256,9 +309,9 @@ export default function Companies({ onCountChange }) {
             idField="company_id"
             loading={loading}
             onRowClick={(row) => setDetailId(row.company_id)}
-            onSort={handleSort}
-            orderBy={orderBy}
-            order={order}
+            onSort={view.handleSort}
+            orderBy={view.sort.column}
+            order={view.sort.direction}
             selected={selected}
             onToggleSelect={toggleSelect}
             onToggleAll={toggleAll}

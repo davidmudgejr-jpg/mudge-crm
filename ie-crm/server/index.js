@@ -967,6 +967,281 @@ app.get('/api/settings/env', (req, res) => {
 });
 
 // ============================================================
+// TPE DATA ROUTE — scored properties from the materialized view
+// ============================================================
+app.get('/api/ai/tpe', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const limit = Math.min(parseInt(req.query.limit) || 2000, 5000);
+    const result = await pool.query(
+      `SELECT * FROM property_tpe_scores ORDER BY blended_priority DESC NULLS LAST LIMIT $1`,
+      [limit]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('TPE fetch error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// TPE CONFIG ROUTES
+// ============================================================
+
+// GET /api/ai/tpe-config — fetch all config values
+app.get('/api/ai/tpe-config', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const result = await pool.query(
+      'SELECT config_category, config_key, config_value, description FROM tpe_config ORDER BY config_category, config_key'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/ai/tpe-config — update one or more config values
+app.patch('/api/ai/tpe-config', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const updates = Array.isArray(req.body) ? req.body : [req.body];
+    const results = [];
+    for (const { config_key, config_value } of updates) {
+      if (!config_key || config_value == null) continue;
+      const r = await pool.query(
+        'UPDATE tpe_config SET config_value = $1 WHERE config_key = $2 RETURNING *',
+        [config_value, config_key]
+      );
+      if (r.rows.length === 0) {
+        return res.status(404).json({ error: `Config key not found: ${config_key}` });
+      }
+      results.push(r.rows[0]);
+    }
+    res.json(results);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/ai/tpe-config/reset — restore all config values to seed defaults
+app.post('/api/ai/tpe-config/reset', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const defaults = {
+      lease_12mo_points: 30, lease_18mo_points: 22, lease_24mo_points: 15, lease_36mo_points: 8,
+      entity_individual_points: 8, entity_trust_points: 10, hold_15yr_points: 12, hold_10yr_points: 7, hold_7yr_points: 4, owner_user_bonus: 10, ownership_cap: 30,
+      age_70_points: 20, age_65_points: 15, age_60_points: 10, age_55_points: 5,
+      growth_30pct_points: 15, growth_20pct_points: 10, growth_10pct_points: 5,
+      balloon_high_points: 12, balloon_medium_points: 7, balloon_low_points: 4, lien_points: 7, stress_cap: 15,
+      sale_price_psf: 250, lease_rate_small: 1.15, lease_rate_mid: 1.00, lease_rate_large: 0.90, lease_term_months: 60,
+      sale_commission_5m: 0.03, sale_commission_10m: 0.02, sale_commission_over10m: 0.01,
+      lease_new_commission_rate: 0.04, lease_renewal_commission_rate: 0.02, commission_divisor: 2500,
+      time_mult_6mo: 1.20, time_mult_12mo: 1.10, time_mult_24mo: 1.00, time_mult_sale: 0.85,
+      tpe_weight: 0.70, ecv_weight: 0.30,
+      mature_30d_points: 20, mature_90d_points: 15, mature_over90d_points: 10,
+      ltv_85_bonus: 5, ltv_75_bonus: 3, ltv_65_bonus: 1, duration_25yr_bonus: 3, duration_4yr_bonus: 1,
+      purpose_acquisition_bonus: 2, purpose_construction_bonus: 2,
+      auction_points: 25, matured_distress_points: 25, nod_points: 20,
+      mature_1mo_points: 22, mature_3mo_points: 18, mature_6mo_points: 15, mature_9mo_points: 12, mature_12mo_points: 10,
+      tier_a_threshold: 50, tier_b_threshold: 40, tier_c_threshold: 30,
+      // Living database: temporal decay keys
+      lease_expired_0_3mo_points: 8, lease_expired_3_6mo_points: 4,
+      maturity_past_0_3mo_points: 15, maturity_past_3_6mo_points: 8, maturity_past_6_12mo_points: 3,
+      distress_decay_6_12mo_pct: 50,
+    };
+    for (const [key, value] of Object.entries(defaults)) {
+      await pool.query('UPDATE tpe_config SET config_value = $1 WHERE config_key = $2', [value, key]);
+    }
+    const result = await pool.query('SELECT * FROM tpe_config ORDER BY config_category, config_key');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── TPE Data Gap Endpoints ──
+app.get('/api/ai/tpe-gaps', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+    const gapType = req.query.gap_type;
+    const typeFilters = {
+      age: 'AND age_gap_pts > 0',
+      growth: 'AND growth_gap_pts > 0',
+      stress: 'AND stress_gap_pts > 0',
+      ownership: 'AND ownership_gap_pts > 0',
+    };
+    const typeFilter = typeFilters[gapType] || '';
+    const result = await pool.query(
+      `SELECT * FROM property_data_gaps
+       WHERE total_gap_pts > 0 ${typeFilter}
+       ORDER BY impact_priority DESC
+       LIMIT $1`,
+      [limit]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/ai/tpe-gaps/stats', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+  try {
+    const result = await pool.query(`
+      SELECT
+        COUNT(*) FILTER (WHERE age_gap_pts > 0) AS missing_owner_dob,
+        COUNT(*) FILTER (WHERE growth_gap_pts > 0) AS missing_tenant_growth,
+        COUNT(*) FILTER (WHERE stress_gap_pts > 0) AS missing_loan_data,
+        COUNT(*) FILTER (WHERE ownership_gap_pts > 0) AS missing_owner_link,
+        COUNT(*) AS total_properties_with_gaps
+      FROM property_data_gaps
+      WHERE total_gap_pts > 0
+    `);
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
+// SAVED VIEWS ROUTES
+// ============================================================
+
+const VALID_VIEW_ENTITY_TYPES = new Set([
+  'properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns',
+]);
+
+// GET /api/views — list views for an entity type
+app.get('/api/views', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+    const { entity_type } = req.query;
+    if (!entity_type || !VALID_VIEW_ENTITY_TYPES.has(entity_type)) {
+      return res.status(400).json({ error: 'Invalid or missing entity_type' });
+    }
+    const result = await pool.query(
+      'SELECT * FROM saved_views WHERE entity_type = $1 ORDER BY position ASC, created_at ASC',
+      [entity_type]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/views — create a new view
+app.post('/api/views', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+    const { entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position } = req.body;
+    if (!entity_type || !VALID_VIEW_ENTITY_TYPES.has(entity_type)) {
+      return res.status(400).json({ error: 'Invalid or missing entity_type' });
+    }
+    if (!view_name || !view_name.trim()) {
+      return res.status(400).json({ error: 'view_name is required' });
+    }
+    const result = await pool.query(
+      `INSERT INTO saved_views (entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [
+        entity_type,
+        view_name.trim(),
+        JSON.stringify(filters || []),
+        filter_logic === 'OR' ? 'OR' : 'AND',
+        sort_column || null,
+        sort_direction === 'ASC' ? 'ASC' : 'DESC',
+        visible_columns ? JSON.stringify(visible_columns) : null,
+        position || 0,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/views/:viewId — update a view (partial)
+app.patch('/api/views/:viewId', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+    const { viewId } = req.params;
+    const updates = req.body;
+
+    // Handle is_default in a transaction (clear old default first)
+    if (updates.is_default === true) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const viewRes = await client.query('SELECT entity_type FROM saved_views WHERE view_id = $1', [viewId]);
+        if (viewRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'View not found' });
+        }
+        const entityType = viewRes.rows[0].entity_type;
+        await client.query(
+          'UPDATE saved_views SET is_default = FALSE WHERE entity_type = $1 AND view_id != $2',
+          [entityType, viewId]
+        );
+        await client.query(
+          'UPDATE saved_views SET is_default = TRUE, updated_at = NOW() WHERE view_id = $1',
+          [viewId]
+        );
+        await client.query('COMMIT');
+        const result = await client.query('SELECT * FROM saved_views WHERE view_id = $1', [viewId]);
+        res.json(result.rows[0]);
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
+      }
+      return;
+    }
+
+    // Normal partial update
+    const allowed = ['view_name', 'filters', 'filter_logic', 'sort_column', 'sort_direction', 'visible_columns', 'is_default', 'position'];
+    const sets = [];
+    const params = [viewId]; // $1 = viewId
+    let i = 2;
+    for (const key of allowed) {
+      if (updates[key] !== undefined) {
+        const val = (key === 'filters' || key === 'visible_columns')
+          ? JSON.stringify(updates[key])
+          : updates[key];
+        sets.push(`${key} = $${i}`);
+        params.push(val);
+        i++;
+      }
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+
+    sets.push('updated_at = NOW()');
+    const sql = `UPDATE saved_views SET ${sets.join(', ')} WHERE view_id = $1 RETURNING *`;
+    const result = await pool.query(sql, params);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'View not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/views/:viewId — delete a view
+app.delete('/api/views/:viewId', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+    const { viewId } = req.params;
+    const result = await pool.query('DELETE FROM saved_views WHERE view_id = $1 RETURNING view_id', [viewId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'View not found' });
+    res.json({ deleted: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // SERVE STATIC FRONTEND (production)
 // ============================================================
 const distPath = path.join(__dirname, '..', 'dist');
