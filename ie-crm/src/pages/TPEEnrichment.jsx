@@ -19,8 +19,17 @@ const GAP_LABELS = {
   ownership_gap_pts: 'Owner Link',
 };
 
+// Shared color map — stat cards + table pills stay in sync
+const GAP_COLORS = {
+  'Owner DOB':      { text: 'text-red-400',     bg: 'bg-red-500/15',     stat: 'red' },
+  'Tenant Growth':  { text: 'text-emerald-400',  bg: 'bg-emerald-500/15', stat: 'green' },
+  'Loan Data':      { text: 'text-blue-400',     bg: 'bg-blue-500/15',    stat: 'blue' },
+  'Owner Link':     { text: 'text-purple-400',   bg: 'bg-purple-500/15',  stat: 'purple' },
+};
+
 function StatCard({ value, label, color }) {
   const colorMap = {
+    red: 'text-red-400',
     yellow: 'text-yellow-400',
     blue: 'text-blue-400',
     green: 'text-emerald-400',
@@ -78,7 +87,12 @@ export default function TPEEnrichment() {
       {/* Header */}
       <div className="px-6 py-4 border-b border-crm-border flex-shrink-0">
         <div className="flex items-center gap-3 mb-1">
-          <h1 className="text-lg font-bold">Data Enrichment</h1>
+          <h1 className="text-lg font-bold flex items-center gap-2">
+            <svg className="w-5 h-5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            </svg>
+            Data Enrichment
+          </h1>
           <span className="text-[10px] uppercase tracking-widest text-crm-muted bg-crm-card px-2 py-0.5 rounded-full">
             TPE Intelligence
           </span>
@@ -92,10 +106,10 @@ export default function TPEEnrichment() {
       {stats && (
         <div className="px-6 py-3 border-b border-crm-border flex-shrink-0">
           <div className="flex gap-3 flex-wrap">
-            <StatCard value={parseInt(stats.missing_owner_dob) || 0} label="Missing Owner DOB" color="yellow" />
-            <StatCard value={parseInt(stats.missing_tenant_growth) || 0} label="Missing Tenant Growth" color="blue" />
-            <StatCard value={parseInt(stats.missing_loan_data) || 0} label="Missing Loan Data" color="green" />
-            <StatCard value={parseInt(stats.missing_owner_link) || 0} label="Missing Owner Link" color="purple" />
+            <StatCard value={parseInt(stats.missing_owner_dob) || 0} label="Missing Owner DOB" color={GAP_COLORS['Owner DOB'].stat} />
+            <StatCard value={parseInt(stats.missing_tenant_growth) || 0} label="Missing Tenant Growth" color={GAP_COLORS['Tenant Growth'].stat} />
+            <StatCard value={parseInt(stats.missing_loan_data) || 0} label="Missing Loan Data" color={GAP_COLORS['Loan Data'].stat} />
+            <StatCard value={parseInt(stats.missing_owner_link) || 0} label="Missing Owner Link" color={GAP_COLORS['Owner Link'].stat} />
             <StatCard value={parseInt(stats.total_properties_with_gaps) || 0} label="Total With Gaps" color="muted" />
           </div>
         </div>
@@ -164,11 +178,14 @@ export default function TPEEnrichment() {
                     </td>
                     <td className="py-2.5 px-2">
                       <div className="flex gap-1 flex-wrap">
-                        {gapTypes.map((gt) => (
-                          <span key={gt} className="bg-yellow-500/15 text-yellow-400 px-2 py-0.5 rounded text-[11px]">
-                            {gt}
-                          </span>
-                        ))}
+                        {gapTypes.map((gt) => {
+                          const c = GAP_COLORS[gt] || { bg: 'bg-yellow-500/15', text: 'text-yellow-400' };
+                          return (
+                            <span key={gt} className={`${c.bg} ${c.text} px-2 py-0.5 rounded text-[11px]`}>
+                              {gt}
+                            </span>
+                          );
+                        })}
                       </div>
                     </td>
                     <td className="py-2.5 px-2 text-right">
