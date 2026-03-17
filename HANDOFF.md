@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-14 (migrations deployed + data model corrections)
-> Previous session: "Ran migrations 007 + 008 against live Neon DB. Fixed 6 FK type mismatches in 007 (INTEGER→UUID). Fixed 8 column name mismatches in 008 TPE VIEW against actual schema. Applied David's domain corrections: lease_exp lives on companies (not properties), owner age is computed from contacts.date_of_birth (not estimated on properties). TPE VIEW now JOINs through junction tables. All 461 properties scoring. Added 11 AI Ops endpoints to server. Expanded 3 prompting guides. Rewrote CLAUDE.md. Built memory system (8 files). Confirmed multiple tenant companies per property works."
-> Next task: **Build dedicated Lease Comp Import Wizard** — David to provide Excel examples first. Then build TPE UI in Properties table + Property detail. Then build AI Ops dashboard page.
+> Updated: 2026-03-17 (TPE Living Database, Saved Views, page icons, enrichment color sync)
+> Previous session: "Built TPE Living Database page with dedicated sidebar nav, stat cards, filter pills, and gap analysis table sorted by potential point gain × tier proximity. Built Custom Saved Views system with save/load/delete for filter+sort+column configurations on all entity pages. Added colored SVG icons to all 12 page headers (matching sidebar icons, unique colors per page). Synced enrichment stat card colors with table pill colors via shared GAP_COLORS map. Fixed color collisions (TPE→orange, Companies→pink). Merged feature/tpe-view branch into main. Resolved git stash conflict in server/index.js (sandbox routes reinserted). Full test pass on all pages."
+> Next task: **Build dedicated Lease Comp Import Wizard** — David to provide Excel examples first. Then build AI Ops dashboard page. Then Smart Filters (Phase 2A).
 
 ---
 
@@ -81,7 +81,9 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **`properties.costar_star_rating`** column added (INTEGER 1-5)
 - [x] **`properties.owner_age_est` dropped** — was wrong location; age comes from contacts through junction
 - [x] **Data model corrections applied** — lease_exp lives on companies, owner age on contacts, both accessed through junction table JOINs
-- [ ] TPE UI not built — needs scoring columns in Properties table + visual in PropertyDetail
+- [x] **TPE Living Database page** — dedicated `/tpe` route with stat cards (missing data counts), filter pills (by gap type), gap analysis table (address, current tier, missing data pills, potential points, projected tier). Sorted by potential gain × tier proximity. Click-through to PropertyDetail via SlideOver.
+- [x] **Data Enrichment page** — `/tpe/enrichment` route showing properties with biggest data gaps and projected tier improvements
+- [x] **Shared GAP_COLORS map** — centralized color definitions for stat cards + table pills (Owner DOB=red, Tenant Growth=green, Loan Data=blue, Owner Link=purple)
 - [ ] **CoStar Star Rating integration** — `costar_star_rating` (1–5) column exists but not yet wired into TPE scoring formula or UI
 - [ ] Populate TPE input data (date_of_birth on contacts, lease_exp on companies, loan_maturities, tenant_growth, property_distress)
 
@@ -156,6 +158,25 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **CLAUDE.md rewritten** — removed Electron references, updated for Vercel/Railway/Neon web deployment, added AI Master System section
 - [x] **Memory system built** — 8 files in `.claude/projects/.../memory/`: user_profile, project_architecture, project_status, project_competitive_edge, feedback_coding_style, feedback_communication, reference_external_systems, reference_key_documents
 - [x] **Multiple tenant companies confirmed** — property_companies junction table supports unlimited companies per property (5 properties already have 2+ linked)
+
+### TPE Living Database & Enrichment UI ✅ (2026-03-17)
+- [x] **TPE Living Database page** — `/tpe` route with sidebar nav (lightning bolt icon), stat cards for total scored/avg score/tier distribution, sortable property table with TPE columns (score, tier, blended priority), TierBadge component with color-coded A/B/C/D badges
+- [x] **Data Enrichment page** — `/tpe/enrichment` route showing gap analysis: stat cards (missing owner DOB, tenant growth, loan data, owner link counts), filter pills by gap type, table with current tier → projected tier if gaps filled, sorted by potential point gain × tier proximity
+- [x] **Shared GAP_COLORS map** — DRY color definitions so stat card numbers and table pills always match (red/green/blue/purple)
+- [x] **TierBadge component** — reusable tier display with A=emerald, B=blue, C=yellow, D=red color coding
+- [x] **API endpoints** — `GET /api/ai/tpe-gaps` (with optional `gap_type` filter), `GET /api/ai/tpe-gaps/stats` for aggregate counts
+
+### Custom Saved Views ✅ (2026-03-17)
+- [x] **SavedViewsBar component** — horizontal bar below page header on all entity pages, shows saved view pills + "Save View" button
+- [x] **View persistence** — saves filter state, sort column/direction, visible columns, and column order per entity type
+- [x] **CRUD operations** — save new views, load views (restores all settings), delete views with confirmation
+- [x] **localStorage-backed** — `crm_saved_views_{entity}` keys, no DB migration needed
+- [x] **Applied to all pages** — Properties, Contacts, Companies, Deals, Interactions, Campaigns
+
+### Page Header Icons ✅ (2026-03-17)
+- [x] **All 12 pages** now have colored SVG icons next to page titles, matching sidebar NAV_ITEMS icons
+- [x] **Unique colors per page** — Properties=blue, Contacts=violet, Companies=pink, Deals=emerald, Interactions=sky, Campaigns=rose, Action Items=teal, Comps=indigo, Import=cyan, Settings=zinc, TPE=yellow, Enrichment=orange
+- [x] **No color collisions** — verified all 12 pages have distinct icon colors
 
 ### Lease Comp Import Wizard ⬜ (next priority)
 - [ ] **Receive Excel examples from David** — need actual lease comp spreadsheet structure before designing
@@ -1308,10 +1329,14 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 14. ~~**Build comps page**~~ ✅ DONE — Lease/Sale toggle, CSV import (comps-only), property/company linking
 15. ~~**Build CSV Import Engine**~~ ✅ DONE — address normalizer, composite matcher, batch INSERT, dedicated Import tab
 16. **Fix bugs (from full system test)** — (a) rename `owner_contact` → "Owner Name" and `broker_contact` → "Broker Name" in `Properties.jsx` ALL_COLUMNS to fix collision with linked-record virtual columns `linked_owner_contacts`/`linked_broker_contacts`; (b) add note to dev workflow: restart Vite dev server after pulling commits (HMR doesn't pick up `const` arrays defined outside components)
-17. **Fix TPE readiness gaps (migration)** — create missing `debt_stress` + `tpe_config` tables; add 5 missing properties columns: `owner_entity_type`, `owner_age_est`, `has_lien_or_delinquency`, `owner_call_status`, `tenant_call_status`
-18. **Build `property_tpe_scores` SQL VIEW** — all 5 TPE models + Action Intelligence + commission courtesy flag, using the full spec in this file; surface TPE score columns in Properties table view
-19. **Build formula computation (deals)** — SQL VIEWs for Deals formulas + commission splits
-20. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
+17. ~~**Fix TPE readiness gaps (migration)**~~ ✅ DONE — `tpe_config` table created (migration 008), `property_tpe_scores` VIEW deployed, `contacts.date_of_birth` added, `properties.costar_star_rating` added, `owner_age_est` dropped
+18. ~~**Build `property_tpe_scores` SQL VIEW**~~ ✅ DONE — 7 CTEs, all 461 properties scoring, tier labels A-D. TPE Living Database + Enrichment pages built with full UI.
+19. ~~**Build formula computation (deals)**~~ ✅ DONE — `deal_formulas` VIEW with geometric series commission calc
+20. **Build dedicated Lease Comp Import Wizard** — David to provide Excel examples first. Need data fan-out mapping (one row → properties + companies + contacts + lease_comps + junctions).
+21. **Build AI Ops Dashboard page** — agent status cards, approval queue, log viewer, system health
+22. **Smart Filters & Saved Lists (Phase 2A)** — filter pills, slide-in filter builder, auto-updating lists
+23. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
+24. **Populate TPE input data** — date_of_birth on contacts, lease_exp on companies, loan_maturities, tenant_growth, property_distress records
 
 ---
 

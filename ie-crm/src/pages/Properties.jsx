@@ -83,6 +83,7 @@ const ALL_COLUMNS = [
   { key: 'building_tax', label: 'Building Tax', defaultWidth: 120, defaultVisible: false },
   { key: 'building_opex', label: 'Bldg OpEx', defaultWidth: 120, defaultVisible: false },
   { key: 'ops_expense_psf', label: 'OpEx/SF', defaultWidth: 80, format: 'currency', defaultVisible: false },
+  { key: 'costar_star_rating', label: 'CoStar Rating', defaultWidth: 100, format: 'number', defaultVisible: false },
   { key: 'loan_amount', label: 'Loan Amount', defaultWidth: 110, format: 'currency', defaultVisible: false },
   { key: 'debt_date', label: 'Debt Date', defaultWidth: 90, format: 'date', defaultVisible: false },
   // Ownership
