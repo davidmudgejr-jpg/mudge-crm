@@ -19,7 +19,7 @@ export default function DashboardStrip({ rows, onTierFilter, activeTier }) {
     localStorage.setItem('crm_tpe_dashboard_collapsed', String(next));
   };
 
-  const tiers = { A: 0, B: 0, C: 0 };
+  const tiers = { A: 0, B: 0, C: 0, D: 0 };
   let totalScore = 0;
   let totalPipeline = 0;
   let scored = 0;
@@ -39,7 +39,7 @@ export default function DashboardStrip({ rows, onTierFilter, activeTier }) {
   });
 
   const avgScore = scored > 0 ? Math.round(totalScore / scored) : 0;
-  const total = tiers.A + tiers.B + tiers.C;
+  const total = tiers.A + tiers.B + tiers.C + tiers.D;
 
   if (collapsed) {
     return (
@@ -49,7 +49,7 @@ export default function DashboardStrip({ rows, onTierFilter, activeTier }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
         </button>
-        {['A', 'B', 'C'].map((t) => (
+        {['A', 'B', 'C', 'D'].map((t) => (
           <button
             key={t}
             onClick={() => onTierFilter(activeTier === t ? null : t)}
@@ -71,7 +71,8 @@ export default function DashboardStrip({ rows, onTierFilter, activeTier }) {
           {[
             { tier: 'A', color: 'text-emerald-400' },
             { tier: 'B', color: 'text-yellow-400' },
-            { tier: 'C', color: 'text-zinc-400' },
+            { tier: 'C', color: 'text-orange-400' },
+            { tier: 'D', color: 'text-zinc-400' },
           ].map(({ tier, color }) => (
             <button
               key={tier}
@@ -91,7 +92,8 @@ export default function DashboardStrip({ rows, onTierFilter, activeTier }) {
               <>
                 <div className="bg-emerald-500 transition-all" style={{ width: `${(tiers.A / total) * 100}%` }} />
                 <div className="bg-yellow-500 transition-all" style={{ width: `${(tiers.B / total) * 100}%` }} />
-                <div className="bg-zinc-500 transition-all" style={{ width: `${(tiers.C / total) * 100}%` }} />
+                <div className="bg-orange-500 transition-all" style={{ width: `${(tiers.C / total) * 100}%` }} />
+                <div className="bg-zinc-500 transition-all" style={{ width: `${(tiers.D / total) * 100}%` }} />
               </>
             )}
           </div>

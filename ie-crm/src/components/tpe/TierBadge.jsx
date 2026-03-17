@@ -3,7 +3,8 @@ import React from 'react';
 const TIER_STYLES = {
   A: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30',
   B: 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30',
-  C: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
+  C: 'bg-orange-500/15 text-orange-400 border-orange-500/30',
+  D: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
 };
 
 export default function TierBadge({ tier, size = 'sm' }) {

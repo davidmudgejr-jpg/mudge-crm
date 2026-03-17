@@ -99,7 +99,7 @@ export default function TPE({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/ai/tpe?limit=500`);
+      const res = await fetch(`${API_BASE}/api/ai/tpe?limit=2000`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setRows(data || []);
@@ -229,7 +229,7 @@ export default function TPE({ onCountChange }) {
         <div className="flex items-center gap-2">
           {/* Tier filter buttons */}
           <div className="flex rounded-lg border border-crm-border overflow-hidden">
-            {[null, 'A', 'B', 'C'].map((t) => (
+            {[null, 'A', 'B', 'C', 'D'].map((t) => (
               <button
                 key={t || 'all'}
                 onClick={() => setTierFilter(t)}

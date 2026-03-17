@@ -66,10 +66,16 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
         <div className="space-y-3">
           <h3 className="text-[11px] uppercase tracking-wider text-crm-muted font-semibold">Score Breakdown</h3>
           <ScoreBar label="Lease Expiration" score={parseFloat(p.lease_score) || 0} max={30} color="blue" annotation={annotations.lease} />
-          <ScoreBar label="Ownership Profile" score={parseFloat(p.ownership_score) || 0} max={25} color="purple" annotation={annotations.ownership} />
+          <ScoreBar label="Ownership Profile" score={parseFloat(p.ownership_score) || 0} max={30} color="purple" annotation={annotations.ownership} />
           <ScoreBar label="Owner Age" score={parseFloat(p.age_score) || 0} max={20} color="amber" annotation={annotations.age} />
           <ScoreBar label="Tenant Growth" score={parseFloat(p.growth_score) || 0} max={15} color="green" annotation={annotations.growth} />
-          <ScoreBar label="Debt/Stress" score={parseFloat(p.stress_score) || 0} max={10} color="red" annotation={annotations.stress} />
+          <ScoreBar label="Debt/Stress" score={parseFloat(p.stress_score) || 0} max={15} color="red" annotation={annotations.stress} />
+          {(parseFloat(p.maturity_boost) > 0 || parseFloat(p.distress_score) > 0) && (
+            <>
+              <ScoreBar label="Maturity Boost" score={parseFloat(p.maturity_boost) || 0} max={35} color="blue" annotation={p.maturity_date ? `Matures ${formatDateCompact(p.maturity_date)}` : 'No maturity data'} />
+              <ScoreBar label="Distress Signal" score={parseFloat(p.distress_score) || 0} max={25} color="red" annotation={p.distress_type || 'No distress signals'} />
+            </>
+          )}
         </div>
 
         {/* Commission Estimate */}

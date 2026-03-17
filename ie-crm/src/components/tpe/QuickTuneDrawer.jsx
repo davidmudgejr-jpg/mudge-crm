@@ -180,7 +180,7 @@ export default function QuickTuneDrawer({ onClose, onConfigChanged }) {
         <NumberControl
           label="A-Tier Threshold"
           description="Minimum blended score for A classification"
-          value={config.tier_a_threshold || 70}
+          value={config.tier_a_threshold || 50}
           configKey="tier_a_threshold"
           onSave={handleSave}
         />
@@ -191,6 +191,15 @@ export default function QuickTuneDrawer({ onClose, onConfigChanged }) {
           description="Minimum blended score for B classification"
           value={config.tier_b_threshold || 40}
           configKey="tier_b_threshold"
+          onSave={handleSave}
+        />
+
+        {/* 3b. C-Tier Threshold */}
+        <NumberControl
+          label="C-Tier Threshold"
+          description="Minimum blended score for C classification"
+          value={config.tier_c_threshold || 30}
+          configKey="tier_c_threshold"
           onSave={handleSave}
         />
 
