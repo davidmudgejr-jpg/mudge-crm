@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import useAgentHeartbeats from '../hooks/useAgentHeartbeats';
 import RoomBreadcrumb from '../components/ai-ops/RoomBreadcrumb';
 import MissionControlRoom from '../components/ai-ops/MissionControlRoom';
@@ -21,6 +22,7 @@ const DETAIL_VIEWS = {
 };
 
 export default function AIOps() {
+  const navigate = useNavigate();
   const [activeView, setActiveView] = useState(null);
   const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 });
   const { agents, pending, recentLogs, loading, error, stale } = useAgentHeartbeats();
@@ -54,6 +56,15 @@ export default function AIOps() {
           Connection lost — showing last known state
         </div>
       )}
+
+      {/* Back to CRM button */}
+      <button
+        onClick={() => navigate('/properties')}
+        className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/80 text-xs transition-all"
+        style={{ display: stale ? 'none' : undefined }}
+      >
+        ← Back to CRM
+      </button>
 
       <RoomBreadcrumb activeView={activeView} onBack={handleZoomOut} />
 
