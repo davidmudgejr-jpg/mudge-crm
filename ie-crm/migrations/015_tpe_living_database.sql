@@ -382,7 +382,7 @@ scores AS (
       WHEN lm.months_to_exp IS NOT NULL AND lm.months_to_exp <= 6 AND lm.months_to_exp >= 0 THEN c.time_6
       WHEN lm.months_to_exp IS NOT NULL AND lm.months_to_exp <= 12 AND lm.months_to_exp >= 0 THEN c.time_12
       WHEN lm.months_to_exp IS NOT NULL AND lm.months_to_exp <= 24 AND lm.months_to_exp >= 0 THEN c.time_24
-      WHEN lm.months_to_exp IS NOT NULL AND lm.months_to_exp < 0 THEN c.time_6  -- expired leases get highest time urgency
+      WHEN lm.months_to_exp IS NOT NULL AND lm.months_to_exp < 0 THEN c.time_sale  -- expired leases get base multiplier (opportunity may have passed)
       ELSE c.time_sale
     END AS time_multiplier,
 
