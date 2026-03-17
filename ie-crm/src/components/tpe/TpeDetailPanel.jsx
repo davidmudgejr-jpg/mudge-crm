@@ -46,7 +46,11 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
   const totalGapPts = activeGaps.reduce((sum, g) => sum + g.pts, 0);
   const blended = parseFloat(p.blended_priority) || 0;
   const projectedScore = blended + totalGapPts * 0.7;
-  const projectedTier = projectedScore >= 50 ? 'A' : projectedScore >= 40 ? 'B' : projectedScore >= 30 ? 'C' : 'D';
+  // Use configurable tier thresholds from the VIEW (fall back to defaults)
+  const tA = parseFloat(p.tier_a) || 50;
+  const tB = parseFloat(p.tier_b) || 40;
+  const tC = parseFloat(p.tier_c) || 30;
+  const projectedTier = projectedScore >= tA ? 'A' : projectedScore >= tB ? 'B' : projectedScore >= tC ? 'C' : 'D';
 
   // Score breakdown annotations
   const annotations = {
@@ -176,7 +180,7 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
                 <div className="flex gap-1.5 flex-wrap">
                   {p.owner_contact_id ? (
                     <button
-                      onClick={() => { onClose(); openSlideOver('contact', p.owner_contact_id); }}
+                      onClick={() => openSlideOver('contact', p.owner_contact_id)}
                       className="bg-crm-deep border border-emerald-500/40 text-emerald-400 px-2.5 py-1 rounded-full text-[11px] hover:bg-emerald-500/10 transition-colors cursor-pointer"
                     >
                       🔗 {p.owner_name || 'Owner'}
@@ -204,7 +208,7 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
                 <div className="flex gap-1.5 flex-wrap">
                   {p.tenant_company_id ? (
                     <button
-                      onClick={() => { onClose(); openSlideOver('company', p.tenant_company_id); }}
+                      onClick={() => openSlideOver('company', p.tenant_company_id)}
                       className="bg-crm-deep border border-blue-400/40 text-blue-400 px-2.5 py-1 rounded-full text-[11px] hover:bg-blue-500/10 transition-colors cursor-pointer"
                     >
                       🔗 {p.tenant_name || 'Tenant'}
@@ -243,7 +247,7 @@ export default function TpeDetailPanel({ property: p, onClose, onCallStatusChang
         {/* Actions */}
         <div className="flex items-center gap-2 pt-2 border-t border-crm-border">
           <button
-            onClick={() => { onClose(); openSlideOver('property', p.property_id); }}
+            onClick={() => openSlideOver('property', p.property_id)}
             className="text-xs text-crm-accent hover:text-crm-accent-hover font-medium flex items-center gap-1"
           >
             View Full Property →

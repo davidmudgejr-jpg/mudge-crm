@@ -130,8 +130,16 @@ export default function QuickTuneDrawer({ onClose, onConfigChanged }) {
     const tpe = (config.tpe_weight || 0.7);
     const ecv = (config.ecv_weight || 0.3);
     try {
-      await patchConfig('tpe_weight', tpe);
-      await patchConfig('ecv_weight', ecv);
+      // Send both weights atomically in a single batch PATCH
+      const res = await fetch(`${API_BASE}/api/ai/tpe-config`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([
+          { config_key: 'tpe_weight', config_value: tpe },
+          { config_key: 'ecv_weight', config_value: ecv },
+        ]),
+      });
+      if (!res.ok) throw new Error(await res.text());
       onConfigChanged?.();
     } catch (err) {
       addToast(`Save failed: ${err.message}`, 'error');

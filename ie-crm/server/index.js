@@ -1039,7 +1039,7 @@ app.post('/api/ai/tpe-config/reset', async (req, res) => {
       lease_new_commission_rate: 0.04, lease_renewal_commission_rate: 0.02, commission_divisor: 2500,
       time_mult_6mo: 1.20, time_mult_12mo: 1.10, time_mult_24mo: 1.00, time_mult_sale: 0.85,
       tpe_weight: 0.70, ecv_weight: 0.30,
-      matured_points: 25, mature_30d_points: 20, mature_90d_points: 15, mature_over90d_points: 10,
+      mature_30d_points: 20, mature_90d_points: 15, mature_over90d_points: 10,
       ltv_85_bonus: 5, ltv_75_bonus: 3, ltv_65_bonus: 1, duration_25yr_bonus: 3, duration_4yr_bonus: 1,
       purpose_acquisition_bonus: 2, purpose_construction_bonus: 2,
       auction_points: 25, matured_distress_points: 25, nod_points: 20,

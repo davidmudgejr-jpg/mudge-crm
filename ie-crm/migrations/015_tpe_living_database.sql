@@ -87,7 +87,6 @@ cfg AS (
     MAX(CASE WHEN config_key = 'tpe_weight' THEN config_value END) AS tpe_w,
     MAX(CASE WHEN config_key = 'ecv_weight' THEN config_value END) AS ecv_w,
     -- Maturity model
-    MAX(CASE WHEN config_key = 'matured_points' THEN config_value END) AS mat_matured,
     MAX(CASE WHEN config_key = 'mature_30d_points' THEN config_value END) AS mat_30d,
     MAX(CASE WHEN config_key = 'mature_90d_points' THEN config_value END) AS mat_90d,
     MAX(CASE WHEN config_key = 'mature_over90d_points' THEN config_value END) AS mat_over90d,
@@ -238,6 +237,7 @@ tenant_company AS (
     co.company_name AS tenant_name
   FROM property_companies pco
   JOIN companies co ON co.company_id = pco.company_id
+  WHERE LOWER(pco.role) = 'tenant'
   ORDER BY pco.property_id, co.lease_exp DESC NULLS LAST
 ),
 -- ============================================================
