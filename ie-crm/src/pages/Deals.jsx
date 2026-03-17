@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getDeals, updateDeal } from '../api/database';
+import { getDeals, updateDeal, queryWithFilters, countWithFilters } from '../api/database';
 import { bulkOps } from '../api/bridge';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import useLinkedRecords from '../hooks/useLinkedRecords';
 import useDetailPanel from '../hooks/useDetailPanel';
+import useViewEngine from '../hooks/useViewEngine';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import ViewBar from '../components/shared/ViewBar';
+import FilterBar from '../components/shared/FilterBar';
+import FilterBuilder from '../components/shared/FilterBuilder';
 import LinkedChips from '../components/shared/LinkedChips';
 import DealDetail, { STATUSES } from './DealDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
@@ -51,20 +55,21 @@ const DEAL_DEAD_REASON_OPTIONS = [
 
 const ALL_COLUMNS = [
   // Default visible
-  { key: 'deal_name', label: 'Deal', defaultWidth: 180, editable: false },
-  { key: 'deal_type', label: 'Type', defaultWidth: 100, editType: 'select', editOptions: DEAL_TYPES },
-  { key: 'status', label: 'Status', defaultWidth: 90,
+  { key: 'deal_name', label: 'Deal', defaultWidth: 180, editable: false, type: 'text', filterable: true },
+  { key: 'deal_type', label: 'Type', defaultWidth: 100, type: 'select', filterable: true, editType: 'select', editOptions: DEAL_TYPES, filterOptions: ['Lease', 'Sale', 'Purchase', 'Sub-Lease', 'Renewal', 'Other'] },
+  { key: 'status', label: 'Status', defaultWidth: 90, type: 'select', filterable: true,
     editType: 'select', editOptions: ['Prospecting', 'Active', 'Lead', 'Long Leads', 'Under Contract', 'Closed', 'Deal fell through', 'Dead', 'Dead Lead'],
+    filterOptions: ['Prospecting', 'Active', 'Lead', 'Long Leads', 'Under Contract', 'Closed', 'Deal fell through', 'Dead', 'Dead Lead'],
     renderCell: (val) => val ? (
       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLORS[val] || 'bg-crm-border text-crm-muted'}`}>{val}</span>
     ) : <span className="text-crm-muted">--</span>,
   },
   { key: 'repping', label: 'Repping', defaultWidth: 100, format: 'tags', editType: 'multi-select', editOptions: REPPING_OPTIONS },
-  { key: 'sf', label: 'SF', defaultWidth: 70, format: 'number' },
-  { key: 'rate', label: 'Rate', defaultWidth: 70, format: 'currency' },
-  { key: 'gross_fee_potential', label: 'Gross Fee', defaultWidth: 90, format: 'currency' },
-  { key: 'close_date', label: 'Close Date', defaultWidth: 90, format: 'date' },
-  { key: 'priority_deal', label: 'Priority', defaultWidth: 70, editType: 'boolean',
+  { key: 'sf', label: 'SF', defaultWidth: 70, type: 'number', filterable: true, format: 'number' },
+  { key: 'rate', label: 'Rate', defaultWidth: 70, type: 'number', filterable: true, format: 'currency' },
+  { key: 'gross_fee_potential', label: 'Gross Fee', defaultWidth: 90, type: 'number', filterable: true, format: 'currency' },
+  { key: 'close_date', label: 'Close Date', defaultWidth: 90, type: 'date', filterable: true, format: 'date' },
+  { key: 'priority_deal', label: 'Priority', defaultWidth: 70, type: 'select', filterable: true, filterOptions: ['Yes', 'No'], editType: 'boolean',
     renderCell: (val) => val ? <span className="text-crm-success">Yes</span> : <span className="text-crm-muted">No</span>,
   },
   { key: 'lead_count', label: 'Leads', defaultWidth: 65, format: 'number',
@@ -113,9 +118,9 @@ export default function Deals({ onCountChange }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
-  const [orderBy, setOrderBy] = useState('created_at');
-  const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
+  const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
+  const view = useViewEngine('deals', ALL_COLUMNS);
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
@@ -155,28 +160,36 @@ export default function Deals({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const filters = {};
-      if (search) filters.search = search;
-      if (filterStatus) filters.status = filterStatus;
-      const result = await getDeals({ limit: 500, orderBy, order, filters });
-      setRows(result.rows || []);
-      const count = result.rows?.length || 0;
-      setTotalCount(count);
-      if (onCountChange) onCountChange(count);
+      if (search || filterStatus) {
+        const filters = {};
+        if (search) filters.search = search;
+        if (filterStatus) filters.status = filterStatus;
+        const result = await getDeals({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        setRows(result.rows || []);
+        const count = result.rows?.length || 0;
+        setTotalCount(count);
+        if (onCountChange) onCountChange(count);
+      } else {
+        const result = await queryWithFilters('deals', {
+          ...view.sqlFilters,
+          orderBy: view.sort.column,
+          order: view.sort.direction,
+          limit: 500,
+        });
+        setRows(result.rows || []);
+        const filtered = result.rows?.length || 0;
+        setTotalCount(filtered);
+        if (onCountChange) onCountChange(filtered);
+      }
     } catch (err) {
       console.error('Failed to fetch deals:', err);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [search, filterStatus, orderBy, order, onCountChange]);
+  }, [search, filterStatus, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  const handleSort = (key) => {
-    if (orderBy === key) setOrder(order === 'ASC' ? 'DESC' : 'ASC');
-    else { setOrderBy(key); setOrder('ASC'); }
-  };
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
@@ -303,6 +316,40 @@ export default function Deals({ onCountChange }) {
         </div>
       </div>
 
+      <ViewBar
+        entityLabel="Deals"
+        views={view.views}
+        activeViewId={view.activeViewId}
+        isDirty={view.isDirty}
+        activeView={view.activeView}
+        applyView={view.applyView}
+        resetToAll={view.resetToAll}
+        saveView={view.saveView}
+        renameView={view.renameView}
+        deleteView={view.deleteView}
+        duplicateView={view.duplicateView}
+        setDefault={view.setDefault}
+        onNewView={() => setFilterBuilderOpen(true)}
+      />
+      <FilterBar
+        filters={view.filters}
+        filterLogic={view.filterLogic}
+        updateFilters={view.updateFilters}
+        onAddFilter={() => setFilterBuilderOpen(true)}
+        totalCount={totalCount}
+        filteredCount={rows.length}
+        activeViewId={view.activeViewId}
+        onSaveAsView={(name) => view.saveView(name)}
+      />
+      <FilterBuilder
+        isOpen={filterBuilderOpen}
+        onClose={() => setFilterBuilderOpen(false)}
+        columnDefs={ALL_COLUMNS}
+        initialFilters={view.filters}
+        initialLogic={view.filterLogic}
+        onApply={(filters, logic) => view.updateFilters(filters, logic)}
+      />
+
       <div className="flex-1 overflow-auto">
         {!loading && augmentedRows.length === 0 && !search && !filterStatus ? (
           <EmptyState entity="deals" entityLabel="Deals" onAdd={() => setShowQuickAdd(true)} addLabel="+ New Deal" />
@@ -314,9 +361,9 @@ export default function Deals({ onCountChange }) {
             idField="deal_id"
             loading={loading}
             onRowClick={(row) => setDetailId(row.deal_id)}
-            onSort={handleSort}
-            orderBy={orderBy}
-            order={order}
+            onSort={view.handleSort}
+            orderBy={view.sort.column}
+            order={view.sort.direction}
             selected={selected}
             onToggleSelect={toggleSelect}
             onToggleAll={toggleAll}

@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getContacts, linkRecords, updateContact } from '../api/database';
+import { getContacts, linkRecords, updateContact, queryWithFilters, countWithFilters } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import useLinkedRecords from '../hooks/useLinkedRecords';
 import useDetailPanel from '../hooks/useDetailPanel';
+import useViewEngine from '../hooks/useViewEngine';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import ViewBar from '../components/shared/ViewBar';
+import FilterBar from '../components/shared/FilterBar';
+import FilterBuilder from '../components/shared/FilterBuilder';
 import LinkedChips from '../components/shared/LinkedChips';
 import ContactDetail from './ContactDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
@@ -35,18 +39,20 @@ const LEVEL_COLORS = { A: 'text-crm-success', B: 'text-yellow-400', C: 'text-crm
 
 const ALL_COLUMNS = [
   // Default visible
-  { key: 'full_name', label: 'Name', defaultWidth: 160, editable: false },
-  { key: 'type', label: 'Type', defaultWidth: 90, format: 'type',
+  { key: 'full_name', label: 'Name', defaultWidth: 160, editable: false, type: 'text', filterable: true },
+  { key: 'type', label: 'Type', defaultWidth: 90, type: 'select', filterable: true, format: 'type',
     editType: 'select', editOptions: ['Owner', 'Broker', 'Tenant', 'Investor', 'Vendor', 'Attorney', 'Lender', 'Other'],
+    filterOptions: ['Owner', 'Broker', 'Tenant', 'Investor', 'Vendor', 'Attorney', 'Lender', 'Other'],
     renderCell: (val) => val ? (
       <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${TYPE_COLORS[val] || 'bg-crm-border text-crm-muted'}`}>{val}</span>
     ) : <span className="text-crm-muted">--</span>,
   },
-  { key: 'title', label: 'Title', defaultWidth: 140 },
-  { key: 'email', label: 'Email', defaultWidth: 180, format: 'email' },
-  { key: 'phone_1', label: 'Phone', defaultWidth: 120, format: 'phone' },
-  { key: 'client_level', label: 'Level', defaultWidth: 80, format: 'level',
+  { key: 'title', label: 'Title', defaultWidth: 140, type: 'text', filterable: true },
+  { key: 'email', label: 'Email', defaultWidth: 180, type: 'text', filterable: true, format: 'email' },
+  { key: 'phone_1', label: 'Phone', defaultWidth: 120, type: 'text', filterable: true, format: 'phone' },
+  { key: 'client_level', label: 'Level', defaultWidth: 80, type: 'select', filterable: true, format: 'level',
     editType: 'select', editOptions: ['A', 'B', 'C', 'D'],
+    filterOptions: ['A', 'B', 'C', 'D'],
     renderCell: (val) => val ? (
       <span className={`font-semibold ${LEVEL_COLORS[val] || 'text-crm-muted'}`}>{val}</span>
     ) : <span className="text-crm-muted">--</span>,
@@ -64,14 +70,14 @@ const ALL_COLUMNS = [
   { key: 'active_need', label: 'Active Need', defaultWidth: 140, defaultVisible: false },
   { key: 'home_address', label: 'Home Address', defaultWidth: 180, defaultVisible: false },
   { key: 'work_address', label: 'Work Address', defaultWidth: 180, defaultVisible: false },
-  { key: 'work_city', label: 'Work City', defaultWidth: 100, defaultVisible: false },
+  { key: 'work_city', label: 'Work City', defaultWidth: 100, type: 'text', filterable: true, defaultVisible: false },
   { key: 'work_state', label: 'Work State', defaultWidth: 80, defaultVisible: false },
   { key: 'work_zip', label: 'Work ZIP', defaultWidth: 70, defaultVisible: false },
   { key: 'data_source', label: 'Source', defaultWidth: 100, defaultVisible: false },
   { key: 'email_3', label: 'Email 3', defaultWidth: 180, format: 'email', defaultVisible: false },
   { key: 'phone_3', label: 'Phone 3', defaultWidth: 120, format: 'phone', defaultVisible: false },
   { key: 'email_kickback', label: 'Email Kickback', defaultWidth: 100, format: 'bool', editType: 'boolean', defaultVisible: false },
-  { key: 'born', label: 'Birthday', defaultWidth: 90, format: 'date', defaultVisible: false },
+  { key: 'born', label: 'Birthday', defaultWidth: 90, type: 'date', filterable: true, format: 'date', defaultVisible: false },
   { key: 'age', label: 'Age', defaultWidth: 50, format: 'number', editable: false, defaultVisible: false },
   // Research links
   { key: 'white_pages_url', label: 'White Pages', defaultWidth: 80, defaultVisible: false },
@@ -112,9 +118,9 @@ export default function Contacts({ onCountChange }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
-  const [orderBy, setOrderBy] = useState('created_at');
-  const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
+  const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
+  const view = useViewEngine('contacts', ALL_COLUMNS);
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
@@ -155,28 +161,36 @@ export default function Contacts({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const filters = {};
-      if (search) filters.search = search;
-      if (filterType) filters.type = filterType;
-      const result = await getContacts({ limit: 500, orderBy, order, filters });
-      setRows(result.rows || []);
-      const count = result.rows?.length || 0;
-      setTotalCount(count);
-      if (onCountChange) onCountChange(count);
+      if (search || filterType) {
+        const filters = {};
+        if (search) filters.search = search;
+        if (filterType) filters.type = filterType;
+        const result = await getContacts({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        setRows(result.rows || []);
+        const count = result.rows?.length || 0;
+        setTotalCount(count);
+        if (onCountChange) onCountChange(count);
+      } else {
+        const result = await queryWithFilters('contacts', {
+          ...view.sqlFilters,
+          orderBy: view.sort.column,
+          order: view.sort.direction,
+          limit: 500,
+        });
+        setRows(result.rows || []);
+        const filtered = result.rows?.length || 0;
+        setTotalCount(filtered);
+        if (onCountChange) onCountChange(filtered);
+      }
     } catch (err) {
       console.error('Failed to fetch contacts:', err);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [search, filterType, orderBy, order, onCountChange]);
+  }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  const handleSort = (key) => {
-    if (orderBy === key) setOrder(order === 'ASC' ? 'DESC' : 'ASC');
-    else { setOrderBy(key); setOrder('ASC'); }
-  };
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
@@ -326,6 +340,40 @@ export default function Contacts({ onCountChange }) {
         </div>
       </div>
 
+      <ViewBar
+        entityLabel="Contacts"
+        views={view.views}
+        activeViewId={view.activeViewId}
+        isDirty={view.isDirty}
+        activeView={view.activeView}
+        applyView={view.applyView}
+        resetToAll={view.resetToAll}
+        saveView={view.saveView}
+        renameView={view.renameView}
+        deleteView={view.deleteView}
+        duplicateView={view.duplicateView}
+        setDefault={view.setDefault}
+        onNewView={() => setFilterBuilderOpen(true)}
+      />
+      <FilterBar
+        filters={view.filters}
+        filterLogic={view.filterLogic}
+        updateFilters={view.updateFilters}
+        onAddFilter={() => setFilterBuilderOpen(true)}
+        totalCount={totalCount}
+        filteredCount={rows.length}
+        activeViewId={view.activeViewId}
+        onSaveAsView={(name) => view.saveView(name)}
+      />
+      <FilterBuilder
+        isOpen={filterBuilderOpen}
+        onClose={() => setFilterBuilderOpen(false)}
+        columnDefs={ALL_COLUMNS}
+        initialFilters={view.filters}
+        initialLogic={view.filterLogic}
+        onApply={(filters, logic) => view.updateFilters(filters, logic)}
+      />
+
       <div className="flex-1 overflow-auto">
         {!loading && augmentedRows.length === 0 && !search && !filterType ? (
           <EmptyState entity="contacts" entityLabel="Contacts" onAdd={() => setShowQuickAdd(true)} addLabel="+ New Contact" />
@@ -337,9 +385,9 @@ export default function Contacts({ onCountChange }) {
             idField="contact_id"
             loading={loading}
             onRowClick={(row) => setDetailId(row.contact_id)}
-            onSort={handleSort}
-            orderBy={orderBy}
-            order={order}
+            onSort={view.handleSort}
+            orderBy={view.sort.column}
+            order={view.sort.direction}
             selected={selected}
             onToggleSelect={toggleSelect}
             onToggleAll={toggleAll}

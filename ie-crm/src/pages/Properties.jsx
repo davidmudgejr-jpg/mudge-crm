@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getProperties, updateProperty } from '../api/database';
+import { getProperties, updateProperty, queryWithFilters, countWithFilters } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import useLinkedRecords from '../hooks/useLinkedRecords';
 import useDetailPanel from '../hooks/useDetailPanel';
+import useViewEngine from '../hooks/useViewEngine';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import ViewBar from '../components/shared/ViewBar';
+import FilterBar from '../components/shared/FilterBar';
+import FilterBuilder from '../components/shared/FilterBuilder';
 import LinkedChips from '../components/shared/LinkedChips';
 import PropertyDetail from './PropertyDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
@@ -25,15 +29,15 @@ const CONTACTED_OPTIONS = [
 
 const ALL_COLUMNS = [
   // Default visible
-  { key: 'property_address', label: 'Address', defaultWidth: 200, editable: false },
-  { key: 'city', label: 'City', defaultWidth: 100 },
-  { key: 'county', label: 'County', defaultWidth: 90 },
-  { key: 'property_type', label: 'Type', defaultWidth: 100, editType: 'select', editOptions: ['Office', 'Retail', 'Industrial', 'Multifamily', 'Land', 'Mixed-Use', 'Special Purpose'] },
-  { key: 'rba', label: 'Bldg SF', defaultWidth: 80, format: 'number' },
+  { key: 'property_address', label: 'Address', defaultWidth: 200, editable: false, type: 'text', filterable: true },
+  { key: 'city', label: 'City', defaultWidth: 100, type: 'text', filterable: true },
+  { key: 'county', label: 'County', defaultWidth: 90, type: 'text', filterable: true },
+  { key: 'property_type', label: 'Type', defaultWidth: 100, type: 'select', filterable: true, editType: 'select', editOptions: ['Office', 'Retail', 'Industrial', 'Multifamily', 'Land', 'Mixed-Use', 'Special Purpose'], filterOptions: ['Office', 'Retail', 'Industrial', 'Multifamily', 'Land', 'Mixed-Use', 'Special Purpose'] },
+  { key: 'rba', label: 'Bldg SF', defaultWidth: 80, type: 'number', filterable: true, format: 'number' },
   { key: 'land_sf', label: 'Lot SF', defaultWidth: 80, format: 'number' },
-  { key: 'year_built', label: 'Year', defaultWidth: 60, format: 'number' },
-  { key: 'owner_name', label: 'Entity Name', defaultWidth: 140 },
-  { key: 'priority', label: 'Priority', defaultWidth: 80, format: 'priority', editType: 'select', editOptions: ['Hot', 'Warm', 'Cold', 'Dead'] },
+  { key: 'year_built', label: 'Year', defaultWidth: 60, type: 'number', filterable: true, format: 'number' },
+  { key: 'owner_name', label: 'Entity Name', defaultWidth: 140, type: 'text', filterable: true },
+  { key: 'priority', label: 'Priority', defaultWidth: 80, type: 'select', filterable: true, format: 'priority', editType: 'select', editOptions: ['Hot', 'Warm', 'Cold', 'Dead'], filterOptions: ['Hot', 'Warm', 'Cold', 'Dead'] },
   { key: 'contacted', label: 'Contacted', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: CONTACTED_OPTIONS },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags' },
   // Hidden by default
@@ -46,7 +50,7 @@ const ALL_COLUMNS = [
   { key: 'price_per_sqft', label: 'Price/SF', defaultWidth: 90, format: 'currency', editType: 'number', defaultVisible: false },
   // RBA already shown as 'Bldg SF' above
   { key: 'far', label: 'FAR', defaultWidth: 60, defaultVisible: false },
-  { key: 'cap_rate', label: 'Cap Rate', defaultWidth: 80, defaultVisible: false },
+  { key: 'cap_rate', label: 'Cap Rate', defaultWidth: 80, type: 'number', filterable: true, defaultVisible: false },
   { key: 'noi', label: 'NOI', defaultWidth: 100, format: 'currency', editType: 'number', defaultVisible: false },
   { key: 'owner_phone', label: 'Owner Phone', defaultWidth: 120, defaultVisible: false },
   { key: 'owner_email', label: 'Owner Email', defaultWidth: 160, editType: 'email', defaultVisible: false },
@@ -69,10 +73,10 @@ const ALL_COLUMNS = [
   { key: 'direct_available_sf', label: 'Direct Avail SF', defaultWidth: 110, format: 'number', defaultVisible: false },
   { key: 'direct_vacant_space', label: 'Direct Vacant', defaultWidth: 100, format: 'number', defaultVisible: false },
   { key: 'percent_leased', label: '% Leased', defaultWidth: 80, format: 'number', defaultVisible: false },
-  { key: 'vacancy_pct', label: 'Vacancy %', defaultWidth: 80, format: 'number', defaultVisible: false },
+  { key: 'vacancy_pct', label: 'Vacancy %', defaultWidth: 80, type: 'number', filterable: true, format: 'number', defaultVisible: false },
   // Financial
-  { key: 'last_sale_price', label: 'Last Sale Price', defaultWidth: 110, format: 'currency', defaultVisible: false },
-  { key: 'last_sale_date', label: 'Last Sale Date', defaultWidth: 100, format: 'date', defaultVisible: false },
+  { key: 'last_sale_price', label: 'Last Sale Price', defaultWidth: 110, type: 'number', filterable: true, format: 'currency', defaultVisible: false },
+  { key: 'last_sale_date', label: 'Last Sale Date', defaultWidth: 100, type: 'date', filterable: true, format: 'date', defaultVisible: false },
   { key: 'plsf', label: 'PLSF', defaultWidth: 70, format: 'currency', defaultVisible: false },
   { key: 'for_sale_price', label: 'For Sale Price', defaultWidth: 110, format: 'currency', defaultVisible: false },
   { key: 'avg_weighted_rent', label: 'Avg Rent', defaultWidth: 90, format: 'currency', defaultVisible: false },
@@ -143,9 +147,9 @@ export default function Properties({ onCountChange }) {
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterPriority, setFilterPriority] = useState('');
-  const [orderBy, setOrderBy] = useState('created_at');
-  const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
+  const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
+  const view = useViewEngine('properties', ALL_COLUMNS);
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
@@ -196,34 +200,37 @@ export default function Properties({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const filters = {};
-      if (search) filters.search = search;
-      if (filterType) filters.property_type = filterType;
-      if (filterPriority) filters.priority = filterPriority;
-
-      const result = await getProperties({ limit: 500, orderBy, order, filters });
-      setRows(result.rows || []);
-      const count = result.rows?.length || 0;
-      setTotalCount(count);
-      if (onCountChange) onCountChange(count);
+      if (search || filterType || filterPriority) {
+        const filters = {};
+        if (search) filters.search = search;
+        if (filterType) filters.property_type = filterType;
+        if (filterPriority) filters.priority = filterPriority;
+        const result = await getProperties({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        setRows(result.rows || []);
+        const count = result.rows?.length || 0;
+        setTotalCount(count);
+        if (onCountChange) onCountChange(count);
+      } else {
+        const result = await queryWithFilters('properties', {
+          ...view.sqlFilters,
+          orderBy: view.sort.column,
+          order: view.sort.direction,
+          limit: 500,
+        });
+        setRows(result.rows || []);
+        const filtered = result.rows?.length || 0;
+        setTotalCount(filtered);
+        if (onCountChange) onCountChange(filtered);
+      }
     } catch (err) {
       console.error('Failed to fetch properties:', err);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [search, filterType, filterPriority, orderBy, order, onCountChange]);
+  }, [search, filterType, filterPriority, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-
-  const handleSort = (key) => {
-    if (orderBy === key) {
-      setOrder(order === 'ASC' ? 'DESC' : 'ASC');
-    } else {
-      setOrderBy(key);
-      setOrder('ASC');
-    }
-  };
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -384,6 +391,40 @@ export default function Properties({ onCountChange }) {
         </div>
       </div>
 
+      <ViewBar
+        entityLabel="Properties"
+        views={view.views}
+        activeViewId={view.activeViewId}
+        isDirty={view.isDirty}
+        activeView={view.activeView}
+        applyView={view.applyView}
+        resetToAll={view.resetToAll}
+        saveView={view.saveView}
+        renameView={view.renameView}
+        deleteView={view.deleteView}
+        duplicateView={view.duplicateView}
+        setDefault={view.setDefault}
+        onNewView={() => setFilterBuilderOpen(true)}
+      />
+      <FilterBar
+        filters={view.filters}
+        filterLogic={view.filterLogic}
+        updateFilters={view.updateFilters}
+        onAddFilter={() => setFilterBuilderOpen(true)}
+        totalCount={totalCount}
+        filteredCount={rows.length}
+        activeViewId={view.activeViewId}
+        onSaveAsView={(name) => view.saveView(name)}
+      />
+      <FilterBuilder
+        isOpen={filterBuilderOpen}
+        onClose={() => setFilterBuilderOpen(false)}
+        columnDefs={ALL_COLUMNS}
+        initialFilters={view.filters}
+        initialLogic={view.filterLogic}
+        onApply={(filters, logic) => view.updateFilters(filters, logic)}
+      />
+
       {/* Table */}
       <div className="flex-1 overflow-auto">
         {!loading && augmentedRows.length === 0 && !search && !filterType && !filterPriority ? (
@@ -396,9 +437,9 @@ export default function Properties({ onCountChange }) {
           idField="property_id"
           loading={loading}
           onRowClick={(row) => setDetailId(row.property_id)}
-          onSort={handleSort}
-          orderBy={orderBy}
-          order={order}
+          onSort={view.handleSort}
+          orderBy={view.sort.column}
+          order={view.sort.direction}
           selected={selected}
           onToggleSelect={toggleSelect}
           onToggleAll={toggleAll}
