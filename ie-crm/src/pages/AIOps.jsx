@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import useAgentHeartbeats from '../hooks/useAgentHeartbeats';
 import RoomBreadcrumb from '../components/ai-ops/RoomBreadcrumb';
+import MissionControlRoom from '../components/ai-ops/MissionControlRoom';
 
 const DETAIL_VIEWS = {};
 
@@ -45,38 +46,12 @@ export default function AIOps() {
             className="w-full h-full"
             style={{ transformOrigin: `${zoomOrigin.x}% ${zoomOrigin.y}%` }}
           >
-            <div className="w-full h-full flex items-center justify-center">
-              <div className="text-center">
-                <div className="text-6xl mb-4">🎮</div>
-                <h1 className="text-2xl font-bold text-white mb-2">Mission Control</h1>
-                <p className="text-crm-muted text-sm mb-6">
-                  {loading ? 'Connecting to agents...' : `${agents.length} agents registered`}
-                </p>
-                {agents.length > 0 && (
-                  <div className="flex gap-3 justify-center flex-wrap">
-                    {agents.map(a => (
-                      <div
-                        key={a.agent_name}
-                        className="px-3 py-2 rounded-lg border cursor-pointer hover:scale-105 transition-transform"
-                        style={{
-                          borderColor: a.status === 'running' ? '#10b981' : a.status === 'error' ? '#ef4444' : '#f59e0b',
-                          background: 'rgba(255,255,255,0.03)'
-                        }}
-                        onClick={(e) => handleZoomIn('agent-' + a.agent_name, e.currentTarget)}
-                      >
-                        <div className="text-xs text-crm-muted">{a.agent_name}</div>
-                        <div className="text-sm font-semibold" style={{
-                          color: a.status === 'running' ? '#10b981' : a.status === 'error' ? '#ef4444' : '#f59e0b'
-                        }}>
-                          {a.status}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                <p className="text-crm-muted text-xs mt-6">Room scene coming soon — click an agent to test zoom</p>
-              </div>
-            </div>
+            <MissionControlRoom
+              agents={agents}
+              pending={pending}
+              recentLogs={recentLogs}
+              onZoomIn={handleZoomIn}
+            />
           </motion.div>
         ) : (
           <motion.div
