@@ -1308,6 +1308,103 @@ app.get('/api/ai/tpe-gaps/stats', async (req, res) => {
 });
 
 // ============================================================
+// AI OPS DASHBOARD ROUTES
+// ============================================================
+
+// Dashboard summary: agent statuses + pending counts
+app.get('/api/ai/dashboard/summary', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const [heartbeats, pending, logRecent] = await Promise.all([
+      pool.query('SELECT agent_name, tier, status, current_task, items_processed_today, items_in_queue, last_error, metadata, updated_at FROM agent_heartbeats ORDER BY tier, agent_name'),
+      pool.query(`
+        SELECT 'contacts' as table_name, COUNT(*) as count FROM sandbox_contacts WHERE status = 'pending'
+        UNION ALL SELECT 'enrichments', COUNT(*) FROM sandbox_enrichments WHERE status = 'pending'
+        UNION ALL SELECT 'signals', COUNT(*) FROM sandbox_signals WHERE status = 'pending'
+        UNION ALL SELECT 'outreach', COUNT(*) FROM sandbox_outreach WHERE status = 'pending'
+      `),
+      pool.query("SELECT agent_name, log_type, content, created_at FROM agent_logs ORDER BY created_at DESC LIMIT 20")
+    ]);
+    res.json({
+      agents: heartbeats.rows,
+      pending: pending.rows,
+      recentLogs: logRecent.rows
+    });
+  } catch (err) {
+    console.error('[ai/dashboard/summary] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Pipeline: counts per stage
+app.get('/api/ai/dashboard/pipeline', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const result = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM sandbox_signals WHERE status = 'pending') as scout_queue,
+        (SELECT COUNT(*) FROM sandbox_enrichments WHERE status = 'pending') as enricher_queue,
+        (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'pending') as matcher_queue,
+        (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'approved') as approved_today,
+        (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'rejected') as rejected_today
+    `);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[ai/dashboard/pipeline] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Costs: usage tracking aggregation
+app.get('/api/ai/dashboard/costs', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { period = 'day' } = req.query;
+    const trunc = period === 'week' ? 'week' : period === 'month' ? 'month' : 'day';
+    const result = await pool.query(`
+      SELECT
+        DATE_TRUNC($1, created_at) as period,
+        agent_name,
+        SUM(tokens_used) as total_tokens,
+        SUM(cost_usd) as total_cost,
+        COUNT(*) as api_calls
+      FROM ai_usage_tracking
+      GROUP BY 1, 2
+      ORDER BY 1 DESC, 2
+      LIMIT 200
+    `, [trunc]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[ai/dashboard/costs] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Logs: filterable, paginated
+app.get('/api/ai/logs', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { agent, type, limit = 50 } = req.query;
+    let where = [];
+    let params = [];
+    let idx = 1;
+    if (agent) { where.push(`agent_name = $${idx++}`); params.push(agent); }
+    if (type) { where.push(`log_type = $${idx++}`); params.push(type); }
+    const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+    params.push(Math.min(parseInt(limit) || 50, 500));
+    const result = await pool.query(
+      `SELECT id, agent_name, log_type, content, metrics, created_at
+       FROM agent_logs ${whereClause}
+       ORDER BY created_at DESC LIMIT $${idx}`, params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[ai/logs] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // SAVED VIEWS ROUTES
 // ============================================================
 
