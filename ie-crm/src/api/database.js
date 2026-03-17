@@ -158,6 +158,29 @@ function validateJunction(table, cols) {
 }
 
 // ============================================================
+// GENERIC FILTERED QUERY (for View Engine)
+// ============================================================
+const VALID_VIEW_TABLES = new Set([
+  'properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns',
+]);
+
+export async function queryWithFilters(table, { whereClause = '', params = [], orderBy, order, limit = 200, offset = 0 } = {}) {
+  if (!VALID_VIEW_TABLES.has(table)) throw new Error(`Invalid table: ${table}`);
+  const safeOrder = sanitizeCol(orderBy, table, 'created_at');
+  const safeDir = sanitizeDir(order);
+  const n = params.length;
+  const sql = `SELECT * FROM ${table} ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${n + 1} OFFSET $${n + 2}`;
+  return query(sql, [...params, limit, offset]);
+}
+
+export async function countWithFilters(table, { whereClause = '', params = [] } = {}) {
+  if (!VALID_VIEW_TABLES.has(table)) throw new Error(`Invalid table: ${table}`);
+  const sql = `SELECT COUNT(*) AS total FROM ${table} ${whereClause}`;
+  const result = await query(sql, params);
+  return parseInt(result.rows?.[0]?.total || '0', 10);
+}
+
+// ============================================================
 // PROPERTIES
 // ============================================================
 export async function getProperties({ limit = 200, offset = 0, orderBy = 'created_at', order = 'DESC', filters = {} } = {}) {

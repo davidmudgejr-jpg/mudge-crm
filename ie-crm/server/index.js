@@ -1106,6 +1106,142 @@ app.get('/api/ai/tpe-gaps/stats', async (req, res) => {
 });
 
 // ============================================================
+// SAVED VIEWS ROUTES
+// ============================================================
+
+const VALID_VIEW_ENTITY_TYPES = new Set([
+  'properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns',
+]);
+
+// GET /api/views — list views for an entity type
+app.get('/api/views', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+    const { entity_type } = req.query;
+    if (!entity_type || !VALID_VIEW_ENTITY_TYPES.has(entity_type)) {
+      return res.status(400).json({ error: 'Invalid or missing entity_type' });
+    }
+    const result = await pool.query(
+      'SELECT * FROM saved_views WHERE entity_type = $1 ORDER BY position ASC, created_at ASC',
+      [entity_type]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/views — create a new view
+app.post('/api/views', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+    const { entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position } = req.body;
+    if (!entity_type || !VALID_VIEW_ENTITY_TYPES.has(entity_type)) {
+      return res.status(400).json({ error: 'Invalid or missing entity_type' });
+    }
+    if (!view_name || !view_name.trim()) {
+      return res.status(400).json({ error: 'view_name is required' });
+    }
+    const result = await pool.query(
+      `INSERT INTO saved_views (entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [
+        entity_type,
+        view_name.trim(),
+        JSON.stringify(filters || []),
+        filter_logic === 'OR' ? 'OR' : 'AND',
+        sort_column || null,
+        sort_direction === 'ASC' ? 'ASC' : 'DESC',
+        visible_columns ? JSON.stringify(visible_columns) : null,
+        position || 0,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/views/:viewId — update a view (partial)
+app.patch('/api/views/:viewId', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+    const { viewId } = req.params;
+    const updates = req.body;
+
+    // Handle is_default in a transaction (clear old default first)
+    if (updates.is_default === true) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const viewRes = await client.query('SELECT entity_type FROM saved_views WHERE view_id = $1', [viewId]);
+        if (viewRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'View not found' });
+        }
+        const entityType = viewRes.rows[0].entity_type;
+        await client.query(
+          'UPDATE saved_views SET is_default = FALSE WHERE entity_type = $1 AND view_id != $2',
+          [entityType, viewId]
+        );
+        await client.query(
+          'UPDATE saved_views SET is_default = TRUE, updated_at = NOW() WHERE view_id = $1',
+          [viewId]
+        );
+        await client.query('COMMIT');
+        const result = await client.query('SELECT * FROM saved_views WHERE view_id = $1', [viewId]);
+        res.json(result.rows[0]);
+      } catch (txErr) {
+        await client.query('ROLLBACK');
+        throw txErr;
+      } finally {
+        client.release();
+      }
+      return;
+    }
+
+    // Normal partial update
+    const allowed = ['view_name', 'filters', 'filter_logic', 'sort_column', 'sort_direction', 'visible_columns', 'is_default', 'position'];
+    const sets = [];
+    const params = [viewId]; // $1 = viewId
+    let i = 2;
+    for (const key of allowed) {
+      if (updates[key] !== undefined) {
+        const val = (key === 'filters' || key === 'visible_columns')
+          ? JSON.stringify(updates[key])
+          : updates[key];
+        sets.push(`${key} = $${i}`);
+        params.push(val);
+        i++;
+      }
+    }
+    if (sets.length === 0) return res.status(400).json({ error: 'No valid fields to update' });
+
+    sets.push('updated_at = NOW()');
+    const sql = `UPDATE saved_views SET ${sets.join(', ')} WHERE view_id = $1 RETURNING *`;
+    const result = await pool.query(sql, params);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'View not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/views/:viewId — delete a view
+app.delete('/api/views/:viewId', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+    const { viewId } = req.params;
+    const result = await pool.query('DELETE FROM saved_views WHERE view_id = $1 RETURNING view_id', [viewId]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'View not found' });
+    res.json({ deleted: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // SERVE STATIC FRONTEND (production)
 // ============================================================
 const distPath = path.join(__dirname, '..', 'dist');
