@@ -967,6 +967,208 @@ app.get('/api/settings/env', (req, res) => {
 });
 
 // ============================================================
+// AI OPS — Sandbox Management & Agent Infrastructure
+// ============================================================
+
+// Allowed sandbox tables (whitelist for security)
+const SANDBOX_TABLES = ['sandbox_contacts', 'sandbox_enrichments', 'sandbox_signals', 'sandbox_outreach'];
+
+// GET /api/ai/sandbox/:table — List sandbox items with filtering
+app.get('/api/ai/sandbox/:table', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const table = req.params.table;
+    if (!SANDBOX_TABLES.includes(table)) return res.status(400).json({ error: 'Invalid sandbox table' });
+    const status = req.query.status || 'pending';
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = parseInt(req.query.offset) || 0;
+    const validStatuses = ['pending', 'approved', 'rejected', 'promoted', 'sent'];
+    if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status filter' });
+    const result = await pool.query(
+      `SELECT * FROM ${table} WHERE status = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+      [status, limit, offset]
+    );
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM ${table} WHERE status = $1`,
+      [status]
+    );
+    res.json({ rows: result.rows, total: parseInt(countResult.rows[0].count) });
+  } catch (err) {
+    console.error('[ai/sandbox] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/ai/sandbox/:table/review — Approve or reject a sandbox item
+app.post('/api/ai/sandbox/:table/review', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const table = req.params.table;
+    if (!SANDBOX_TABLES.includes(table)) return res.status(400).json({ error: 'Invalid sandbox table' });
+    const { id, decision, review_notes, reviewed_by } = req.body;
+    if (!id || !decision) return res.status(400).json({ error: 'id and decision required' });
+    if (!['approved', 'rejected'].includes(decision)) return res.status(400).json({ error: 'decision must be approved or rejected' });
+    const result = await pool.query(
+      `UPDATE ${table} SET status = $1, review_notes = $2, reviewed_by = $3, reviewed_at = NOW(), updated_at = NOW() WHERE id = $4 AND status = 'pending' RETURNING *`,
+      [decision, review_notes || null, reviewed_by || 'david', id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Item not found or already reviewed' });
+    res.json({ success: true, item: result.rows[0] });
+  } catch (err) {
+    console.error('[ai/sandbox/review] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/ai/sandbox/contacts/promote — Promote approved sandbox contact to production
+app.post('/api/ai/sandbox/contacts/promote', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const { sandbox_id } = req.body;
+    if (!sandbox_id) return res.status(400).json({ error: 'sandbox_id required' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const sandbox = await client.query('SELECT * FROM sandbox_contacts WHERE id = $1 AND status = $2', [sandbox_id, 'approved']);
+      if (sandbox.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'No approved sandbox contact with that ID' }); }
+      const sc = sandbox.rows[0];
+      let existingId = null;
+      if (sc.email) {
+        const existing = await client.query('SELECT contact_id FROM contacts WHERE email = $1', [sc.email]);
+        if (existing.rows.length > 0) existingId = existing.rows[0].contact_id;
+      }
+      let contactId;
+      if (existingId) {
+        await client.query(
+          `UPDATE contacts SET phone_1 = COALESCE($1, phone_1), phone_2 = COALESCE($2, phone_2),
+            home_address = COALESCE($3, home_address), work_address = COALESCE($4, work_address),
+            title = COALESCE($5, title), linkedin = COALESCE($6, linkedin), last_modified = NOW()
+          WHERE contact_id = $7`,
+          [sc.phone_1, sc.phone_2, sc.home_address, sc.work_address, sc.title, sc.linkedin, existingId]
+        );
+        contactId = existingId;
+      } else {
+        const insert = await client.query(
+          `INSERT INTO contacts (full_name, first_name, email, email_2, email_3, phone_1, phone_2, phone_3,
+            home_address, work_address, work_city, work_state, work_zip, title, type, linkedin, data_source)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING contact_id`,
+          [sc.full_name, sc.first_name, sc.email, sc.email_2, sc.email_3, sc.phone_1, sc.phone_2, sc.phone_3,
+           sc.home_address, sc.work_address, sc.work_city, sc.work_state, sc.work_zip, sc.title, sc.type, sc.linkedin,
+           sc.data_source || 'AI Agent: ' + sc.agent_name]
+        );
+        contactId = insert.rows[0].contact_id;
+      }
+      await client.query(`UPDATE sandbox_contacts SET status = 'promoted', promoted_at = NOW(), promoted_to_id = $1, updated_at = NOW() WHERE id = $2`, [contactId, sandbox_id]);
+      await client.query('COMMIT');
+      res.json({ success: true, contact_id: contactId, was_merge: !!existingId });
+    } catch (err) { await client.query('ROLLBACK'); throw err; }
+    finally { client.release(); }
+  } catch (err) {
+    console.error('[ai/sandbox/promote] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/ai/heartbeats — Agent fleet health status
+app.get('/api/ai/heartbeats', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const result = await pool.query('SELECT * FROM agent_heartbeats ORDER BY agent_name');
+    res.json(result.rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/ai/heartbeat — Agent heartbeat upsert
+app.post('/api/ai/heartbeat', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const { agent_name, tier, status, current_task, items_processed_today, items_in_queue, last_error, metadata } = req.body;
+    if (!agent_name || !tier) return res.status(400).json({ error: 'agent_name and tier required' });
+    const result = await pool.query(
+      `INSERT INTO agent_heartbeats (agent_name, tier, status, current_task, items_processed_today, items_in_queue, last_error, metadata, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       ON CONFLICT (agent_name) DO UPDATE SET
+         tier = $2, status = $3, current_task = $4, items_processed_today = $5,
+         items_in_queue = $6, last_error = $7, metadata = $8, updated_at = NOW()
+       RETURNING *`,
+      [agent_name, tier, status || 'idle', current_task, items_processed_today || 0, items_in_queue || 0, last_error, metadata || {}]
+    );
+    res.json(result.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/ai/log — Agent activity log
+app.post('/api/ai/log', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const { agent_name, log_type, content, metrics } = req.body;
+    if (!agent_name || !content) return res.status(400).json({ error: 'agent_name and content required' });
+    const result = await pool.query(
+      `INSERT INTO agent_logs (agent_name, log_type, content, metrics) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [agent_name, log_type || 'activity', content, metrics || {}]
+    );
+    res.json(result.rows[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/ai/sandbox/summary — Dashboard summary across all sandbox tables
+app.get('/api/ai/sandbox/summary', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const counts = {};
+    for (const table of SANDBOX_TABLES) {
+      const result = await pool.query(`SELECT status, COUNT(*) as count FROM ${table} GROUP BY status`);
+      counts[table] = {};
+      result.rows.forEach(r => { counts[table][r.status] = parseInt(r.count); });
+    }
+    res.json(counts);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/ai/convergence — Detect signal convergence (multiple agents flagging same entity)
+app.get('/api/ai/convergence', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const hours = parseInt(req.query.hours) || 48;
+    const result = await pool.query(`
+      WITH recent_signals AS (
+        SELECT unnest(crm_property_ids) AS entity_id, 'property' AS entity_type,
+               signal_type, agent_name, confidence_score, created_at
+        FROM sandbox_signals
+        WHERE created_at > NOW() - ($1 || ' hours')::interval AND crm_property_ids IS NOT NULL
+        UNION ALL
+        SELECT contact_id AS entity_id, 'contact' AS entity_type,
+               'outreach' AS signal_type, agent_name, confidence_score, created_at
+        FROM sandbox_outreach
+        WHERE created_at > NOW() - ($1 || ' hours')::interval AND contact_id IS NOT NULL
+        UNION ALL
+        SELECT contact_id AS entity_id, 'contact' AS entity_type,
+               'enrichment' AS signal_type, agent_name, confidence_score, created_at
+        FROM sandbox_enrichments
+        WHERE created_at > NOW() - ($1 || ' hours')::interval AND contact_id IS NOT NULL
+      ),
+      convergence AS (
+        SELECT entity_id, entity_type,
+               COUNT(DISTINCT agent_name) AS agent_count, COUNT(*) AS signal_count,
+               AVG(confidence_score) AS avg_confidence,
+               array_agg(DISTINCT agent_name) AS agents_involved,
+               array_agg(DISTINCT signal_type) AS signal_types,
+               MIN(created_at) AS first_signal, MAX(created_at) AS last_signal
+        FROM recent_signals
+        GROUP BY entity_id, entity_type
+        HAVING COUNT(DISTINCT agent_name) >= 2 OR COUNT(*) >= 3
+      )
+      SELECT c.*, (c.agent_count * 15 + c.signal_count * 10 + c.avg_confidence * 0.5)::integer AS convergence_score
+      FROM convergence c ORDER BY convergence_score DESC LIMIT 20
+    `, [hours]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[ai/convergence] Error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // TPE DATA ROUTE — scored properties from the materialized view
 // ============================================================
 app.get('/api/ai/tpe', async (req, res) => {

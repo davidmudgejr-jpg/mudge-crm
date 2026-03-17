@@ -2,96 +2,117 @@
 
 ## Overview
 
-Inland Empire CRM — an Electron + React desktop app for commercial real estate contact/deal management. Built with Vite, Tailwind CSS, and PostgreSQL. Includes an integrated Claude AI assistant for natural-language database queries.
+Inland Empire CRM — a React + Express web application for commercial real estate contact/deal management. Built with Vite, Tailwind CSS, and PostgreSQL (Neon). Includes an integrated Claude AI assistant for natural-language database queries. Deployed on Vercel (frontend) + Railway (backend).
+
+> **Note:** This app was originally built as an Electron desktop app but has migrated to a web-first architecture. The `electron/` directory remains for potential future desktop packaging but is NOT the primary deployment path.
 
 ## Quick Start
 
 ```bash
-npm run dev          # Vite dev server (port 5173) + Electron
-npm run build        # Production build
-npm run dist         # Package macOS DMG via electron-builder
+cd ie-crm
+npm run dev          # Vite dev server (port 5173)
+node server/index.js # Express API server (port 3001)
+# Or use the start-servers skill to launch both
 ```
+
+## Deployment
+
+| Layer | Service | Auto-Deploy |
+|-------|---------|-------------|
+| Frontend | Vercel | On git push to main |
+| Backend | Railway | On git push to main |
+| Database | Neon PostgreSQL 17 | Pooled connections (use `-pooler` hostname) |
 
 ## Architecture
 
 ```
 ie-crm/
-├── electron/main.js          # Electron main process, IPC handlers, DB + Claude setup
+├── server/
+│   ├── index.js              # Express API — all REST endpoints, Claude integration
+│   └── utils/
+│       ├── addressNormalizer.js  # Address parsing + normalization for imports
+│       └── compositeMatcher.js  # Tiered confidence matching for deduplication
 ├── src/
 │   ├── main.jsx              # React entry, HashRouter
 │   ├── App.jsx               # Layout: Sidebar + main content + ClaudePanel
 │   ├── api/
 │   │   ├── database.js       # All DB operations (CRUD, search, links, formulas, undo)
-│   │   └── claude.js         # Claude AI SDK wrapper (schema, messages, parsing)
+│   │   ├── claude.js         # Claude AI SDK wrapper (schema, messages, parsing)
+│   │   └── bridge.js         # HTTP/IPC abstraction layer
 │   ├── components/
 │   │   ├── ClaudePanel.jsx   # AI chat UI with SQL execution + file attachments
 │   │   ├── Sidebar.jsx       # Navigation with entity counts
-│   │   ├── shared/           # Reusable UI components
-│   │   │   ├── SlideOver.jsx         # Slide-in panel wrapper (right side)
-│   │   │   ├── CrmTable.jsx          # Airtable-style data table with inline editing
-│   │   │   ├── InlineField.jsx       # Click-to-edit field component
-│   │   │   ├── Section.jsx           # Collapsible detail section
-│   │   │   ├── LinkedRecordSection.jsx  # M2M relationship display + link/unlink
-│   │   │   ├── QuickAddModal.jsx     # Inline record creation modal
-│   │   │   ├── LinkPickerModal.jsx   # Search + link existing records
-│   │   │   └── DetailSkeleton.jsx    # Shimmer loading skeleton
-│   │   └── contexts/
-│   │       ├── SlideOverContext.jsx   # Manages slide-over panel state
-│   │       └── ToastContext.jsx       # Toast notification system
-│   ├── pages/                # Route pages (list views with CrmTable)
-│   │   ├── PropertiesPage.jsx
-│   │   ├── ContactsPage.jsx
-│   │   ├── CompaniesPage.jsx
-│   │   ├── DealsPage.jsx
-│   │   ├── InteractionsPage.jsx
-│   │   ├── CampaignsPage.jsx
-│   │   └── SettingsPage.jsx
-│   ├── details/              # Detail views (slide-over or standalone overlay)
-│   │   ├── PropertyDetail.jsx
-│   │   ├── ContactDetail.jsx
-│   │   ├── CompanyDetail.jsx
-│   │   ├── DealDetail.jsx
-│   │   └── InteractionDetail.jsx
+│   │   └── shared/           # Reusable UI components
+│   │       ├── CrmTable.jsx          # Airtable-style data table with inline editing
+│   │       ├── InlineTableCellEditor.jsx  # Type-aware cell editors
+│   │       ├── SlideOver.jsx         # Slide-in panel wrapper (right side)
+│   │       ├── LinkedRecordSection.jsx  # M2M relationship display + link/unlink
+│   │       ├── LinkedChips.jsx       # Pill-style linked record chips
+│   │       ├── ActivitySection.jsx   # Interaction history per entity
+│   │       ├── ActivityCellPreview.jsx # Activity column in table view
+│   │       ├── NotesSection.jsx      # Notes per entity
+│   │       ├── TasksSection.jsx      # Action items per entity
+│   │       ├── QuickAddModal.jsx     # Inline record creation modal
+│   │       ├── LinkPickerModal.jsx   # Search + link existing records
+│   │       ├── CompManualEntryModal.jsx # Manual comp entry
+│   │       ├── CommandPalette.jsx    # Cmd+K command palette
+│   │       ├── ColumnToggleMenu.jsx  # Column visibility/rename/delete
+│   │       └── ContextMenu.jsx       # Right-click context menu
+│   ├── pages/                # Route pages (8 tabs)
+│   │   ├── Properties.jsx    # Properties with role-specific linked columns
+│   │   ├── Contacts.jsx
+│   │   ├── Companies.jsx
+│   │   ├── Deals.jsx         # Queries deal_formulas VIEW for commission calc
+│   │   ├── Interactions.jsx
+│   │   ├── Campaigns.jsx
+│   │   ├── ActionItems.jsx   # Apple Reminders-style task management
+│   │   ├── Comps.jsx         # Lease/Sale toggle with source color-coding
+│   │   ├── Import.jsx        # CSV import with matching + auto-linking
+│   │   └── Settings.jsx
 │   ├── hooks/
-│   │   └── useAutoSave.js    # Optimistic inline save with debounce
+│   │   ├── useAutoSave.js    # Optimistic inline save with debounce
+│   │   ├── useLinkedRecords.js  # Batch-fetch linked records for all rows
+│   │   ├── useColumnVisibility.js # Column show/hide persistence
+│   │   ├── useCustomFields.js # Formula columns from DB
+│   │   ├── useFormulaColumns.js # Formula column integration
+│   │   ├── useColumnResize.js # Airtable-style drag resize
+│   │   ├── useDetailPanel.js # Detail slide-over state
+│   │   └── useKeyboardShortcuts.js # Global keyboard shortcuts
+│   ├── config/
+│   │   ├── entityTypes.js    # Entity type definitions
+│   │   ├── fieldTypes.js     # Field type rendering config
+│   │   ├── typeIcons.js      # Icons per entity type
+│   │   ├── quickAddFields.js # Fields for quick-add modals
+│   │   └── zIndex.js         # Z-index layer system
 │   └── index.css             # CSS variables for CRM theme tokens
+├── migrations/               # PostgreSQL migration files (001-008)
+├── schema.sql                # Base schema (run migrations on top)
+└── electron/                 # Legacy Electron packaging (not primary deployment)
 ```
 
 ## Key Patterns
 
-### IPC Bridge
+### API Layer (bridge.js)
 
-All database and Claude operations go through Electron IPC. The renderer accesses them via `window.iecrm.db` and `window.iecrm.claude`, exposed in `electron/main.js` via `contextBridge`.
+All database operations route through `bridge.js` which abstracts HTTP calls to the Express backend. The frontend calls `bridge.db.*` methods which map to REST endpoints.
 
 ```js
-// Renderer side
-const rows = await window.iecrm.db.getAll('contacts', 'last_name', 'asc');
+// Frontend
+const rows = await bridge.db.getAll('contacts', 'last_name', 'asc');
+// → GET /api/db/contacts?sort=last_name&dir=asc
 ```
 
 ### Entity Types
 
-6 entities: **Properties**, **Contacts**, **Companies**, **Deals**, **Interactions**, **Campaigns**
+8 entities: **Properties**, **Contacts**, **Companies**, **Deals**, **Interactions**, **Campaigns**, **Action Items**, **Comps** (Lease + Sale)
 
-Many-to-many relationships use junction tables (e.g., `contact_companies`, `deal_contacts`, `property_deals`).
+Many-to-many relationships use junction tables (e.g., `contact_companies`, `deal_contacts`, `property_deals`). Role-specific linking via `role` column on junction tables.
 
 ### Detail View Pattern (`isSlideOver` prop)
 
 Detail components accept an `isSlideOver` boolean:
 - `true` — rendered inside the shared `SlideOver` wrapper (no overlay needed)
 - `false` — renders its own fixed overlay + slide-in panel
-
-```jsx
-if (isSlideOver) return <DetailSkeleton />;
-return (
-  <div className="fixed inset-0 z-40 flex justify-end" onClick={onClose}>
-    <div className="absolute inset-0 bg-crm-overlay animate-fade-in" />
-    <div className="w-[500px] bg-crm-sidebar border-l border-crm-border h-full overflow-y-auto animate-slide-in-right"
-         onClick={(e) => e.stopPropagation()}>
-      <DetailSkeleton />
-    </div>
-  </div>
-);
-```
 
 ### Inline Editing with useAutoSave
 
@@ -101,10 +122,12 @@ Fields use `useAutoSave` hook for optimistic updates with 400ms debounce. The ho
 
 Airtable-style table with:
 - Sortable column headers (click to toggle asc/desc)
-- Inline cell editing via `InlineField`
+- Inline cell editing via `InlineTableCellEditor` (type-aware: text, number, date, select, multi-select, tags, boolean, email, tel, url)
 - Row click opens detail in SlideOver
 - Staggered row-appear animation
-- Column resize support
+- Column resize (drag handles)
+- Column visibility toggle + rename/delete
+- Activity cell preview (most recent interaction)
 
 ### Linked Records
 
@@ -113,18 +136,24 @@ Airtable-style table with:
 - "Link existing" opens `LinkPickerModal` (typeahead search)
 - "Quick add" opens `QuickAddModal` (create + link in one step)
 - Unlink with confirmation
+- Role-specific filtering (owner contacts, broker contacts, etc.)
 
 ## Database Layer (`database.js`)
 
 ### SQL Injection Prevention
 
 All dynamic column/direction values are sanitized:
-- `sanitizeCol(col)` — whitelist of valid column names
+- `sanitizeCol(col)` — whitelist of valid column names per table
 - `sanitizeDir(dir)` — only allows `asc` or `desc`
 - `validateFieldKeys(fields)` — validates field objects before insert/update
 - `validateJunction(junction)` — validates junction table operations
 
 User-supplied data always goes through parameterized queries (`$1`, `$2`, etc.).
+
+### SQL VIEWs (computed, not stored)
+
+- `deal_formulas` — Commission calculations: team_gross, jr_gross, jr_net (geometric series for leases)
+- `property_tpe_scores` — Transaction Probability Engine: 5-model scoring with configurable weights from `tpe_config` table
 
 ### Formula Columns
 
@@ -146,7 +175,7 @@ crm-text, crm-muted, crm-success, crm-border, crm-hover,
 crm-deep, crm-overlay, crm-tooltip
 ```
 
-Always use `crm-*` tokens instead of raw colors.
+Always use `crm-*` tokens instead of raw colors. Apple-inspired design: clean, minimal, depth through subtle gradients and spring animations.
 
 ### Animations
 
@@ -160,7 +189,7 @@ Defined in tailwind.config.js:
 
 ### How It Works
 
-1. `claude.js` fetches the live DB schema and builds a system prompt
+1. `claude.js` fetches the live DB schema (cached 60s) and builds a system prompt with CRE terminology
 2. User messages are sent with full schema context
 3. Claude responses are parsed for SQL blocks (read/write)
 4. Read queries execute immediately; write queries show a 1.5s countdown before auto-execution
@@ -170,12 +199,22 @@ Defined in tailwind.config.js:
 
 ClaudePanel supports drag-and-drop or click-to-attach files: PDFs, images, CSVs, Excel, JSON. Files are converted to appropriate content blocks for the Claude API.
 
+## AI Master System
+
+The CRM integrates with a planned 3-tier AI agent fleet (see `ai-system/` directory):
+- **Tier 1 (Claude Opus):** Strategic oversight via Chief of Staff ("Houston")
+- **Tier 2 (ChatGPT/Gemini):** Validation/QA on agent outputs
+- **Tier 3 (Local — Qwen 3.5, MiniMax 2.5):** High-volume research, enrichment, matching
+
+Agent outputs land in `sandbox_*` tables (migration 007) for human review before promotion to production tables.
+
 ## Tech Stack
 
-- **Electron 33** + **React 18** + **Vite 6**
+- **React 18** + **Vite 6** (frontend)
+- **Express** + **Node.js** (backend API)
 - **react-router-dom 6** (HashRouter)
 - **Tailwind CSS 3** (custom theme)
-- **PostgreSQL** via `pg` driver
+- **PostgreSQL 17** via Neon (pooled connections)
 - **@anthropic-ai/sdk** for Claude integration
 - **xlsx** for Excel file parsing
-- **electron-builder** for macOS packaging
+- **Vercel** (frontend hosting) + **Railway** (backend hosting)

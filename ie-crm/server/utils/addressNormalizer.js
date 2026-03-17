@@ -177,6 +177,20 @@ function normalizeCompanyName(raw) {
 }
 
 /**
+ * Normalize a contact name for matching.
+ * Strips CRE designations (SIOR, CCIM, etc.), lowercases, trims.
+ */
+function normalizeContactName(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  return raw
+    .replace(/,?\s*\b(SIOR|CCIM|CPA|Esq|Jr|Sr|III|II|MBA|PhD|PE|AIA|LEED\s*AP)\b\.?/gi, '')
+    .replace(/[.,]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim() || null;
+}
+
+/**
  * Simple Levenshtein distance for fuzzy matching.
  */
 function levenshtein(a, b) {
@@ -210,6 +224,7 @@ module.exports = {
   parseAddress,
   normalizeUnit,
   normalizeCompanyName,
+  normalizeContactName,
   levenshtein,
   similarity,
 };

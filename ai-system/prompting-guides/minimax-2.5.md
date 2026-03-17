@@ -81,4 +81,121 @@ source: "MiniMax documentation, community benchmarks, Ollama model notes"
 
 ---
 
+---
+
+## 8. CRE-Specific Prompt Templates
+
+### News Signal Detection Prompt (Researcher)
+```
+You are a CRE market intelligence analyst for the Inland Empire (San Bernardino & Riverside counties, CA).
+
+Scan the following content and extract any signals relevant to commercial real estate activity.
+
+CONTENT SOURCE: {source_name}
+CONTENT:
+{trimmed_content_max_5k_tokens}
+
+SIGNAL TYPES (report only these):
+- company_expansion: Company growing, hiring, new location
+- new_lease: Lease signed or announced
+- sale_closed: Property sold or in escrow
+- funding: Company raised capital or refinanced
+- hiring: Job postings indicating growth
+- relocation: Company moving in/out of IE
+- lease_expiration: Lease ending, tenant searching
+- distress: Foreclosure, NOD, bankruptcy, layoffs
+- market_trend: Vacancy rates, rent trends, absorption
+
+RELEVANCE FILTER: Only report signals within or directly affecting the Inland Empire market. National trends only if they specifically impact IE industrial/office/retail.
+
+For each signal found, return JSON:
+{"signals": [{"headline": "string", "signal_type": "enum", "relevance": "high|medium|low", "confidence": 0-100, "companies": ["string"], "properties": ["string"], "source_url": "string", "recommended_action": "string"}]}
+
+If no relevant signals found, return: {"signals": []}
+```
+
+### Evolution Report Prompt (Scout)
+```
+You are the Scout agent monitoring AI/ML developments for CRE applications.
+
+SOURCES SCANNED TODAY:
+{source_list_with_summaries}
+
+CURRENT SYSTEM CAPABILITIES:
+{brief_system_summary}
+
+Generate the weekly evolution report:
+1. New tools/models relevant to CRE intelligence (max 3)
+2. Techniques that could improve our agents (max 3)
+3. Competitive intelligence — what are other CRE tech companies doing? (max 2)
+4. Recommended upgrades (must be specific and actionable)
+
+Format as markdown with ## headers per section. Keep total under 500 words.
+```
+
+### Daily Summary Prompt (Logger)
+```
+Summarize the following raw agent activity logs into a structured daily summary.
+
+RAW LOGS:
+{agent_logs_last_24h}
+
+Return JSON:
+{
+  "date": "YYYY-MM-DD",
+  "agents": {
+    "enricher": {"items_processed": n, "items_approved": n, "items_rejected": n, "avg_confidence": n, "notable": "string"},
+    "researcher": {"signals_found": n, "high_relevance": n, "sources_scanned": n, "notable": "string"},
+    "matcher": {"matches_attempted": n, "matches_found": n, "emails_drafted": n, "notable": "string"}
+  },
+  "anomalies": ["string"],
+  "system_health": "healthy|degraded|error",
+  "recommendations": ["string"]
+}
+```
+
+---
+
+## 9. Token Budget Guidelines
+
+| Task | Input Budget | Output Budget | Total | Notes |
+|---|---|---|---|---|
+| News signal scan (per article) | 3K-5K | 500-1K | 4K-6K | Trim articles to first 5K tokens |
+| Market trend analysis | 5K-8K | 1K-2K | 7K-10K | Multiple sources aggregated |
+| Evolution report | 3K-5K | 1K-2K | 5K-7K | Weekly, not daily |
+| Daily summary | 5K-10K | 1K-2K | 7K-12K | Compresses 24h of logs |
+| Security audit scan | 3K-5K | 1K-2K | 5K-7K | Per-perspective pass |
+
+**Processing capacity per hour (Mac Mini M4 Pro):**
+- Signal detection: ~100-150 articles/hour (at ~3 sec/inference)
+- Summarization: ~80-120 documents/hour (at ~4 sec/inference)
+- Security scans: ~40-60 scans/hour (at ~6 sec/inference, deeper analysis)
+
+---
+
+## 10. Error Recovery Patterns
+
+### When MiniMax Over-Reports Signals (False Positives)
+- Common issue: MiniMax sees signals in generic business news
+- Mitigation: Add "CRITICAL: The signal must specifically mention a company, property, or market within San Bernardino or Riverside counties. National news without IE impact is NOT a signal."
+- If false positive rate > 30%, tighten relevance filter and add negative examples
+
+### When MiniMax Produces Overconfident Scores
+- MiniMax defaults to 70-80 confidence even on single-source signals
+- Mitigation: Add "Confidence guidelines: 90+ requires 3+ independent sources. 70-89 requires 2 sources. Below 70 for single source. Below 50 for unverified rumors."
+- Chief of Staff should monitor average confidence weekly
+
+### When MiniMax Gets Confused by Long Documents
+- Break articles into 2-3K token chunks
+- Process each chunk independently for signals
+- Deduplicate signals across chunks before submitting
+
+### When Source URLs Are Inaccessible
+- Log the failed URL with error code
+- Skip the source for this cycle
+- If the same source fails 3 days in a row, alert Scout to find alternative
+- Never hallucinate content from an inaccessible URL
+
+---
+
 *For: IE CRM AI Master System — Researcher, Scout, and Logger prompting reference*

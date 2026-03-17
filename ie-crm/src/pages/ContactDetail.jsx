@@ -12,7 +12,7 @@ import TYPE_ICONS from '../config/typeIcons';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
 import ActivitySection from '../components/shared/ActivitySection';
 
-export const CONTACT_TYPES = ['Tenant', 'Landlord', 'Buyer', 'Seller', 'Investor', 'Developer', 'Broker', 'Lender', 'Attorney', 'Other'];
+export const CONTACT_TYPES = ['Owner', 'Tenant', 'Landlord', 'Buyer', 'Seller', 'Investor', 'Developer', 'Broker', 'Lender', 'Attorney', 'Other'];
 export const CLIENT_LEVEL_OPTIONS = ['A', 'B', 'C', 'D'];
 
 const TYPE_COLORS = {

@@ -40,7 +40,7 @@ CREATE TABLE IF NOT EXISTS sandbox_contacts (
   reviewed_at TIMESTAMPTZ,
   review_notes TEXT,
   promoted_at TIMESTAMPTZ,
-  promoted_to_id INTEGER, -- contacts.id after promotion
+  promoted_to_id UUID, -- contacts.contact_id after promotion
   -- Timestamps
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -54,7 +54,7 @@ CREATE INDEX idx_sandbox_contacts_created ON sandbox_contacts(created_at);
 -- Sandbox: Enrichment data for existing contacts
 CREATE TABLE IF NOT EXISTS sandbox_enrichments (
   id SERIAL PRIMARY KEY,
-  contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+  contact_id UUID REFERENCES contacts(contact_id) ON DELETE SET NULL,
   -- Enrichment fields (any field that can be updated on a contact)
   field_name TEXT NOT NULL, -- which contact field this enriches (e.g. 'email', 'phone_1', 'work_address')
   old_value TEXT, -- current value in contacts table (for review context)
@@ -96,8 +96,8 @@ CREATE TABLE IF NOT EXISTS sandbox_signals (
   -- CRM cross-references
   companies_mentioned TEXT[],
   properties_mentioned TEXT[],
-  crm_company_ids INTEGER[], -- matched company IDs in IE CRM
-  crm_property_ids INTEGER[], -- matched property IDs in IE CRM
+  crm_company_ids UUID[], -- matched company IDs in IE CRM
+  crm_property_ids UUID[], -- matched property IDs in IE CRM
   crm_match BOOLEAN DEFAULT FALSE,
   relevance TEXT DEFAULT 'medium' CHECK (relevance IN ('high', 'medium', 'low')),
   -- Sandbox metadata
@@ -111,8 +111,8 @@ CREATE TABLE IF NOT EXISTS sandbox_signals (
   review_notes TEXT,
   promoted_at TIMESTAMPTZ,
   -- What was created on promotion (interaction, action_item, or both)
-  promoted_interaction_id INTEGER,
-  promoted_action_item_id INTEGER,
+  promoted_interaction_id UUID,
+  promoted_action_item_id UUID,
   -- Timestamps
   timestamp_found TIMESTAMPTZ DEFAULT NOW(),
   created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -129,7 +129,7 @@ CREATE INDEX idx_sandbox_signals_created ON sandbox_signals(created_at);
 -- Sandbox: Draft outreach emails
 CREATE TABLE IF NOT EXISTS sandbox_outreach (
   id SERIAL PRIMARY KEY,
-  contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+  contact_id UUID REFERENCES contacts(contact_id) ON DELETE SET NULL,
   contact_name TEXT,
   email TEXT NOT NULL,
   -- Email content
@@ -381,9 +381,9 @@ CREATE TABLE IF NOT EXISTS ai_usage_tracking (
   output_tokens INTEGER,
   total_cost DECIMAL(10, 6),
   -- CRM cross-references (optional — tracks which record triggered the cost)
-  contact_id INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
-  deal_id INTEGER REFERENCES deals(id) ON DELETE SET NULL,
-  property_id INTEGER REFERENCES properties(id) ON DELETE SET NULL,
+  contact_id UUID REFERENCES contacts(contact_id) ON DELETE SET NULL,
+  deal_id UUID REFERENCES deals(deal_id) ON DELETE SET NULL,
+  property_id UUID REFERENCES properties(property_id) ON DELETE SET NULL,
   -- Metadata
   request_details JSONB DEFAULT '{}', -- request/response summary for debugging
   -- Timestamps

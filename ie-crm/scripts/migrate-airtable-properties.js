@@ -16,6 +16,8 @@ async function main() {
   const args = process.argv.slice(2);
   const dryRun = args.includes('--dry-run');
   const live = args.includes('--live');
+  const startRowArg = args.find(a => a.startsWith('--start-row='));
+  const startRow = startRowArg ? parseInt(startRowArg.split('=')[1], 10) : 0;
 
   if (!dryRun && !live) {
     console.error('Usage: node scripts/migrate-airtable-properties.js [--dry-run | --live]');
@@ -44,11 +46,17 @@ async function main() {
   const withAddress = parsedRows.filter(r => r.address);
   console.log(`[cli] ${withAddress.length} rows have addresses (${parsedRows.length - withAddress.length} skipped — no address)`);
 
+  // Apply --start-row if resuming
+  const rowsToProcess = startRow > 0 ? withAddress.slice(startRow) : withAddress;
+  if (startRow > 0) {
+    console.log(`[cli] Resuming from row ${startRow} — processing ${rowsToProcess.length} remaining rows`);
+  }
+
   // Run engine
   const pool = new Pool({ connectionString: DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
   try {
-    const report = await processAirtableProperties(withAddress, pool, { dryRun });
+    const report = await processAirtableProperties(rowsToProcess, pool, { dryRun });
 
     // Print report
     console.log(`\n${'='.repeat(60)}`);

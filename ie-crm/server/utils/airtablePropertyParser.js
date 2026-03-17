@@ -69,16 +69,29 @@ function parseAirtableRow(raw) {
   if (maxContiguous) overflow.max_contiguous_sf = maxContiguous;
 
   // --- Contacts ---
-  const ownerContact = cleanStr(raw['Owner Contact']);
-  const brokerContact = cleanStr(raw['Broker Contact']);
+  // Airtable linked fields export as comma-separated values
+  // "David Little,John Little (owner)" = TWO contacts, strip role tags like "(owner)"
+  const stripRoleTag = (s) => s.replace(/\s*\((?:owner|tenant|broker|manager|agent)\)\s*$/i, '').trim();
+  const ownerContactsRaw = cleanStr(raw['Owner Contact']);
+  const ownerContacts = ownerContactsRaw
+    ? ownerContactsRaw.split(',').map(s => stripRoleTag(s.trim())).filter(Boolean)
+    : [];
+  const brokerContactsRaw = cleanStr(raw['Broker Contact']);
+  const brokerContacts = brokerContactsRaw
+    ? brokerContactsRaw.split(',').map(s => stripRoleTag(s.trim())).filter(Boolean)
+    : [];
 
   // --- Companies ---
-  const companyOwner = cleanStr(raw['(Company) Owner']);
+  // Same comma-split + role tag stripping for all linked fields
+  const companyOwnerRaw = cleanStr(raw['(Company) Owner']);
+  const companyOwners = companyOwnerRaw
+    ? companyOwnerRaw.split(',').map(s => stripRoleTag(s.trim())).filter(Boolean)
+    : [];
 
-  // (Company) Tenants — may be comma-separated
+  // (Company) Tenants — comma-separated linked field
   const tenantsRaw = cleanStr(raw['(Company) Tenants']);
   const companyTenants = tenantsRaw
-    ? tenantsRaw.split(',').map(s => s.trim()).filter(Boolean)
+    ? tenantsRaw.split(',').map(s => stripRoleTag(s.trim())).filter(Boolean)
     : [];
 
   const industryType = cleanStr(raw['Industry Type (from (Company) Tenants) 2']);
@@ -101,10 +114,10 @@ function parseAirtableRow(raw) {
     debtDate, loanAmount, buildingPark, county, ownerType,
     costarUrl, landvisionUrl, heating, sewer, water, gas,
     contacted, overflow,
-    // Contacts
-    ownerContact, brokerContact,
+    // Contacts (arrays — Airtable linked fields are comma-separated)
+    ownerContacts, brokerContacts,
     // Companies
-    companyOwner, companyTenants, industryType,
+    companyOwners, companyTenants, industryType,
     // Notes
     notes,
     // Reference

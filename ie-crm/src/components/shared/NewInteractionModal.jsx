@@ -11,6 +11,10 @@ const LINK_TYPES = [
   { key: 'deal', label: 'Deal', searchFn: searchDeals },
 ];
 
+const LEAD_SOURCES = ['CoStar', 'Loopnet', 'Sign Call', 'Referral', 'Website', 'Other'];
+const LEAD_STATUSES = ['New', 'Contacted', 'Qualified', 'Dead'];
+const LEAD_INTERESTS = ['Hot', 'Warm', 'Cold'];
+
 function InlineSearch({ entityType, searchFn, selected, onSelect, onRemove }) {
   const [term, setTerm] = useState('');
   const [results, setResults] = useState([]);
@@ -134,6 +138,9 @@ export default function NewInteractionModal({ onCreated, onClose, initialLinks }
   const [subject, setSubject] = useState('');
   const [date, setDate] = useState(todayPacific());
   const [notes, setNotes] = useState('');
+  const [leadSource, setLeadSource] = useState('');
+  const [leadStatus, setLeadStatus] = useState('New');
+  const [leadInterest, setLeadInterest] = useState('Warm');
   const [links, setLinks] = useState(() => {
     const base = { contact: [], property: [], company: [], deal: [] };
     if (initialLinks) {
@@ -170,6 +177,11 @@ export default function NewInteractionModal({ onCreated, onClose, initialLinks }
     try {
       const fields = { type, subject: subject.trim(), date };
       if (notes.trim()) fields.notes = notes.trim();
+      if (type === 'Lead') {
+        if (leadSource) fields.lead_source = leadSource;
+        fields.lead_status = leadStatus;
+        fields.lead_interest = leadInterest;
+      }
 
       const result = await createInteraction(fields);
       const row = result?.rows?.[0] || result;
@@ -268,6 +280,43 @@ export default function NewInteractionModal({ onCreated, onClose, initialLinks }
                 className="w-full bg-crm-bg border border-crm-border rounded-lg px-3 py-2 text-sm text-crm-text placeholder-crm-muted focus:outline-none focus:border-crm-accent/50 resize-none"
               />
             </div>
+
+            {/* Lead-specific fields */}
+            {type === 'Lead' && (
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="block text-xs text-crm-muted mb-1">Source</label>
+                  <select
+                    value={leadSource}
+                    onChange={(e) => setLeadSource(e.target.value)}
+                    className="w-full bg-crm-bg border border-crm-border rounded-lg px-2 py-1.5 text-xs text-crm-text focus:outline-none focus:border-crm-accent/50"
+                  >
+                    <option value="">Select...</option>
+                    {LEAD_SOURCES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-crm-muted mb-1">Status</label>
+                  <select
+                    value={leadStatus}
+                    onChange={(e) => setLeadStatus(e.target.value)}
+                    className="w-full bg-crm-bg border border-crm-border rounded-lg px-2 py-1.5 text-xs text-crm-text focus:outline-none focus:border-crm-accent/50"
+                  >
+                    {LEAD_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs text-crm-muted mb-1">Interest</label>
+                  <select
+                    value={leadInterest}
+                    onChange={(e) => setLeadInterest(e.target.value)}
+                    className="w-full bg-crm-bg border border-crm-border rounded-lg px-2 py-1.5 text-xs text-crm-text focus:outline-none focus:border-crm-accent/50"
+                  >
+                    {LEAD_INTERESTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
 
             {/* Divider */}
             <div className="border-t border-crm-border pt-3">

@@ -285,10 +285,11 @@ async function processRow(row, rowNum, client, caches, report, dryRun) {
 
   if (!propertyId && !dryRun) return;
 
-  // 2. OWNER COMPANY — find or create
-  let ownerCompanyId = null;
-  if (row.companyOwner) {
-    const existing = findCompany(row.companyOwner, caches, report.fuzzyMatches, rowNum);
+  // 2. OWNER COMPANIES — loop over all (Airtable linked fields are comma-separated)
+  const ownerCompanyIds = [];
+  for (const ownerName of row.companyOwners || []) {
+    const existing = findCompany(ownerName, caches, report.fuzzyMatches, rowNum);
+    let ownerCompanyId;
     if (existing) {
       ownerCompanyId = existing.company_id;
       report.companies.matched++;
@@ -296,15 +297,15 @@ async function processRow(row, rowNum, client, caches, report, dryRun) {
       if (!dryRun) {
         const { rows } = await client.query(
           `INSERT INTO companies (company_name, company_type) VALUES ($1, 'owner') RETURNING company_id`,
-          [row.companyOwner]
+          [ownerName]
         );
         ownerCompanyId = rows[0].company_id;
-        const norm = normalizeCompanyName(row.companyOwner);
-        if (norm) caches.companyCache.set(norm, { company_id: ownerCompanyId, company_name: row.companyOwner, company_type: 'owner' });
+        const norm = normalizeCompanyName(ownerName);
+        if (norm) caches.companyCache.set(norm, { company_id: ownerCompanyId, company_name: ownerName, company_type: 'owner' });
       }
       report.companies.created++;
     }
-    // Junction: property_companies (role='owner')
+    if (ownerCompanyId) ownerCompanyIds.push(ownerCompanyId);
     if (ownerCompanyId && propertyId && !dryRun) {
       await upsertJunction(client, 'property_companies', { property_id: propertyId, company_id: ownerCompanyId, role: 'owner' }, report);
     }
@@ -339,10 +340,11 @@ async function processRow(row, rowNum, client, caches, report, dryRun) {
     }
   }
 
-  // 4. OWNER CONTACT — find or create
-  let ownerContactId = null;
-  if (row.ownerContact) {
-    const existing = findContact(row.ownerContact, caches, report.fuzzyMatches, rowNum);
+  // 4. OWNER CONTACTS — loop over all (Airtable linked fields are comma-separated)
+  const ownerContactIds = [];
+  for (const contactName of row.ownerContacts || []) {
+    const existing = findContact(contactName, caches, report.fuzzyMatches, rowNum);
+    let ownerContactId;
     if (existing) {
       ownerContactId = existing.contact_id;
       report.contacts.matched++;
@@ -350,34 +352,36 @@ async function processRow(row, rowNum, client, caches, report, dryRun) {
       if (!dryRun) {
         const { rows } = await client.query(
           `INSERT INTO contacts (full_name, type) VALUES ($1, 'owner') RETURNING contact_id`,
-          [row.ownerContact]
+          [contactName]
         );
         ownerContactId = rows[0].contact_id;
-        const norm = normalizeContactName(row.ownerContact);
+        const norm = normalizeContactName(contactName);
         if (norm) {
-          const entry = { contact_id: ownerContactId, full_name: row.ownerContact };
+          const entry = { contact_id: ownerContactId, full_name: contactName };
           if (!caches.contactCache.has(norm)) caches.contactCache.set(norm, []);
           caches.contactCache.get(norm).push(entry);
         }
       }
       report.contacts.created++;
     }
+    if (ownerContactId) ownerContactIds.push(ownerContactId);
     if (ownerContactId && propertyId && !dryRun) {
       await upsertJunction(client, 'property_contacts', { property_id: propertyId, contact_id: ownerContactId, role: 'owner' }, report);
     }
-    // Link owner contact to owner company
-    if (ownerContactId && ownerCompanyId && !dryRun) {
-      await upsertJunction(client, 'contact_companies', { contact_id: ownerContactId, company_id: ownerCompanyId }, report);
+    // Link owner contact to all owner companies
+    for (const compId of ownerCompanyIds) {
+      if (ownerContactId && !dryRun) {
+        await upsertJunction(client, 'contact_companies', { contact_id: ownerContactId, company_id: compId }, report);
+      }
     }
   }
 
-  // 5. BROKER CONTACT — find or create
+  // 5. BROKER CONTACTS — loop over all (Airtable linked fields are comma-separated)
   // Track which contacts are already linked to avoid PK violation
-  const linkedContactIds = new Set();
-  if (ownerContactId) linkedContactIds.add(ownerContactId);
+  const linkedContactIds = new Set(ownerContactIds);
 
-  if (row.brokerContact) {
-    const existing = findContact(row.brokerContact, caches, report.fuzzyMatches, rowNum);
+  for (const brokerName of row.brokerContacts || []) {
+    const existing = findContact(brokerName, caches, report.fuzzyMatches, rowNum);
     let brokerContactId;
     if (existing) {
       brokerContactId = existing.contact_id;
@@ -386,12 +390,12 @@ async function processRow(row, rowNum, client, caches, report, dryRun) {
       if (!dryRun) {
         const { rows } = await client.query(
           `INSERT INTO contacts (full_name, type) VALUES ($1, 'broker') RETURNING contact_id`,
-          [row.brokerContact]
+          [brokerName]
         );
         brokerContactId = rows[0].contact_id;
-        const norm = normalizeContactName(row.brokerContact);
+        const norm = normalizeContactName(brokerName);
         if (norm) {
-          const entry = { contact_id: brokerContactId, full_name: row.brokerContact };
+          const entry = { contact_id: brokerContactId, full_name: brokerName };
           if (!caches.contactCache.has(norm)) caches.contactCache.set(norm, []);
           caches.contactCache.get(norm).push(entry);
         }
@@ -401,8 +405,7 @@ async function processRow(row, rowNum, client, caches, report, dryRun) {
     // Edge case: same person as owner + broker → skip second junction insert
     if (brokerContactId && propertyId && !linkedContactIds.has(brokerContactId) && !dryRun) {
       await upsertJunction(client, 'property_contacts', { property_id: propertyId, contact_id: brokerContactId, role: 'broker' }, report);
-    } else if (brokerContactId && linkedContactIds.has(brokerContactId)) {
-      report.warnings.push({ rowNum, message: `Same contact "${row.brokerContact}" is both owner and broker for property "${row.address}" — first role (owner) kept` });
+      linkedContactIds.add(brokerContactId);
     }
   }
 
@@ -523,29 +526,33 @@ async function processAirtableProperties(rows, pool, options = {}) {
     dataGaps: null,
   };
 
+  const BATCH_SIZE = 500;
+
   try {
     console.log(`[airtable-engine] Loading caches from database...`);
     const caches = await loadCaches(client);
     console.log(`[airtable-engine] Loaded ${caches.propertyCache.size} properties, ${caches.companyCache.size} companies, ${caches.contactCache.size} contacts`);
 
-    if (!dryRun) await client.query('BEGIN');
+    // Process in committed batches so progress survives crashes
+    for (let batchStart = 0; batchStart < rows.length; batchStart += BATCH_SIZE) {
+      const batchEnd = Math.min(batchStart + BATCH_SIZE, rows.length);
 
-    for (let i = 0; i < rows.length; i++) {
-      try {
-        if (!dryRun) await client.query(`SAVEPOINT row_${i}`);
-        await processRow(rows[i], i, client, caches, report, dryRun);
-        if (!dryRun) await client.query(`RELEASE SAVEPOINT row_${i}`);
-      } catch (err) {
-        if (!dryRun) await client.query(`ROLLBACK TO SAVEPOINT row_${i}`);
-        report.errors.push({ rowNum: i, address: rows[i].address, message: err.message });
+      if (!dryRun) await client.query('BEGIN');
+
+      for (let i = batchStart; i < batchEnd; i++) {
+        try {
+          if (!dryRun) await client.query(`SAVEPOINT row_${i}`);
+          await processRow(rows[i], i, client, caches, report, dryRun);
+          if (!dryRun) await client.query(`RELEASE SAVEPOINT row_${i}`);
+        } catch (err) {
+          if (!dryRun) await client.query(`ROLLBACK TO SAVEPOINT row_${i}`);
+          report.errors.push({ rowNum: i, address: rows[i].address, message: err.message });
+        }
       }
 
-      if ((i + 1) % 500 === 0) {
-        console.log(`[airtable-engine] Processed ${i + 1}/${rows.length} rows...`);
-      }
+      if (!dryRun) await client.query('COMMIT');
+      console.log(`[airtable-engine] ✅ Committed batch ${batchStart + 1}-${batchEnd}/${rows.length} (${Math.round(batchEnd / rows.length * 100)}%)`);
     }
-
-    if (!dryRun) await client.query('COMMIT');
 
     report.dataGaps = await generateGapReport(client);
 

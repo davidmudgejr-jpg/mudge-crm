@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-13
-> Previous session: "5-round deep AI/CRM audit — 60 strategic prompts across Rounds 1-5 producing 47-tier evolution roadmap (Tiers 0-47), predictive intelligence layer (Round 4), and implementation bridge specs (Round 5). 17 design documents created, 115+ new tables designed, all existing docs updated."
-> Next task: **Start building Tier 0 deployment blockers** (migration 008 FK fix, auth, schema.sql refresh). Then begin Tier 44 (RBAC) as the foundation for Round 5 implementation.
+> Updated: 2026-03-14 (migrations deployed + data model corrections)
+> Previous session: "Ran migrations 007 + 008 against live Neon DB. Fixed 6 FK type mismatches in 007 (INTEGER→UUID). Fixed 8 column name mismatches in 008 TPE VIEW against actual schema. Applied David's domain corrections: lease_exp lives on companies (not properties), owner age is computed from contacts.date_of_birth (not estimated on properties). TPE VIEW now JOINs through junction tables. All 461 properties scoring. Added 11 AI Ops endpoints to server. Expanded 3 prompting guides. Rewrote CLAUDE.md. Built memory system (8 files). Confirmed multiple tenant companies per property works."
+> Next task: **Build dedicated Lease Comp Import Wizard** — David to provide Excel examples first. Then build TPE UI in Properties table + Property detail. Then build AI Ops dashboard page.
 
 ---
 
@@ -47,7 +47,7 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **Add `role` to batch queries** — `batchGetPropertyContacts` and `batchGetPropertyCompanies` now SELECT `pc.role` (commit `87c88cd`)
 - [x] **Role-specific sections in PropertyDetail** — 5 role-filtered LinkedRecordSection panels replace 2 generic ones. `role` prop passed through to `linkRecords()` extras so new links get correct role. Legacy NULL-role records shown in conditional "Other" sections.
 - [x] **9 phantom columns in Properties ALL_COLUMNS** — fixed via migration 004: `apn`/`asking_price` were naming mismatches (removed dupes); `units`, `stories`, `parking_spaces`, `price_per_sqft`, `noi`, `owner_email`, `owner_mailing_address` added to DB via ALTER TABLE (commit `e062b84`)
-- [ ] **schema.sql is stale** — doesn't include migration 001/002/003 tables/columns. Fresh install from schema.sql alone would be incomplete.
+- [ ] **schema.sql is stale** — doesn't include migration 001-008 tables/columns. Fresh install from schema.sql alone would be incomplete.
 - [ ] Add indexes on all filtered/searched columns
 - [ ] Confirm Vercel frontend works end-to-end
 
@@ -72,14 +72,18 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [ ] Lease expiration auto-sync to companies.lease_exp
 - [ ] Sale comp auto-update of property last_sale_date/last_sale_price
 
-### Phase 1E — TPE ⬜
+### Phase 1E — TPE ⬜ (partially complete)
 - [x] Full spec documented (5 models, all weights, tpe_config table)
 - [x] Supporting tables created (loan_maturities, property_distress, tenant_growth)
-- [ ] **Missing DB tables**: `debt_stress`, `tpe_config` not yet created
-- [ ] **Missing properties columns**: `owner_entity_type`, `owner_age_est`, `has_lien_or_delinquency`, `owner_call_status`, `tenant_call_status` (note: `holding_period_years` exists but spec calls it `hold_duration_years`), `costar_star_rating` (INTEGER 1–5, see docs/COSTAR-STAR-RATINGS.md)
-- [ ] SQL VIEW `property_tpe_scores` not built (only `deal_formulas` view exists in DB)
-- [ ] TPE UI not built
-- [ ] **CoStar Star Rating integration** — `costar_star_rating` (1–5) is a nationally standardized building quality metric that supplements the broker-reported `building_class` (A/B/C). Can serve as Age Score modifier in TPE and flag class/quality divergences. Full reference: `docs/COSTAR-STAR-RATINGS.md`
+- [x] **Migration 008 deployed** — `tpe_config` table created with default weights, `property_tpe_scores` SQL VIEW live
+- [x] **`property_tpe_scores` VIEW** — 7 CTEs joining through junction tables: owner age via `property_contacts→contacts.date_of_birth`, lease months via `property_companies→companies.lease_exp`, tenant growth via `property_companies→tenant_growth.growth_rate`, debt/distress via `loan_maturities`/`property_distress`. All 461 properties scoring (Tier C baseline until input data populated).
+- [x] **`contacts.date_of_birth`** column added (DATE) — owner age computed at query time via `AGE(NOW(), date_of_birth)`, NOT stored on properties
+- [x] **`properties.costar_star_rating`** column added (INTEGER 1-5)
+- [x] **`properties.owner_age_est` dropped** — was wrong location; age comes from contacts through junction
+- [x] **Data model corrections applied** — lease_exp lives on companies, owner age on contacts, both accessed through junction table JOINs
+- [ ] TPE UI not built — needs scoring columns in Properties table + visual in PropertyDetail
+- [ ] **CoStar Star Rating integration** — `costar_star_rating` (1–5) column exists but not yet wired into TPE scoring formula or UI
+- [ ] Populate TPE input data (date_of_birth on contacts, lease_exp on companies, loan_maturities, tenant_growth, property_distress)
 
 ### Phase 1F — Interaction Types ✅
 - [x] Expanded from 7 to 17 types (commit `e34ce30`)
@@ -143,6 +147,21 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **Column metadata on all 4 pages** — Added `editable: false` to primary columns (address/name), `editType`/`editOptions` to select/multi-select/tags/boolean columns. Properties: property_type select (7 options), contacted multi-select (14 options), priority select, boolean flags. Contacts: type select (8 types), client_level select (A-D), boolean flags. Deals: status select (9 statuses), deal_type select, repping/run_by multi-select, priority_deal boolean. Companies: revenue number, tags.
 - [x] **handleCellSave on all 4 pages** — Optimistic update with rollback on error. Uses `updateProperty`/`updateContact`/`updateDeal`/`updateCompany` DB functions. Toast notifications for success/failure.
 - [x] **Empty activity cell click** — ActivityCellPreview `--` placeholder now has `onClick` → opens ActivityModal instead of falling through to detail panel. Works on all 4 table views.
+
+### AI System Deployment (2026-03-14)
+- [x] **Migration 007 deployed** — 11 sandbox/agent tables live in Neon: sandbox_contacts, sandbox_enrichments, sandbox_signals, sandbox_outreach, agent_heartbeats, agent_logs, ai_api_keys, agent_priority_board, agent_escalations, outbound_email_queue, ai_usage_tracking. All FK references corrected to UUID (was INTEGER).
+- [x] **Migration 008 deployed** — TPE VIEW + tpe_config + contacts.date_of_birth + costar_star_rating. Dropped owner_age_est from properties.
+- [x] **11 AI Ops API endpoints** added to server/index.js: GET/POST sandbox review, contact promotion (with email dedup + SAVEPOINT), heartbeats, logging, summary, TPE scores (single + bulk), convergence detection algorithm
+- [x] **3 prompting guides expanded** — opus-4.6.md, qwen-3.5.md, minimax-2.5.md all expanded from ~84 to ~200 lines with CRE-specific templates, token budgets, error recovery
+- [x] **CLAUDE.md rewritten** — removed Electron references, updated for Vercel/Railway/Neon web deployment, added AI Master System section
+- [x] **Memory system built** — 8 files in `.claude/projects/.../memory/`: user_profile, project_architecture, project_status, project_competitive_edge, feedback_coding_style, feedback_communication, reference_external_systems, reference_key_documents
+- [x] **Multiple tenant companies confirmed** — property_companies junction table supports unlimited companies per property (5 properties already have 2+ linked)
+
+### Lease Comp Import Wizard ⬜ (next priority)
+- [ ] **Receive Excel examples from David** — need actual lease comp spreadsheet structure before designing
+- [ ] **Design data fan-out mapping** — one Excel row → properties + companies + contacts + lease_comps + junction tables
+- [ ] **Build dedicated wizard page** — separate from generic CSV import, smart field mapping, preview before commit
+- [ ] **Auto-link logic** — find-or-create for properties (by address), companies (by name), contacts (by name/email), then create junction links with correct roles
 
 ### AI System Architecture Updates (2026-03-13)
 - [x] **YouTube Transcript MCP** — installed `@kimtaeyoon83/mcp-server-youtube-transcript` for both Claude Desktop and Claude Code (project-level `.mcp.json`). Drop any YouTube URL in future sessions and Claude can pull the transcript.

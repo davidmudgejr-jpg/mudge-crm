@@ -81,4 +81,120 @@ source: "Anthropic documentation, Claude model card, prompting best practices"
 
 ---
 
+---
+
+## 8. CRE-Specific Prompt Templates
+
+### Daily Review Prompt Structure
+```xml
+<role>You are Houston, Chief of Staff for the IE CRM AI fleet. You oversee 5 agents operating in the Inland Empire commercial real estate market.</role>
+
+<context>
+Today's date: {date}
+Agent fleet status: {heartbeat_summary}
+Yesterday's metrics: {metrics_json}
+</context>
+
+<daily_logs>
+{concatenated_agent_logs_last_24h}
+</daily_logs>
+
+<task>
+Conduct your 8-step daily review:
+1. Read all agent logs from the last 24 hours
+2. Identify patterns, anomalies, or concerning trends
+3. Check confidence calibration (are agents over/under-confident?)
+4. Review any escalated items awaiting your decision
+5. Evaluate agent instruction effectiveness
+6. Draft instruction updates if needed (provide exact diff)
+7. Compose the morning briefing (team version + ops version)
+8. Generate 1-3 reverse prompts for David
+</task>
+
+<output_format>
+Return a JSON object with keys: review_summary, instruction_updates[], morning_briefing_team, morning_briefing_ops, reverse_prompts[], anomalies[], confidence_notes
+</output_format>
+```
+
+### Council Briefing Prompt Structure
+```xml
+<role>You are {perspective_name} — one of three council reviewers.</role>
+
+<perspectives>
+- DealHunter: Maximize revenue opportunity. Ask "What deals could we close?"
+- RevenueGuardian: Protect against costly errors. Ask "What could go wrong?"
+- MarketSkeptic: Challenge assumptions. Ask "Is the data strong enough?"
+</perspectives>
+
+<item_under_review>
+{sandbox_item_json}
+</item_under_review>
+
+<task>
+Review this item from your perspective. Score 1-10 on: data_quality, confidence_warranted, action_readiness, risk_level. Provide 2-3 sentence reasoning.
+</task>
+```
+
+### Instruction Rewrite Prompt
+```xml
+<current_instruction>
+{agent_name}.md content
+</current_instruction>
+
+<feedback_data>
+Approval rate last 7 days: {rate}%
+Common rejection reasons: {reasons}
+False positive examples: {examples}
+David's manual overrides: {overrides}
+</feedback_data>
+
+<task>
+Rewrite the agent instruction to address the feedback. Keep the same structure. Only change sections that need improvement. Mark each change with a comment: <!-- CHANGED: reason -->
+</task>
+```
+
+---
+
+## 9. Token Budget Guidelines
+
+| Task | Input Budget | Output Budget | Total | Notes |
+|---|---|---|---|---|
+| Daily review (full) | 50K-80K | 5K-10K | 60K-90K | Logs can be large; summarize history |
+| Council briefing (per reviewer) | 5K-10K | 1K-2K | 8K-12K | Item + context, short review |
+| Instruction rewrite | 10K-15K | 8K-12K | 20K-25K | Full agent.md + feedback data |
+| Morning briefing | 5K-10K | 2K-3K | 8K-13K | Synthesis from daily review |
+| Escalation decision | 3K-5K | 500-1K | 4K-6K | Quick judgment call |
+| CRM improvement proposal | 10K-20K | 3K-5K | 15K-25K | Needs codebase context |
+
+**Monthly cost estimate at current rates:**
+- Daily review: ~$3.50/day × 30 = ~$105/mo
+- Council briefings: ~$0.50 each × 10/mo = ~$5/mo
+- Instruction rewrites: ~$1.50 each × 8/mo = ~$12/mo
+- Ad hoc: ~$30/mo buffer
+- **Total Opus budget: ~$150-180/mo**
+
+---
+
+## 10. Error Recovery Patterns
+
+### When Opus Produces Invalid JSON
+1. Retry once with `temperature: 0.0` and explicit schema
+2. If still invalid, parse partial JSON and fill gaps with defaults
+3. Log the failure for instruction improvement
+
+### When Opus Over-Recommends (Too Many Actions)
+- Add constraint: "Maximum 3 highest-impact recommendations. Ruthlessly prioritize."
+- If persistent, lower temperature to 0.1
+
+### When Opus Under-Explains (Too Terse)
+- Add: "For each recommendation, explain: what, why, expected impact, and risk"
+- Provide an example of the desired depth
+
+### When Opus Hallucinates Data
+- Always cross-reference Opus claims against `agent_logs` and `sandbox_*` tables
+- If a cited metric doesn't exist in logs, flag as hallucination and re-prompt with explicit data only
+- Add to system prompt: "Only reference data present in the logs. Do not infer or estimate metrics not provided."
+
+---
+
 *For: IE CRM AI Master System — Chief of Staff prompting reference*
