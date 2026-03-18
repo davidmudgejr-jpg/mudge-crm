@@ -9,7 +9,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 // Delivery cues are for TTS — strip from displayed text
 const DELIVERY_CUE_RE = /\[(playfully|warmly|matter-of-fact|gently|confidently|urgently|thoughtfully|reassuringly)\]\s*/gi;
