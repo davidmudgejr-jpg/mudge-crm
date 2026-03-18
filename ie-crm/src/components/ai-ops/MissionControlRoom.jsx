@@ -13,13 +13,13 @@ import { createMovementEngine } from './AgentMovementEngine';
 // Agent configuration — 7 agents across 3 tiers
 // ---------------------------------------------------------------------------
 const AGENT_CONFIGS = [
-  { name: 'enricher', color: '#10b981', accessories: ['labcoat'], homeDesk: { x: 210, y: 340 }, tier: 3 },
-  { name: 'researcher', color: '#3b82f6', accessories: ['headset'], homeDesk: { x: 630, y: 335 }, tier: 3 },
-  { name: 'scout', color: '#f59e0b', accessories: [], homeDesk: { x: 248, y: 232 }, tier: 3 },
-  { name: 'matcher', color: '#8b5cf6', accessories: ['tablet'], homeDesk: { x: 620, y: 225 }, tier: 3 },
-  { name: 'ralph', color: '#ef4444', accessories: ['clipboard'], standing: { x: 400, y: 370 }, tier: 2 },
-  { name: 'gemini', color: '#06b6d4', accessories: [], standing: { x: 440, y: 385 }, tier: 2 },
-  { name: 'houston', color: '#fbbf24', accessories: [], standing: { x: 370, y: 420 }, tier: 1, isHouston: true },
+  { name: 'enricher', color: '#10b981', accessories: ['labcoat'], homeDesk: { x: 230, y: 395 }, tier: 3 },
+  { name: 'researcher', color: '#3b82f6', accessories: ['headset'], homeDesk: { x: 630, y: 390 }, tier: 3 },
+  { name: 'scout', color: '#f59e0b', accessories: [], homeDesk: { x: 270, y: 310 }, tier: 3 },
+  { name: 'matcher', color: '#8b5cf6', accessories: ['tablet'], homeDesk: { x: 620, y: 305 }, tier: 3 },
+  { name: 'ralph', color: '#ef4444', accessories: ['clipboard'], standing: { x: 410, y: 420 }, tier: 2 },
+  { name: 'gemini', color: '#06b6d4', accessories: [], standing: { x: 460, y: 435 }, tier: 2 },
+  { name: 'houston', color: '#fbbf24', accessories: [], standing: { x: 420, y: 450 }, tier: 1, isHouston: true },
 ];
 
 // ---------------------------------------------------------------------------
@@ -109,6 +109,30 @@ export default function MissionControlRoom({ agents = [], pending = 0, recentLog
     [onZoomIn]
   );
 
+  // Sphere/console "floor Y" for depth ordering — agents behind this render first
+  // Console floor center is at y≈400, so agents with y<400 are behind the sphere
+  const SPHERE_DEPTH_Y = 400;
+
+  // Split agents into behind-sphere and in-front-of-sphere groups
+  const agentsBehind = sortedAgents.filter((a) => (a.position?.y || 0) < SPHERE_DEPTH_Y);
+  const agentsInFront = sortedAgents.filter((a) => (a.position?.y || 0) >= SPHERE_DEPTH_Y);
+
+  const renderAgent = (agent) => (
+    <AgentCharacter
+      key={agent.name}
+      agentName={agent.name}
+      color={agent.color}
+      status={agent.status}
+      position={agent.position}
+      facing={agent.facing || 'front-left'}
+      isWalking={agent.isWalking || false}
+      isSeated={agent.isSeated || false}
+      accessories={agent.accessories || []}
+      isHouston={agent.isHouston || false}
+      onClick={(e) => handleAgentClick(agent.name, e)}
+    />
+  );
+
   return (
     <div className="w-full h-full flex items-center justify-center">
       <RoomShell>
@@ -118,64 +142,54 @@ export default function MissionControlRoom({ agents = [], pending = 0, recentLog
         {/* 2. WallScreens — mounted on left + right walls */}
         <WallScreens agents={agents} pending={pending} onZoomIn={onZoomIn} />
 
-        {/* 3. WorkstationDesks — back desks first (higher y = farther back in iso) */}
+        {/* 3. WorkstationDesks — back desks first (lower y = farther back in iso) */}
         {/* Scout (back-left) */}
         <WorkstationDesk
-          x={200}
-          y={250}
+          x={220}
+          y={320}
           monitorColor="#f59e0b"
           label="Scout"
         />
         {/* Matcher (back-right) */}
         <WorkstationDesk
-          x={590}
-          y={245}
+          x={580}
+          y={315}
           monitorColor="#8b5cf6"
           label="Matcher"
         />
-        {/* Enricher (front-left) */}
+
+        {/* 4a. Agents BEHIND the sphere (lower y) */}
+        {agentsBehind.map(renderAgent)}
+
+        {/* 4b. Enricher desk (front-left — in front of sphere) */}
         <WorkstationDesk
-          x={160}
-          y={360}
+          x={180}
+          y={405}
           monitorColor="#10b981"
           label="Enricher"
         />
-        {/* Researcher (front-right) */}
+        {/* Researcher desk (front-right) */}
         <WorkstationDesk
           x={590}
-          y={355}
+          y={400}
           monitorColor="#3b82f6"
           label="Researcher"
         />
 
-        {/* 4. ControlConsole — center of room */}
+        {/* 5. ControlConsole — center of room */}
         <ControlConsole
           onClick={onZoomIn ? (e) => onZoomIn('health', e) : undefined}
         />
 
-        {/* 5. HolographicSphere — above the console */}
+        {/* 6. HolographicSphere — above the console */}
         <HolographicSphere
           onClickSphere={onZoomIn ? (e) => onZoomIn('territory', e) : undefined}
         />
 
-        {/* 6. Agent characters — depth-sorted by y position */}
-        {sortedAgents.map((agent) => (
-          <AgentCharacter
-            key={agent.name}
-            agentName={agent.name}
-            color={agent.color}
-            status={agent.status}
-            position={agent.position}
-            facing={agent.facing || 'front-left'}
-            isWalking={agent.isWalking || false}
-            isSeated={agent.isSeated || false}
-            accessories={agent.accessories || []}
-            isHouston={agent.isHouston || false}
-            onClick={(e) => handleAgentClick(agent.name, e)}
-          />
-        ))}
+        {/* 7. Agents IN FRONT of the sphere (higher y = closer to camera) */}
+        {agentsInFront.map(renderAgent)}
 
-        {/* 7. LiveFeedTicker — bottom overlay inside floor diamond */}
+        {/* 8. LiveFeedTicker — bottom overlay inside floor diamond */}
         <LiveFeedTicker logs={recentLogs} />
       </RoomShell>
     </div>

@@ -2,8 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useAgentHeartbeats from '../hooks/useAgentHeartbeats';
 import RoomBreadcrumb from '../components/ai-ops/RoomBreadcrumb';
-import MissionControlRoom from '../components/ai-ops/MissionControlRoom';
-import ZoomTransition from '../components/ai-ops/ZoomTransition';
+import WarRoom3D from '../components/ai-ops/WarRoom3D';
+import DetailOverlay from '../components/ai-ops/DetailOverlay';
 import PipelineDashboard from '../components/ai-ops/detail-views/PipelineDashboard';
 import AgentDossier from '../components/ai-ops/detail-views/AgentDossier';
 import ApprovalQueue from '../components/ai-ops/detail-views/ApprovalQueue';
@@ -24,16 +24,10 @@ const DETAIL_VIEWS = {
 export default function AIOps() {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState(null);
-  const [zoomOrigin, setZoomOrigin] = useState({ x: 50, y: 50 });
   const { agents, pending, recentLogs, loading, error, stale } = useAgentHeartbeats();
 
-  const handleZoomIn = (viewKey, originElement) => {
-    if (originElement) {
-      const rect = originElement.getBoundingClientRect();
-      const x = ((rect.left + rect.width / 2) / window.innerWidth) * 100;
-      const y = ((rect.top + rect.height / 2) / window.innerHeight) * 100;
-      setZoomOrigin({ x, y });
-    }
+  // Simplified — no more DOM element / getBoundingClientRect needed
+  const handleZoomIn = (viewKey) => {
     setActiveView(viewKey);
   };
 
@@ -41,6 +35,7 @@ export default function AIOps() {
     setActiveView(null);
   };
 
+  // Escape key handler
   useEffect(() => {
     const handler = (e) => {
       if (e.key === 'Escape' && activeView) handleZoomOut();
@@ -49,54 +44,58 @@ export default function AIOps() {
     return () => window.removeEventListener('keydown', handler);
   }, [activeView]);
 
+  // Build detail content
+  let detailContent = null;
+  if (activeView) {
+    if (activeView.startsWith('agent-')) {
+      detailContent = (
+        <div className="max-w-6xl mx-auto">
+          <AgentDossier agentName={activeView.replace('agent-', '')} agents={agents} />
+        </div>
+      );
+    } else if (DETAIL_VIEWS[activeView]) {
+      detailContent = (
+        <div className="max-w-6xl mx-auto">
+          {React.createElement(DETAIL_VIEWS[activeView], { agents, pending, recentLogs })}
+        </div>
+      );
+    }
+  }
+
   return (
-    <div className="fixed inset-0 bg-[#04040a] overflow-hidden">
+    <div className="fixed inset-0 bg-[#04040a] overflow-hidden z-40">
       {stale && (
         <div className="absolute top-4 right-4 z-50 px-3 py-1.5 bg-amber-500/10 border border-amber-500/30 rounded-lg text-amber-400 text-xs">
-          Connection lost — showing last known state
+          Connection lost - showing last known state
         </div>
       )}
 
-      {/* Back to CRM button */}
+      {/* Back to CRM */}
       <button
         onClick={() => navigate('/properties')}
         className="absolute top-4 right-4 z-50 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/50 hover:text-white/80 text-xs transition-all"
         style={{ display: stale ? 'none' : undefined }}
       >
-        ← Back to CRM
+        {'<-'} Back to CRM
       </button>
 
       <RoomBreadcrumb activeView={activeView} onBack={handleZoomOut} />
 
-      <ZoomTransition
+      {/* 3D War Room Canvas — fills entire viewport */}
+      <WarRoom3D
+        agents={agents}
+        pending={pending}
+        recentLogs={recentLogs}
+        onZoomIn={handleZoomIn}
         activeView={activeView}
-        zoomOrigin={zoomOrigin}
-        roomContent={
-          <MissionControlRoom
-            agents={agents}
-            pending={pending}
-            recentLogs={recentLogs}
-            onZoomIn={handleZoomIn}
-          />
-        }
-        detailContent={
-          activeView ? (
-            <div className="max-w-6xl mx-auto">
-              {activeView.startsWith('agent-') ? (
-                <AgentDossier
-                  agentName={activeView.replace('agent-', '')}
-                  agents={agents}
-                />
-              ) : DETAIL_VIEWS[activeView] ? (
-                React.createElement(DETAIL_VIEWS[activeView], { agents, pending, recentLogs })
-              ) : (
-                <div className="text-crm-muted text-center py-20">
-                  View not found: {activeView}
-                </div>
-              )}
-            </div>
-          ) : null
-        }
+        onBack={handleZoomOut}
+      />
+
+      {/* HTML detail panel overlay — on top of 3D canvas */}
+      <DetailOverlay
+        activeView={activeView}
+        detailContent={detailContent}
+        onBack={handleZoomOut}
       />
     </div>
   );

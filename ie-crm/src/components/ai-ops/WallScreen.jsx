@@ -135,14 +135,20 @@ function statusDot(status) {
   return '#f59e0b';
 }
 
-// Left wall upper screen — Pipeline Status
-// Points chosen to sit on the left wall face (60,300 → 450,100 → 450,0 → 60,40)
-const PIPELINE_POINTS = '85,220 240,140 240,88 85,168';
-const COST_POINTS     = '85,268 205,200 205,164 85,232';
+// Left wall: (60,300) bottom → (450,100) top — slope ≈ -27°
+// Two screens per wall, vertically separated with ~15px gap
+// Polygon order: bottom-left, bottom-right, top-right, top-left
+const PIPELINE_POINTS = '140,215 320,123 320,55 140,147';
+const COST_POINTS     = '80,290 220,218 220,162 80,234';
 
-// Right wall upper screen — Agent Status
-const AGENT_POINTS  = '660,140 815,220 815,168 660,88';
-const ALERT_POINTS  = '695,200 815,264 815,232 695,168';
+// Right wall: (840,300) bottom → (450,100) top — slope ≈ +27°
+const AGENT_POINTS  = '580,123 760,215 760,147 580,55';
+const ALERT_POINTS  = '680,218 820,290 820,234 680,162';
+
+// Left wall text: skewY(-27) pivoted at mid-x of screens
+const L_WALL_SKEW = 'translate(200, 0) skewY(-27) translate(-200, 0)';
+// Right wall text: skewY(27) pivoted at mid-x of screens
+const R_WALL_SKEW = 'translate(700, 0) skewY(27) translate(-700, 0)';
 
 export function WallScreens({ agents = [], pending = [], pipeline = null, onZoomIn }) {
   const hasError = agents.some(a => a.status === 'error');
@@ -166,61 +172,22 @@ export function WallScreens({ agents = [], pending = [], pipeline = null, onZoom
         borderColor="#6366f1"
         onClick={onZoomIn ? (e) => onZoomIn('pipeline', e) : undefined}
       >
-        {/* Title */}
-        <text
-          x={130} y={106}
-          fill="#a5b4fc"
-          fontSize={5.5}
-          fontFamily="monospace"
-          fontWeight="bold"
-          opacity={0.9}
-          transform="skewX(18)"
-        >
-          PIPELINE
-        </text>
-        {/* Stage line */}
-        <text
-          x={105} y={120}
-          fill="#c7d2fe"
-          fontSize={5}
-          fontFamily="monospace"
-          opacity={0.8}
-          transform="skewX(18)"
-        >
-          {"Scout > Enrich > Match > Review"}
-        </text>
-        {/* Values */}
-        <text
-          x={108} y={133}
-          fill="#e0e7ff"
-          fontSize={6}
-          fontFamily="monospace"
-          fontWeight="bold"
-          opacity={0.9}
-          transform="skewX(18)"
-        >
-          {pendingTotal} pending approval
-        </text>
-        <text
-          x={108} y={145}
-          fill="#818cf8"
-          fontSize={4.5}
-          fontFamily="monospace"
-          opacity={0.7}
-          transform="skewX(18)"
-        >
-          {pipelineText}
-        </text>
-        {/* Separator line */}
-        <line
-          x1={100} y1={150} x2={225} y2={112}
-          stroke="#6366f1" strokeWidth={0.4} opacity={0.3}
-        />
-        {/* Bar chart hint */}
-        <rect x={108} y={155} width={8}  height={3} rx={0.5} fill="#6366f1" opacity={0.6} transform="skewX(18)" />
-        <rect x={120} y={153} width={12} height={5} rx={0.5} fill="#818cf8" opacity={0.5} transform="skewX(18)" />
-        <rect x={136} y={158} width={5}  height={0} rx={0.5} fill="#a5b4fc" opacity={0.4} transform="skewX(18)" />
-        <rect x={145} y={154} width={14} height={4} rx={0.5} fill="#6366f1" opacity={0.6} transform="skewX(18)" />
+        <g transform={L_WALL_SKEW}>
+          <text x={190} y={100} fill="#a5b4fc" fontSize={8} fontFamily="monospace" fontWeight="bold" opacity={0.9}>
+            PIPELINE
+          </text>
+          <text x={183} y={115} fill="#c7d2fe" fontSize={6} fontFamily="monospace" opacity={0.8}>
+            {"Scout > Enrich > Match > Review"}
+          </text>
+          <text x={176} y={132} fill="#e0e7ff" fontSize={8} fontFamily="monospace" fontWeight="bold" opacity={0.9}>
+            {pendingTotal} pending
+          </text>
+          {/* Bar chart hint */}
+          <rect x={170} y={140} width={12} height={5} rx={0.5} fill="#6366f1" opacity={0.6} />
+          <rect x={186} y={138} width={16} height={7} rx={0.5} fill="#818cf8" opacity={0.5} />
+          <rect x={206} y={140} width={8}  height={5} rx={0.5} fill="#a5b4fc" opacity={0.4} />
+          <rect x={218} y={138} width={18} height={7} rx={0.5} fill="#6366f1" opacity={0.6} />
+        </g>
       </WallScreen>
 
       {/* ---- LEFT WALL: Cost Monitor (lower) ---- */}
@@ -230,37 +197,17 @@ export function WallScreens({ agents = [], pending = [], pipeline = null, onZoom
         borderColor="#10b981"
         onClick={onZoomIn ? (e) => onZoomIn('costs', e) : undefined}
       >
-        <text
-          x={118} y={175}
-          fill="#6ee7b7"
-          fontSize={5}
-          fontFamily="monospace"
-          fontWeight="bold"
-          opacity={0.9}
-          transform="skewX(18)"
-        >
-          COST MONITOR
-        </text>
-        <text
-          x={118} y={187}
-          fill="#d1fae5"
-          fontSize={5.5}
-          fontFamily="monospace"
-          opacity={0.85}
-          transform="skewX(18)"
-        >
-          Daily: $2.41
-        </text>
-        <text
-          x={118} y={197}
-          fill="#a7f3d0"
-          fontSize={5.5}
-          fontFamily="monospace"
-          opacity={0.8}
-          transform="skewX(18)"
-        >
-          Monthly: $47.20
-        </text>
+        <g transform={L_WALL_SKEW}>
+          <text x={118} y={195} fill="#6ee7b7" fontSize={7} fontFamily="monospace" fontWeight="bold" opacity={0.9}>
+            COST MONITOR
+          </text>
+          <text x={113} y={208} fill="#d1fae5" fontSize={6.5} fontFamily="monospace" opacity={0.85}>
+            Daily: $2.41
+          </text>
+          <text x={108} y={220} fill="#a7f3d0" fontSize={6.5} fontFamily="monospace" opacity={0.8}>
+            Monthly: $47.20
+          </text>
+        </g>
       </WallScreen>
 
       {/* ---- RIGHT WALL: Agent Status (upper) ---- */}
@@ -270,53 +217,38 @@ export function WallScreens({ agents = [], pending = [], pipeline = null, onZoom
         borderColor="#3b82f6"
         onClick={onZoomIn ? (e) => onZoomIn('agent-overview', e) : undefined}
       >
-        <text
-          x={668} y={106}
-          fill="#93c5fd"
-          fontSize={5.5}
-          fontFamily="monospace"
-          fontWeight="bold"
-          opacity={0.9}
-          transform="skewX(-18)"
-        >
-          AGENT STATUS
-        </text>
-        {agents.length === 0 ? (
-          <text
-            x={668} y={122}
-            fill="#64748b"
-            fontSize={5}
-            fontFamily="monospace"
-            opacity={0.7}
-            transform="skewX(-18)"
-          >
-            No agents registered
+        <g transform={R_WALL_SKEW}>
+          <text x={670} y={100} fill="#93c5fd" fontSize={8} fontFamily="monospace" fontWeight="bold" opacity={0.9}>
+            AGENT STATUS
           </text>
-        ) : (
-          agents.slice(0, 5).map((agent, i) => (
-            <g key={agent.agent_name}>
-              <circle
-                cx={670}
-                cy={118 + i * 11}
-                r={2.5}
-                fill={statusDot(agent.status)}
-                opacity={0.85}
-                transform="skewX(-18)"
-              />
-              <text
-                x={676}
-                y={121 + i * 11}
-                fill={agentColor(agent.agent_name)}
-                fontSize={5}
-                fontFamily="monospace"
-                opacity={0.85}
-                transform="skewX(-18)"
-              >
-                {`${agent.agent_name} - ${agent.status}`}
-              </text>
-            </g>
-          ))
-        )}
+          {agents.length === 0 ? (
+            <text x={675} y={116} fill="#64748b" fontSize={6} fontFamily="monospace" opacity={0.7}>
+              No agents registered
+            </text>
+          ) : (
+            agents.slice(0, 4).map((agent, i) => (
+              <g key={agent.agent_name}>
+                <circle
+                  cx={673 + i * 1.5}
+                  cy={112 + i * 12}
+                  r={2.5}
+                  fill={statusDot(agent.status)}
+                  opacity={0.85}
+                />
+                <text
+                  x={679 + i * 1.5}
+                  y={116 + i * 12}
+                  fill={agentColor(agent.agent_name)}
+                  fontSize={6}
+                  fontFamily="monospace"
+                  opacity={0.85}
+                >
+                  {`${agent.agent_name} - ${agent.status}`}
+                </text>
+              </g>
+            ))
+          )}
+        </g>
       </WallScreen>
 
       {/* ---- RIGHT WALL: Alert Screen (lower) ---- */}
@@ -327,41 +259,21 @@ export function WallScreens({ agents = [], pending = [], pipeline = null, onZoom
         flashing={hasError}
         onClick={onZoomIn ? (e) => onZoomIn('approval-queue', e) : undefined}
       >
-        <text
-          x={704} y={178}
-          fill={hasError ? '#fca5a5' : '#6ee7b7'}
-          fontSize={5}
-          fontFamily="monospace"
-          fontWeight="bold"
-          opacity={0.9}
-          transform="skewX(-18)"
-        >
-          {hasError ? 'ALERT' : 'ALERTS'}
-        </text>
-        <text
-          x={704} y={190}
-          fill={hasError ? '#fecaca' : '#d1fae5'}
-          fontSize={5.5}
-          fontFamily="monospace"
-          opacity={0.85}
-          transform="skewX(-18)"
-        >
-          {hasError
-            ? `${agents.filter(a => a.status === 'error').length} agent error(s)`
-            : 'All clear'}
-        </text>
-        {pendingTotal > 0 && (
-          <text
-            x={704} y={202}
-            fill="#fbbf24"
-            fontSize={5}
-            fontFamily="monospace"
-            opacity={0.8}
-            transform="skewX(-18)"
-          >
-            {pendingTotal} pending review
+        <g transform={R_WALL_SKEW}>
+          <text x={720} y={195} fill={hasError ? '#fca5a5' : '#6ee7b7'} fontSize={7} fontFamily="monospace" fontWeight="bold" opacity={0.9}>
+            {hasError ? 'ALERT' : 'ALERTS'}
           </text>
-        )}
+          <text x={725} y={208} fill={hasError ? '#fecaca' : '#d1fae5'} fontSize={6.5} fontFamily="monospace" opacity={0.85}>
+            {hasError
+              ? `${agents.filter(a => a.status === 'error').length} agent error(s)`
+              : 'All systems clear'}
+          </text>
+          {pendingTotal > 0 && (
+            <text x={728} y={220} fill="#fbbf24" fontSize={6} fontFamily="monospace" opacity={0.8}>
+              {pendingTotal} pending review
+            </text>
+          )}
+        </g>
       </WallScreen>
     </g>
   );

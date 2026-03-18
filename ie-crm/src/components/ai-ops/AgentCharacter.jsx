@@ -26,7 +26,9 @@ export default function AgentCharacter({
 }) {
   const [hovered, setHovered] = useState(false);
 
-  const isFront = facing.startsWith('front');
+  const isSide = facing.startsWith('side');
+  const isFront = !isSide && facing.startsWith('front');
+  const isBack = !isSide && facing.startsWith('back');
   const isLeft = facing.endsWith('left');
   const flipX = isLeft ? 1 : -1;
   const scale = isHouston ? 1.15 : 1;
@@ -99,17 +101,17 @@ export default function AgentCharacter({
             <>
               <g className={isWalking ? 'agent-leg-left' : ''}>
                 <path
-                  d={`M-3,0 L-4,12`}
+                  d={isWalking ? `M-3,0 L-5,6 L-4,12` : `M-3,0 L-4,12`}
                   stroke={pantColor} strokeWidth={3} fill="none" strokeLinecap="round"
                 />
-                <ellipse cx={-4} cy={12} rx={3} ry={1.5} fill={shoeColor} />
+                <ellipse cx={-4} cy={12} rx={3.5} ry={1.8} fill={shoeColor} />
               </g>
               <g className={isWalking ? 'agent-leg-right' : ''}>
                 <path
-                  d={`M3,0 L4,12`}
+                  d={isWalking ? `M3,0 L5,6 L4,12` : `M3,0 L4,12`}
                   stroke={pantColor} strokeWidth={3} fill="none" strokeLinecap="round"
                 />
-                <ellipse cx={4} cy={12} rx={3} ry={1.5} fill={shoeColor} />
+                <ellipse cx={4} cy={12} rx={3.5} ry={1.8} fill={shoeColor} />
               </g>
             </>
           )}
@@ -220,13 +222,31 @@ export default function AgentCharacter({
         </g>
 
         {/* === HEAD === */}
-        <g transform={`translate(0,-20) scale(${isFront ? 1 : 1},1)`}>
+        <g transform={`translate(0,-20)`}>
           {/* Hair (back, slightly wider) */}
           <ellipse cx={0} cy={-1} rx={8} ry={7} fill={hairColor} />
           {/* Head/face */}
           <ellipse cx={0} cy={1} rx={7} ry={6} fill={skinColor} />
 
-          {isFront ? (
+          {isSide ? (
+            /* Side-facing profile */
+            <>
+              {/* Hair covers back half */}
+              <ellipse cx={2 * flipX} cy={0} rx={6} ry={6.5} fill={hairColor} />
+              {/* One visible eye */}
+              <circle cx={-3 * flipX} cy={0} r={1.1} fill="#1a1a2e" />
+              <circle cx={-2.5 * flipX} cy={-0.5} r={0.3} fill="#fff" />
+              {/* Nose bump */}
+              <ellipse cx={-5.5 * flipX} cy={1.5} rx={1.2} ry={0.8} fill={skinShadow} opacity={0.4} />
+              {/* Mouth */}
+              <path
+                d={`M${-3 * flipX},3 Q${-4.5 * flipX},4 ${-3 * flipX},4.5`}
+                stroke={skinShadow} strokeWidth={0.6} fill="none"
+              />
+              {/* Ear */}
+              <ellipse cx={4 * flipX} cy={1} rx={1.5} ry={2.2} fill={skinShadow} opacity={0.5} />
+            </>
+          ) : isFront ? (
             /* Front-facing details */
             <>
               {/* Eyes */}
@@ -358,36 +378,48 @@ export default function AgentCharacter({
           50% { transform: scaleY(1.02); }
         }
 
-        /* Walking — leg stride */
+        /* Walking — leg stride (contralateral natural gait)
+           Left leg forward = translate up+forward, right leg back
+           Uses translate instead of rotate to avoid bug-like lateral motion */
         .agent--walking .agent-leg-left {
-          animation: agentLegFwd 0.5s ease-in-out infinite alternate;
+          animation: agentLegL 0.9s ease-in-out infinite;
         }
         .agent--walking .agent-leg-right {
-          animation: agentLegBack 0.5s ease-in-out infinite alternate;
+          animation: agentLegR 0.9s ease-in-out infinite;
         }
-        @keyframes agentLegFwd {
-          0% { transform: translateX(-1px); }
-          100% { transform: translateX(1.5px); }
+        @keyframes agentLegL {
+          0%, 100% { transform: translate(-1.5px, -2px); }
+          50%  { transform: translate(1.5px, 0px); }
         }
-        @keyframes agentLegBack {
-          0% { transform: translateX(1.5px); }
-          100% { transform: translateX(-1px); }
+        @keyframes agentLegR {
+          0%, 100% { transform: translate(1.5px, 0px); }
+          50%  { transform: translate(-1.5px, -2px); }
         }
 
-        /* Walking — arm swing */
+        /* Walking — body bob (subtle up-down) */
+        .agent--walking .agent-torso-breathe {
+          animation: agentWalkBob 0.45s ease-in-out infinite;
+        }
+        @keyframes agentWalkBob {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-0.8px); }
+        }
+
+        /* Walking — arm swing (contralateral: left arm syncs with right leg)
+           Opposite arm+leg move together, like human walking */
         .agent--walking .agent-arm-left-swing {
-          animation: agentArmSwingL 0.5s ease-in-out infinite alternate;
+          animation: agentArmSwingL 0.9s ease-in-out infinite;
         }
         .agent--walking .agent-arm-right-swing {
-          animation: agentArmSwingR 0.5s ease-in-out infinite alternate;
+          animation: agentArmSwingR 0.9s ease-in-out infinite;
         }
         @keyframes agentArmSwingL {
-          0% { transform: rotate(-8deg); transform-origin: -8px -6px; }
-          100% { transform: rotate(8deg); transform-origin: -8px -6px; }
+          0%, 100% { transform: translate(1px, 0px); }
+          50%  { transform: translate(-1px, -1.5px); }
         }
         @keyframes agentArmSwingR {
-          0% { transform: rotate(8deg); transform-origin: 8px -6px; }
-          100% { transform: rotate(-8deg); transform-origin: 8px -6px; }
+          0%, 100% { transform: translate(-1px, -1.5px); }
+          50%  { transform: translate(1px, 0px); }
         }
 
         /* Glow ring pulse */

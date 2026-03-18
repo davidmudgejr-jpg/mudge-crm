@@ -14,19 +14,61 @@ const STATES = {
   SITTING_DOWN: 'SITTING_DOWN',
 };
 
-// Points of interest agents can walk to
+// Hardcoded waypoints at radius 6.0 world units from center (0,0,0)
+// Converted to SVG: worldX*390/6+450, -(worldZ*200/4)+300
+// radius 6 → SVG offset = 6*390/6 = 390px from center (450,300)
+// These are provably outside the platform (radius 3.2 → SVG ~208px)
 const POI = [
-  { name: 'sphere', x: 450, y: 280 },
-  { name: 'left-screen', x: 180, y: 220 },
-  { name: 'right-screen', x: 720, y: 220 },
-  { name: 'console', x: 400, y: 330 },
-  { name: 'water-cooler', x: 140, y: 180 },
+  { name: 'wp-north', x: 450, y: 0 },    // (0, 0, 6) → behind platform
+  { name: 'wp-east',  x: 840, y: 300 },   // (6, 0, 0) → right of platform
+  { name: 'wp-south', x: 450, y: 600 },   // (0, 0, -6) → in front of platform
+  { name: 'wp-west',  x: 60,  y: 300 },   // (-6, 0, 0) → left of platform
 ];
+console.log('[AI Ops] Agent waypoints hardcoded at SVG radius ~390px from center. Platform SVG radius ~208px.');
 
-const WALK_SPEED = 80; // pixels per second
+const WALK_SPEED = 12; // pixels per second (slow, deliberate pace — Sims-style)
 const MAX_WALKING = 2;
 const GET_UP_DURATION = 400; // ms
 const SIT_DOWN_DURATION = 400;
+
+// Floor diamond bounds — agents must stay inside this
+// Diamond vertices: top(450,100), right(840,300), bottom(450,500), left(60,300)
+// Inset for safety (don't walk to very edge)
+function isOnFloor(x, y) {
+  // Use diamond equation: |x-cx|/hw + |y-cy|/hh <= 1
+  // Large inset keeps agents well within floor, away from walls and screens
+  const cx = 450, cy = 360, hw = 240, hh = 100;
+  return Math.abs(x - cx) / hw + Math.abs(y - cy) / hh <= 1;
+}
+
+// Dais exclusion — agents must not walk through the raised platform
+// Dais center at SVG (450, 300), radius ~195px in SVG space (3.0 world units)
+// Platform radius 3.2 world = 3.2*390/6 = 208 SVG pixels. Add 2.5 world = 162px buffer.
+const DAIS_CX = 450, DAIS_CY = 300, DAIS_RADIUS = 370; // 208 + 162 = never walk inside
+function isOnDais(x, y) {
+  return Math.sqrt((x - DAIS_CX) ** 2 + (y - DAIS_CY) ** 2) < DAIS_RADIUS;
+}
+
+function clampToFloor(x, y) {
+  let px = x, py = y;
+  if (!isOnFloor(px, py)) {
+    // Push toward center until on floor
+    const cx = 450, cy = 300;
+    for (let t = 0.9; t >= 0; t -= 0.05) {
+      const tx = cx + (px - cx) * t;
+      const ty = cy + (py - cy) * t;
+      if (isOnFloor(tx, ty)) { px = tx; py = ty; break; }
+    }
+  }
+  // Push OUT of dais if inside it
+  if (isOnDais(px, py)) {
+    const dx = px - DAIS_CX, dy = py - DAIS_CY;
+    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+    px = DAIS_CX + (dx / dist) * (DAIS_RADIUS + 10);
+    py = DAIS_CY + (dy / dist) * (DAIS_RADIUS + 10);
+  }
+  return { x: px, y: py };
+}
 
 function randomBetween(min, max) {
   return min + Math.random() * (max - min);
@@ -41,6 +83,15 @@ function lerp(a, b, t) {
 }
 
 function facingFromVector(dx, dy) {
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+
+  // Show side view when horizontal movement exceeds vertical
+  // Lower threshold (1.0) means side profiles appear during lateral movement
+  if (absDx > absDy * 1.0) {
+    return dx < 0 ? 'side-left' : 'side-right';
+  }
+  // Otherwise diagonal/front/back
   if (dx <= 0 && dy >= 0) return 'front-left';
   if (dx > 0 && dy >= 0) return 'front-right';
   if (dx <= 0 && dy < 0) return 'back-left';
@@ -72,7 +123,7 @@ export function createMovementEngine(agentConfigs) {
       walkDistance: 0,
       stateTimer: 0,
       atTargetDuration: 0,
-      nextCheckTimer: randomBetween(3000, 8000),
+      nextCheckTimer: randomBetween(6000, 18000),
     };
   });
 
@@ -128,11 +179,13 @@ export function createMovementEngine(agentConfigs) {
     const dist = distance(agent.position, target);
     if (dist < 20) return; // too close, skip
 
-    agent.targetPosition = { x: target.x, y: target.y };
+    // Clamp target to floor bounds
+    const clamped = clampToFloor(target.x, target.y);
+    agent.targetPosition = { x: clamped.x, y: clamped.y };
     agent.walkOrigin = { ...agent.position };
     agent.walkProgress = 0;
     agent.walkDistance = dist;
-    agent.atTargetDuration = randomBetween(3000, 10000);
+    agent.atTargetDuration = randomBetween(5000, 15000);
 
     if (agent.isDesk) {
       agent.state = STATES.GETTING_UP;
@@ -151,7 +204,7 @@ export function createMovementEngine(agentConfigs) {
       case STATES.SEATED_WORKING:
       case STATES.STANDING_IDLE:
         if (agent.nextCheckTimer <= 0) {
-          agent.nextCheckTimer = randomBetween(4000, 12000);
+          agent.nextCheckTimer = randomBetween(8000, 20000);
           tryStartWalk(agent.config.name);
         }
         break;

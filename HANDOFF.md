@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-17 (comp auto-sync triggers, schema refresh, CoStar rating, cleanup)
-> Previous session: "Built TPE Living Database + Enrichment pages, Custom Saved Views, page header icons (12 unique colors). Then cleaned up 4 stale items: (1) Migration 018 — DB triggers auto-sync lease comp expiration→companies.lease_exp and sale comp sale data→properties.last_sale_date/price. Delete triggers recalculate. (2) Refreshed schema.sql from live Neon DB (46 tables, 100 indexes, 8 triggers — was stale since migrations 001-017). (3) Added CoStar Star Rating to Properties page columns. (4) Updated HANDOFF.md next steps — marked completed items, reordered priorities."
-> Next task: **AI Ops Dashboard page** — agent status cards, approval queue, log viewer, system health. Sandbox tables + 11 API endpoints already deployed. Then Smart Filters (Phase 2A).
+> Updated: 2026-03-18 (AI Ops 3D War Room complete, Houston voice activation next)
+> Previous session: "Complete rebuild of AI Ops Dashboard from flat SVG to full Three.js 3D war room. Polyhaven PBR textures on all surfaces, @react-three/postprocessing Bloom, gyroscopic orbital rings (OrbRings.jsx — LOCKED), 5 roaming AI agents with 3-state machine (walk/pause/look) and platform collision avoidance, 4 wall screens with live data + RectAreaLight glow, tiered stone amphitheater platform with glowing center bowl, cinematic dark lighting (orb as primary light source), FogExp2 atmospheric fog, dust particles. Star Wars Clone Wars briefing room aesthetic."
+> Next task: **Houston Voice Activation** — Click orb triggers GSAP camera swoop to floor level, ElevenLabs voice synthesis ("What do you need, David?"), Web Speech API mic input, Claude API with CRM database RAG context, orb pulses in sync with voice amplitude. Clone architecture from Elowen personal AI assistant.
 
 ---
 
@@ -158,6 +158,16 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **CLAUDE.md rewritten** — removed Electron references, updated for Vercel/Railway/Neon web deployment, added AI Master System section
 - [x] **Memory system built** — 8 files in `.claude/projects/.../memory/`: user_profile, project_architecture, project_status, project_competitive_edge, feedback_coding_style, feedback_communication, reference_external_systems, reference_key_documents
 - [x] **Multiple tenant companies confirmed** — property_companies junction table supports unlimited companies per property (5 properties already have 2+ linked)
+
+### AI Ops 3D War Room ✅ (2026-03-18)
+- [x] **Full Three.js rebuild** — Replaced flat SVG isometric room with real 3D scene using `three`, `@react-three/fiber`, `@react-three/drei`, `gsap`
+- [x] **12 new component files** — WarRoom3D.jsx (canvas shell), WarRoomScene.jsx (room geometry + lighting), OrbCore.jsx (holographic sphere + lights), OrbRings.jsx (LOCKED — 3 gyroscopic rings with precession), Agent3D.jsx (mesh composite characters), DustParticles.jsx (200 floating motes), WallScreen3D.jsx (4 data screens + RectAreaLight), CameraController.jsx, DetailOverlay.jsx, ProceduralTextures.js, useRoomTextures.js, coordMap.js
+- [x] **Polyhaven PBR textures** — 9 texture sets loaded from `/public/textures/`: painted_concrete_02 (floor), granite_tile_04 (platform), painted_plaster_wall (back wall), plastered_wall_03 (left wall), plastered_wall_04 (right wall), grey_tiles (ceiling), metal_plate_02 (platform trim), corrugated_iron_03 (accent panels), rock_tile_floor (alt floor)
+- [x] **@react-three/postprocessing v2.19.1** — Bloom effect (intensity 1.5, luminanceThreshold 0.15, mipmapBlur) on orb, rings, screen edges, platform glow
+- [x] **Agent roaming AI** — 3-state machine (WALKING/PAUSING/LOOKING), platform collision avoidance with waypoint pathfinding, smooth angle interpolation
+- [x] **Cinematic lighting** — Zero ambient, orb as primary light source (PointLight #4488ff intensity 8.0), 4 ceiling SpotLights, HemisphereLight silhouette fill, FogExp2 atmospheric fog
+- [x] **Tiered amphitheater platform** — 3 stepped stone rings (outer tallest, inner lowest) + recessed glowing center bowl, matching Star Wars Rebels war table reference
+- [x] **OrbRings.jsx is LOCKED** — standalone file with 3 rings, each with primary spin + gyroscopic precession, never to be edited
 
 ### TPE Living Database & Enrichment UI ✅ (2026-03-17)
 - [x] **TPE Living Database page** — `/tpe` route with sidebar nav (lightning bolt icon), stat cards for total scored/avg score/tier distribution, sortable property table with TPE columns (score, tier, blended priority), TierBadge component with color-coded A/B/C/D badges
@@ -1333,7 +1343,8 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 18. ~~**Build `property_tpe_scores` SQL VIEW**~~ ✅ DONE — 7 CTEs, all 461 properties scoring, tier labels A-D. TPE Living Database + Enrichment pages built with full UI.
 19. ~~**Build formula computation (deals)**~~ ✅ DONE — `deal_formulas` VIEW with geometric series commission calc
 20. **Build dedicated Lease Comp Import Wizard** — David to provide Excel examples first. Need data fan-out mapping (one row → properties + companies + contacts + lease_comps + junctions).
-21. **Build AI Ops Dashboard page** — "Mission Control" isometric room with zoom-through navigation, 7 detail views, agent characters. Full spec + plan written (see `docs/superpowers/specs/2026-03-17-ai-ops-dashboard-design.md` and `docs/superpowers/plans/2026-03-17-ai-ops-dashboard.md`). **IN PROGRESS**
+21. ~~**Build AI Ops Dashboard page**~~ ✅ DONE — Full Three.js 3D war room rebuilt from SVG. Polyhaven PBR textures, Bloom postprocessing, gyroscopic rings (OrbRings.jsx LOCKED), 5 roaming agents with collision avoidance, 4 data screens with RectAreaLight, tiered amphitheater platform, cinematic lighting, FogExp2 fog, dust particles. 12 new component files created. Dependencies added: three, @react-three/fiber, @react-three/drei, @react-three/postprocessing, gsap.
+21b. **Houston Voice Activation** — Click orb → GSAP camera swoop to floor level → ElevenLabs voice ("What do you need, David?") → Web Speech API mic → Claude API with CRM RAG context → orb pulses with voice amplitude. Clone from Elowen codebase. **NEXT PRIORITY**
 22. **Smart Filters & Saved Lists (Phase 2A)** — filter pills, slide-in filter builder, auto-updating lists
 23. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
 24. **Populate TPE input data** — date_of_birth on contacts, lease_exp on companies, loan_maturities, tenant_growth, property_distress records
@@ -1592,7 +1603,7 @@ Add a trigger or computed column: whenever `property_address` changes, `normaliz
 
 ## Future Considerations (not now)
 
-- **Houston Voice Agent** — ElevenLabs Pro ($100/mo) voice for Houston AI boss. Join Zoom calls as 4th team member (David, dad, Sarah + Houston). Wake word "Hey Houston" via Picovoice Porcupine. Zoom Meeting SDK or Recall.ai audio bridge. Could query dashboard data live ("Hey Houston, what's the pipeline looking like?"). Ties into Elowen personal AI assistant concept.
+- ~~**Houston Voice Agent**~~ → **PROMOTED TO NEXT PRIORITY (Step 21b)** — Click orb → GSAP camera swoop → ElevenLabs voice → Web Speech API mic → Claude API with CRM RAG → orb pulses with amplitude. Clone from Elowen codebase. Zoom integration (wake word, Recall.ai bridge) remains future.
 - Houston AI agent — auto-generate action items from TPE score changes, lease expiry alerts
 - IAR Hot Sheet automation (daily PDF → parse → update comps + property availability)
 - Email automation / webhook capture (auto-log emails as Interactions)
