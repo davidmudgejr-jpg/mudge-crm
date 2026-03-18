@@ -4,6 +4,7 @@ import useAgentHeartbeats from '../hooks/useAgentHeartbeats';
 import RoomBreadcrumb from '../components/ai-ops/RoomBreadcrumb';
 import WarRoom3D from '../components/ai-ops/WarRoom3D';
 import DetailOverlay from '../components/ai-ops/DetailOverlay';
+import HoustonVoice from '../components/ai-ops/HoustonVoice';
 import PipelineDashboard from '../components/ai-ops/detail-views/PipelineDashboard';
 import AgentDossier from '../components/ai-ops/detail-views/AgentDossier';
 import ApprovalQueue from '../components/ai-ops/detail-views/ApprovalQueue';
@@ -24,6 +25,7 @@ const DETAIL_VIEWS = {
 export default function AIOps() {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState(null);
+  const [houstonActive, setHoustonActive] = useState(false);
   const { agents, pending, recentLogs, loading, error, stale } = useAgentHeartbeats();
 
   // Simplified — no more DOM element / getBoundingClientRect needed
@@ -35,14 +37,31 @@ export default function AIOps() {
     setActiveView(null);
   };
 
-  // Escape key handler
+  // Houston orb activation — separate from detail view system
+  const handleHoustonActivate = () => {
+    setActiveView('houston');
+    setHoustonActive(true);
+  };
+
+  const handleHoustonDeactivate = () => {
+    setHoustonActive(false);
+    setActiveView(null);
+  };
+
+  // Escape key handler — Houston mode takes priority
   useEffect(() => {
     const handler = (e) => {
-      if (e.key === 'Escape' && activeView) handleZoomOut();
+      if (e.key === 'Escape') {
+        if (houstonActive) {
+          handleHoustonDeactivate();
+        } else if (activeView) {
+          handleZoomOut();
+        }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [activeView]);
+  }, [activeView, houstonActive]);
 
   // Build detail content
   let detailContent = null;
@@ -89,6 +108,8 @@ export default function AIOps() {
         onZoomIn={handleZoomIn}
         activeView={activeView}
         onBack={handleZoomOut}
+        houstonActive={houstonActive}
+        onHoustonActivate={handleHoustonActivate}
       />
 
       {/* HTML detail panel overlay — on top of 3D canvas */}
@@ -97,6 +118,9 @@ export default function AIOps() {
         detailContent={detailContent}
         onBack={handleZoomOut}
       />
+
+      {/* Houston voice conversation overlay */}
+      <HoustonVoice active={houstonActive} />
     </div>
   );
 }

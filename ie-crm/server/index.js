@@ -1541,6 +1541,141 @@ app.delete('/api/views/:viewId', async (req, res) => {
 });
 
 // ============================================================
+// HOUSTON VOICE — ElevenLabs Conversational AI (Custom LLM)
+// ============================================================
+const { buildPrompt: buildHoustonPrompt } = require('./services/houstonRAG');
+
+// GET /api/houston/signed-url — Get a temporary WebSocket URL from ElevenLabs
+app.get('/api/houston/signed-url', async (req, res) => {
+  try {
+    const agentId = process.env.ELEVENLABS_AGENT_ID;
+    if (!agentId) {
+      return res.status(500).json({ error: 'ElevenLabs agent not configured' });
+    }
+
+    const response = await fetch(
+      `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
+      { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY } }
+    );
+
+    if (!response.ok) {
+      const body = await response.text();
+      console.error('[houston] Signed URL failed:', response.status, body);
+      return res.status(502).json({ error: 'Failed to get signed URL from ElevenLabs' });
+    }
+
+    const data = await response.json();
+    res.json({ url: data.signed_url });
+  } catch (err) {
+    console.error('[houston] Signed URL error:', err.message);
+    res.status(500).json({ error: 'Failed to generate signed URL' });
+  }
+});
+
+// POST /api/houston/completions — OpenAI-compatible endpoint that ElevenLabs calls
+// ElevenLabs sends the full conversation in OpenAI format. We replace the system
+// prompt with Houston's RAG-enhanced prompt, call Claude, and stream back in
+// OpenAI SSE format. This is the "Custom LLM" integration.
+app.post('/api/houston/completions', async (req, res) => {
+  try {
+    const { messages } = req.body;
+
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return res.status(400).json({ error: 'Messages array is required' });
+    }
+    if (!anthropic) {
+      return res.status(503).json({ error: 'Claude not configured' });
+    }
+
+    // Extract latest user message for logging
+    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
+    const message = typeof lastUserMsg?.content === 'string'
+      ? lastUserMsg.content
+      : lastUserMsg?.content?.map(c => c.text || '').join('') || '';
+
+    console.log('[houston] ConvAI completions:', message.slice(0, 80));
+
+    // Build RAG system prompt with live CRM data
+    const systemPrompt = await buildHoustonPrompt(pool);
+
+    // Strip ElevenLabs' system message, keep user/assistant turns
+    const conversationMessages = messages
+      .filter(m => m.role !== 'system')
+      .map(m => ({
+        role: m.role,
+        content: typeof m.content === 'string'
+          ? m.content
+          : m.content?.map(c => c.text || '').join('') || '',
+      }));
+
+    // Stream Claude response in OpenAI SSE format
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const chunkId = `chatcmpl-${Date.now()}`;
+    const created = Math.floor(Date.now() / 1000);
+    let isFirstChunk = true;
+
+    const stream = await anthropic.messages.stream({
+      model: 'claude-sonnet-4-20250514',
+      system: systemPrompt,
+      messages: conversationMessages,
+      max_tokens: 300,
+    });
+
+    let fullResponse = '';
+
+    for await (const event of stream) {
+      if (event.type === 'content_block_delta' && event.delta?.text) {
+        const text = event.delta.text;
+        fullResponse += text;
+
+        const delta = isFirstChunk
+          ? { role: 'assistant', content: text }
+          : { content: text };
+        isFirstChunk = false;
+
+        res.write(`data: ${JSON.stringify({
+          id: chunkId,
+          object: 'chat.completion.chunk',
+          created,
+          model: 'claude-sonnet-4-20250514',
+          choices: [{ index: 0, delta, finish_reason: null }],
+        })}\n\n`);
+      }
+    }
+
+    // Send stop chunk
+    res.write(`data: ${JSON.stringify({
+      id: chunkId,
+      object: 'chat.completion.chunk',
+      created,
+      model: 'claude-sonnet-4-20250514',
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    })}\n\n`);
+    res.write('data: [DONE]\n\n');
+    res.end();
+
+    console.log('[houston] Response complete:', fullResponse.slice(0, 80));
+
+  } catch (err) {
+    console.error('[houston] Completions error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Chat completion failed' });
+    } else {
+      res.write(`data: ${JSON.stringify({
+        id: `chatcmpl-err-${Date.now()}`,
+        object: 'chat.completion.chunk',
+        choices: [{ delta: { content: '' }, index: 0, finish_reason: 'error' }],
+      })}\n\n`);
+      res.write('data: [DONE]\n\n');
+      res.end();
+    }
+  }
+});
+
+// ============================================================
 // SERVE STATIC FRONTEND (production)
 // ============================================================
 const distPath = path.join(__dirname, '..', 'dist');

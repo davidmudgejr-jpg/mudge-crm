@@ -64,6 +64,13 @@ const CAMERA_TARGETS = {
     lookAt: [0, 1, 0],
     fov: 58,
   },
+
+  // Houston activation — floor level, looking up at the orb
+  houston: {
+    pos: [0, 1.7, 4],
+    lookAt: [0, 2.4, 0],
+    fov: 72,
+  },
 };
 
 // Agent dossier: orbit to their position
@@ -130,7 +137,7 @@ export default function CameraController({ activeView, onTransitionComplete, age
     }
 
     animating.current = true;
-    const duration = activeView === null ? 0.9 : 1.1;
+    const duration = activeView === null ? 0.9 : activeView === 'houston' ? 2.5 : 1.1;
 
     const tl = gsap.timeline({
       onComplete: () => {

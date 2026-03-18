@@ -296,6 +296,8 @@ export default function WarRoom3D({
   activeView,
   onBack,
   onCameraReady,
+  houstonActive = false,
+  onHoustonActivate,
 }) {
   const handleTransitionComplete = useCallback(() => {
     onCameraReady?.();
@@ -313,7 +315,7 @@ export default function WarRoom3D({
       <Suspense fallback={null}>
         <CameraController activeView={activeView} onTransitionComplete={handleTransitionComplete} />
         <WarRoomScene onZoomIn={onZoomIn} />
-        <OrbCore onClick={() => onZoomIn?.('territory')} />
+        <OrbCore onClick={() => onHoustonActivate?.()} houstonActive={houstonActive} />
         <DustParticles />
         <WallScreenLayout agents={agents} pending={pending} onZoomIn={onZoomIn} />
         {/* Desks removed — clean briefing room */}
