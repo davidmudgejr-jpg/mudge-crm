@@ -27,6 +27,13 @@ const OPERATORS_BY_TYPE = {
     { value: 'between', label: 'between' },
     { value: 'is_empty', label: 'is empty' },
     { value: 'is_not_empty', label: 'is not empty' },
+    { value: 'in_next_n_days', label: 'in the next N days' },
+    { value: 'in_last_n_days', label: 'in the last N days' },
+    { value: 'this_week', label: 'this week' },
+    { value: 'this_month', label: 'this month' },
+    { value: 'this_quarter', label: 'this quarter' },
+    { value: 'this_year', label: 'this year' },
+    { value: 'is_overdue', label: 'is overdue' },
   ],
   select: [
     { value: 'equals', label: 'equals' },
@@ -39,7 +46,8 @@ function ConditionRow({ condition, index, columnDefs, onChange, onRemove }) {
   const col = columnDefs.find(c => c.key === condition.column);
   const colType = col?.type || 'text';
   const operators = OPERATORS_BY_TYPE[colType] || OPERATORS_BY_TYPE.text;
-  const needsNoValue = ['is_empty', 'is_not_empty'].includes(condition.operator);
+  const needsNoValue = ['is_empty', 'is_not_empty', 'this_week', 'this_month', 'this_quarter', 'this_year', 'is_overdue'].includes(condition.operator);
+  const needsDaysInput = ['in_next_n_days', 'in_last_n_days'].includes(condition.operator);
   const isBetween = condition.operator === 'between';
 
   return (
@@ -48,7 +56,7 @@ function ConditionRow({ condition, index, columnDefs, onChange, onRemove }) {
       <select
         value={condition.column || ''}
         onChange={(e) => onChange(index, { ...condition, column: e.target.value, operator: 'equals', value: '' })}
-        className="bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs w-[140px]"
+        className="[color-scheme:dark] bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs w-[140px]"
       >
         <option value="">Select column...</option>
         {columnDefs.map(c => (
@@ -60,7 +68,7 @@ function ConditionRow({ condition, index, columnDefs, onChange, onRemove }) {
       <select
         value={condition.operator || 'equals'}
         onChange={(e) => onChange(index, { ...condition, operator: e.target.value, value: e.target.value === 'between' ? ['', ''] : '' })}
-        className="bg-crm-hover/60 border border-crm-border text-crm-accent px-2.5 py-1.5 rounded-md text-xs w-[100px]"
+        className="[color-scheme:dark] bg-crm-hover/60 border border-crm-border text-crm-accent px-2.5 py-1.5 rounded-md text-xs w-[100px]"
       >
         {operators.map(op => (
           <option key={op.value} value={op.value}>{op.label}</option>
@@ -79,7 +87,7 @@ function ConditionRow({ condition, index, columnDefs, onChange, onRemove }) {
                 v[0] = colType === 'number' ? Number(e.target.value) : e.target.value;
                 onChange(index, { ...condition, value: v });
               }}
-              className="bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs w-20"
+              className="[color-scheme:dark] bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs w-20"
             />
             <span className="text-[11px] text-crm-muted/60">and</span>
             <input
@@ -90,14 +98,14 @@ function ConditionRow({ condition, index, columnDefs, onChange, onRemove }) {
                 v[1] = colType === 'number' ? Number(e.target.value) : e.target.value;
                 onChange(index, { ...condition, value: v });
               }}
-              className="bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs w-20"
+              className="[color-scheme:dark] bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs w-20"
             />
           </div>
         ) : col?.filterOptions ? (
           <select
             value={condition.value || ''}
             onChange={(e) => onChange(index, { ...condition, value: e.target.value })}
-            className="bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs flex-1"
+            className="[color-scheme:dark] bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs flex-1"
           >
             <option value="">Select...</option>
             {col.filterOptions.map(opt => (
@@ -113,9 +121,22 @@ function ConditionRow({ condition, index, columnDefs, onChange, onRemove }) {
               value: colType === 'number' ? Number(e.target.value) : e.target.value,
             })}
             placeholder="Value..."
-            className="bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs flex-1"
+            className="[color-scheme:dark] bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs flex-1"
           />
         )
+      )}
+
+      {needsDaysInput && (
+        <div className="flex items-center gap-1.5 flex-1">
+          <input
+            type="number"
+            min="1"
+            value={condition.value || 30}
+            onChange={(e) => onChange(index, { ...condition, value: parseInt(e.target.value) || 30 })}
+            className="[color-scheme:dark] bg-crm-hover/60 border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs w-20"
+          />
+          <span className="text-[11px] text-crm-muted/60">days</span>
+        </div>
       )}
 
       {/* Remove button */}
