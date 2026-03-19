@@ -5,6 +5,7 @@ import RoomBreadcrumb from '../components/ai-ops/RoomBreadcrumb';
 import WarRoom3D from '../components/ai-ops/WarRoom3D';
 import DetailOverlay from '../components/ai-ops/DetailOverlay';
 import HoustonVoice from '../components/ai-ops/HoustonVoice';
+import LiveTicker from '../components/ai-ops/LiveTicker';
 import PipelineDashboard from '../components/ai-ops/detail-views/PipelineDashboard';
 import AgentDossier from '../components/ai-ops/detail-views/AgentDossier';
 import ApprovalQueue from '../components/ai-ops/detail-views/ApprovalQueue';
@@ -123,6 +124,9 @@ export default function AIOps() {
 
       {/* Houston voice conversation overlay */}
       <HoustonVoice active={houstonActive} />
+
+      {/* Live feed ticker — bottom of screen */}
+      <LiveTicker logs={recentLogs} visible={!activeView && !houstonActive} />
     </div>
   );
 }
