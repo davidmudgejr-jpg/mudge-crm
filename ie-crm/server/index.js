@@ -1645,6 +1645,43 @@ app.delete('/api/views/:viewId', async (req, res) => {
 // ============================================================
 const { buildPrompt: buildHoustonPrompt } = require('./services/houstonRAG');
 
+// GET /api/houston/context — Pre-flight context for Houston dynamic variables
+app.get('/api/houston/context', async (req, res) => {
+  try {
+    const userId = req.user?.user_id;
+
+    // Parallel queries for speed
+    const [dealsRes, tasksRes, userRes] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*) AS count FROM deals WHERE status NOT IN ('Closed Won', 'Closed Lost', 'Dead')`
+      ),
+      pool.query(
+        `SELECT COUNT(*) AS count FROM action_items WHERE completed = false AND (due_date IS NULL OR due_date <= CURRENT_DATE + INTERVAL '1 day')`
+      ),
+      userId
+        ? pool.query('SELECT last_login FROM users WHERE user_id = $1', [userId])
+        : Promise.resolve({ rows: [] }),
+    ]);
+
+    // Time of day (Pacific)
+    const pt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+    const hour = pt.getHours();
+    const timeOfDay = hour >= 5 && hour < 12 ? 'morning'
+      : hour >= 12 && hour < 17 ? 'afternoon'
+      : hour >= 17 && hour < 21 ? 'evening' : 'night';
+
+    res.json({
+      active_deal_count: parseInt(dealsRes.rows[0]?.count || '0'),
+      pending_tasks: parseInt(tasksRes.rows[0]?.count || '0'),
+      time_of_day: timeOfDay,
+      last_login: userRes.rows[0]?.last_login || null,
+    });
+  } catch (err) {
+    console.error('[houston] Context error:', err.message);
+    res.json({ active_deal_count: 0, pending_tasks: 0, time_of_day: 'unknown', last_login: null });
+  }
+});
+
 // GET /api/houston/signed-url — Get a temporary WebSocket URL from ElevenLabs
 app.get('/api/houston/signed-url', async (req, res) => {
   try {

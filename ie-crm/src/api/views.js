@@ -4,9 +4,14 @@
 const API_BASE = ''; // relative URLs — same origin
 
 async function apiFetch(path, options = {}) {
+  const token = localStorage.getItem('crm-auth-token');
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
