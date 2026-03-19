@@ -96,8 +96,11 @@ export default function useHoustonVoice({ currentUser } = {}) {
     setError(null);
 
     try {
-      // 1. Get signed WebSocket URL from our server
-      const res = await fetch(`${API_BASE}/api/houston/signed-url`);
+      // 1. Get signed WebSocket URL from our server (with auth token)
+      const token = localStorage.getItem('crm-auth-token');
+      const res = await fetch(`${API_BASE}/api/houston/signed-url`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error('Failed to get signed URL');
       const { url: signedUrl } = await res.json();
 
