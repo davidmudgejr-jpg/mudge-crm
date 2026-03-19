@@ -1572,11 +1572,8 @@ app.get('/api/houston/signed-url', async (req, res) => {
   }
 });
 
-// POST /api/houston/completions — OpenAI-compatible endpoint that ElevenLabs calls
-// ElevenLabs sends the full conversation in OpenAI format. We replace the system
-// prompt with Houston's RAG-enhanced prompt, call Claude, and stream back in
-// OpenAI SSE format. This is the "Custom LLM" integration.
-app.post('/api/houston/completions', async (req, res) => {
+// Houston completions handler — shared between both route aliases
+async function houstonCompletions(req, res) {
   try {
     const { messages } = req.body;
 
@@ -1673,7 +1670,14 @@ app.post('/api/houston/completions', async (req, res) => {
       res.end();
     }
   }
-});
+}
+
+// POST /api/houston/completions — direct route
+app.post('/api/houston/completions', houstonCompletions);
+
+// POST /v1/chat/completions — OpenAI-compatible alias that ElevenLabs calls
+// ElevenLabs appends /chat/completions to the Server URL automatically
+app.post('/v1/chat/completions', houstonCompletions);
 
 // ============================================================
 // SERVE STATIC FRONTEND (production)
