@@ -151,9 +151,18 @@ export default function useHoustonVoice() {
         activeRef.current = true;
         setState('listening');
 
-        // Send init data — no auth needed for Houston (public CRM tool)
+        // Send init data with output format override
+        // ElevenLabs defaults to PCM 16kHz but our AudioContext runs at 44.1kHz
+        // Without this override, audio plays at 2.75x speed (chipmunk effect)
         ws.send(JSON.stringify({
           type: 'conversation_initiation_client_data',
+          conversation_config_override: {
+            agent: {
+              tts: {
+                output_format: 'pcm_44100',
+              },
+            },
+          },
           custom_llm_extra_body: {},
         }));
 
