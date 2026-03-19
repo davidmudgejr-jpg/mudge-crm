@@ -7,6 +7,23 @@ import { listViews, createView, updateView, deleteView } from '../api/views';
 
 const LS_PREFIX = 'views_';
 
+const SEED_VIEWS = {
+  deals: [
+    { view_name: 'Active Pipeline', filters: [{ column: 'status', operator: 'equals', value: 'Active' }], filter_logic: 'AND' },
+    { view_name: 'Priority Deals', filters: [{ column: 'priority_deal', operator: 'equals', value: 'Yes' }], filter_logic: 'AND' },
+    { view_name: 'Closing This Month', filters: [{ column: 'close_date', operator: 'this_month', value: null }], filter_logic: 'AND' },
+  ],
+  properties: [
+    { view_name: 'Expiring Leases (90 days)', filters: [{ column: 'lease_exp', operator: 'in_next_n_days', value: 90 }], filter_logic: 'AND' },
+  ],
+  contacts: [],
+  companies: [
+    { view_name: 'Lease Expiring Soon', filters: [{ column: 'lease_exp', operator: 'in_next_n_days', value: 90 }], filter_logic: 'AND' },
+  ],
+  interactions: [],
+  campaigns: [],
+};
+
 function readCache(entityType) {
   try {
     const raw = localStorage.getItem(`${LS_PREFIX}${entityType}`);
@@ -98,6 +115,36 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
         if (cancelled) return;
         setViews(serverViews);
         writeCache(entityType, serverViews);
+
+        // Seed default views if none exist yet
+        const seededKey = `${LS_PREFIX}${entityType}_seeded`;
+        if (serverViews.length === 0 && !localStorage.getItem(seededKey)) {
+          const seeds = SEED_VIEWS[entityType] || [];
+          if (seeds.length > 0) {
+            try {
+              const created = [];
+              for (let i = 0; i < seeds.length; i++) {
+                const view = await createView({
+                  entity_type: entityType,
+                  view_name: seeds[i].view_name,
+                  filters: seeds[i].filters,
+                  filter_logic: seeds[i].filter_logic,
+                  sort_column: null,
+                  sort_direction: 'DESC',
+                  visible_columns: null,
+                  position: i,
+                });
+                created.push(view);
+              }
+              if (cancelled) return;
+              setViews(created);
+              writeCache(entityType, created);
+            } catch (err) {
+              console.error(`[useViewEngine] Failed to seed views for ${entityType}:`, err);
+            }
+          }
+          localStorage.setItem(seededKey, 'true');
+        }
 
         // Auto-apply default view if no active selection
         if (!loadedRef.current) {
