@@ -67,6 +67,86 @@ app.get('/robots.txt', (req, res) => {
 });
 
 // ============================================================
+// AUTHENTICATION
+// ============================================================
+const bcrypt = require('bcryptjs');
+const { requireAuth, optionalAuth, signToken } = require('./middleware/auth');
+
+// POST /api/auth/login — email + password → JWT
+app.post('/api/auth/login', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+    const result = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+    const user = result.rows[0];
+    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // Update last_login
+    await pool.query('UPDATE users SET last_login = now() WHERE user_id = $1', [user.user_id]);
+
+    const token = signToken(user);
+    res.json({
+      token,
+      user: {
+        user_id: user.user_id,
+        email: user.email,
+        display_name: user.display_name,
+        role: user.role,
+        avatar_color: user.avatar_color,
+      },
+    });
+  } catch (err) {
+    console.error('[auth/login] Error:', err.message);
+    res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+// GET /api/auth/me — validate token, return user profile
+app.get('/api/auth/me', requireAuth, async (req, res) => {
+  if (!pool) return res.json(req.user);
+  try {
+    const result = await pool.query(
+      'SELECT user_id, email, display_name, role, avatar_color FROM users WHERE user_id = $1',
+      [req.user.user_id]
+    );
+    res.json(result.rows[0] || req.user);
+  } catch {
+    res.json(req.user);
+  }
+});
+
+// POST /api/auth/change-password
+app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords required' });
+
+    const result = await pool.query('SELECT password_hash FROM users WHERE user_id = $1', [req.user.user_id]);
+    const user = result.rows[0];
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const valid = await bcrypt.compare(currentPassword, user.password_hash);
+    if (!valid) return res.status(401).json({ error: 'Current password incorrect' });
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE users SET password_hash = $1 WHERE user_id = $2', [hash, req.user.user_id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[auth/change-password] Error:', err.message);
+    res.status(500).json({ error: 'Password change failed' });
+  }
+});
+
+// Protect all API routes below this line (except Houston completions which use optionalAuth)
+app.use('/api', requireAuth);
+
+// ============================================================
 // DATABASE ROUTES
 // ============================================================
 app.post('/api/db/query', async (req, res) => {
@@ -1610,10 +1690,12 @@ async function houstonCompletions(req, res) {
       ? lastUserMsg.content
       : lastUserMsg?.content?.map(c => c.text || '').join('') || '';
 
-    console.log('[houston] ConvAI completions:', message.slice(0, 80));
+    // Extract user identity from ElevenLabs custom_llm_extra_body
+    const userName = req.body.user_name || req.body.custom_llm_extra_body?.user_name || null;
+    console.log('[houston] ConvAI completions from', userName || 'unknown', ':', message.slice(0, 80));
 
-    // Build RAG system prompt with live CRM data
-    const systemPrompt = await buildHoustonPrompt(pool);
+    // Build RAG system prompt with live CRM data + user personalization
+    const systemPrompt = await buildHoustonPrompt(pool, userName);
 
     // Strip ElevenLabs' system message, keep user/assistant turns
     const conversationMessages = messages

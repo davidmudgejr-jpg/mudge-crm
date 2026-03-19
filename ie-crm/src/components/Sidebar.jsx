@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useDevMode } from './shared/DevModeContext';
+import { useAuth } from '../contexts/AuthContext';
 import mcIcon from '../assets/mc-icon.png';
 
 const NAV_ITEMS = [
@@ -23,6 +24,8 @@ export default function Sidebar({ onTableChange }) {
   const navigate = useNavigate();
   const location = useLocation();
   const { devMode, toggleDevMode } = useDevMode();
+  const { user, logout } = useAuth();
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   // Track whether the OS is in dark mode
   const [isDark, setIsDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -71,6 +74,34 @@ export default function Sidebar({ onTableChange }) {
           );
         })}
       </nav>
+
+      {/* User avatar + sign out */}
+      {user && (
+        <div className="relative mb-2">
+          <button
+            onClick={() => setShowUserMenu(prev => !prev)}
+            className="no-drag w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold text-white transition-colors hover:ring-1 hover:ring-white/20"
+            style={{ background: user.avatar_color || '#3b82f6' }}
+            title={user.display_name}
+          >
+            {(user.display_name || '?').split(' ').map(n => n[0]).join('').slice(0, 2)}
+          </button>
+          {showUserMenu && (
+            <div className="absolute left-12 bottom-0 bg-crm-card border border-crm-border rounded-lg shadow-xl py-1 w-44 z-50">
+              <div className="px-3 py-2 border-b border-crm-border">
+                <p className="text-crm-text text-sm font-medium">{user.display_name}</p>
+                <p className="text-crm-muted text-xs truncate">{user.email}</p>
+              </div>
+              <button
+                onClick={() => { setShowUserMenu(false); logout(); }}
+                className="w-full text-left px-3 py-2 text-sm text-red-400 hover:bg-red-500/10 transition-colors"
+              >
+                Sign Out
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Dev Mode toggle — only visible in dark mode */}
       {isDark && (

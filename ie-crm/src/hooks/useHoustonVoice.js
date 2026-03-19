@@ -18,7 +18,7 @@ function stripCues(text) {
   return text.replace(DELIVERY_CUE_RE, '');
 }
 
-export default function useHoustonVoice() {
+export default function useHoustonVoice({ currentUser } = {}) {
   const [state, setState] = useState('idle'); // idle | connecting | listening | processing | speaking
   const [houstonText, setHoustonText] = useState('');
   const [userText, setUserText] = useState('');
@@ -152,11 +152,13 @@ export default function useHoustonVoice() {
         activeRef.current = true;
         setState('listening');
 
-        // Send init data — no output format override needed
-        // ElevenLabs ConvAI sends PCM at 16kHz, AudioContext matches at 16kHz
+        // Send init data with user identity for Houston personalization
         ws.send(JSON.stringify({
           type: 'conversation_initiation_client_data',
-          custom_llm_extra_body: {},
+          custom_llm_extra_body: {
+            user_name: currentUser?.display_name || null,
+            user_id: currentUser?.user_id || null,
+          },
         }));
 
         // Forward mic PCM as base64 JSON

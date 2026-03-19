@@ -138,12 +138,33 @@ async function buildContext(pool) {
   return sections.join('\n\n');
 }
 
-// Build complete system prompt
-async function buildPrompt(pool) {
+// Fetch per-user Houston memories
+async function getUserMemories(pool, userName) {
+  if (!pool || !userName) return '';
+  try {
+    const result = await pool.query(
+      `SELECT hm.category, hm.content FROM houston_memories hm
+       JOIN users u ON u.user_id = hm.user_id
+       WHERE u.display_name = $1
+       ORDER BY hm.updated_at DESC LIMIT 20`,
+      [userName]
+    );
+    if (result.rows.length === 0) return '';
+    return result.rows.map(r => `[${r.category}] ${r.content}`).join('\n');
+  } catch {
+    return '';
+  }
+}
+
+// Build complete system prompt — personalized per user
+async function buildPrompt(pool, userName) {
   const context = await buildContext(pool);
   const timeContext = getTimeContext();
+  const memories = await getUserMemories(pool, userName);
 
   const parts = [HOUSTON_IDENTITY];
+  if (userName) parts.push(`SPEAKING TO: ${userName}. Address them by name occasionally.`);
+  if (memories) parts.push(`MEMORY (things ${userName} has told you or you remember about them):\n${memories}`);
   if (context) parts.push(`CURRENT CRM INTELLIGENCE:\n${context}`);
   if (timeContext) parts.push(timeContext);
 
