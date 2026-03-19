@@ -306,6 +306,12 @@ export default function Properties({ onCountChange }) {
     }
   }, [addToast]);
 
+  const handleColumnFilter = useCallback((columnKey, conditions) => {
+    const otherFilters = view.filters.filter(f => f.column !== columnKey);
+    const merged = [...otherFilters, ...conditions];
+    view.updateFilters(merged, view.filterLogic);
+  }, [view]);
+
   const rowClassName = (row) => PRIORITY_BORDERS[row.priority] || '';
 
   return (
@@ -468,6 +474,8 @@ export default function Properties({ onCountChange }) {
           onSelectOnly={selectOnly}
           onShiftSelect={shiftSelect}
           onDeleteRow={deleteRow}
+          filters={view.filters}
+          onColumnFilter={handleColumnFilter}
         />
         )}
       </div>

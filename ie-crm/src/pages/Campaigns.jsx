@@ -370,6 +370,12 @@ export default function Campaigns({ onCountChange }) {
     }
   }, [selected, fetchData, addToast]);
 
+  const handleColumnFilter = useCallback((columnKey, conditions) => {
+    const otherFilters = view.filters.filter(f => f.column !== columnKey);
+    const merged = [...otherFilters, ...conditions];
+    view.updateFilters(merged, view.filterLogic);
+  }, [view]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -528,6 +534,8 @@ export default function Campaigns({ onCountChange }) {
             onSelectOnly={selectOnly}
             onShiftSelect={shiftSelect}
             onDeleteRow={deleteRow}
+            filters={view.filters}
+            onColumnFilter={handleColumnFilter}
           />
         )}
       </div>

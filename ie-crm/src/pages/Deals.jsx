@@ -256,6 +256,12 @@ export default function Deals({ onCountChange }) {
     }
   }, [addToast]);
 
+  const handleColumnFilter = useCallback((columnKey, conditions) => {
+    const otherFilters = view.filters.filter(f => f.column !== columnKey);
+    const merged = [...otherFilters, ...conditions];
+    view.updateFilters(merged, view.filterLogic);
+  }, [view]);
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-shrink-0 px-6 py-4 border-b border-crm-border">
@@ -390,6 +396,8 @@ export default function Deals({ onCountChange }) {
             onSelectOnly={selectOnly}
             onShiftSelect={shiftSelect}
             onDeleteRow={deleteRow}
+            filters={view.filters}
+            onColumnFilter={handleColumnFilter}
           />
         )}
       </div>
