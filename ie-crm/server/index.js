@@ -1311,11 +1311,11 @@ app.get('/api/ai/tpe-gaps/stats', async (req, res) => {
 // AI OPS DASHBOARD ROUTES
 // ============================================================
 
-// Dashboard summary: agent statuses + pending counts
+// Dashboard summary: agent statuses + pending counts + pipeline + costs
 app.get('/api/ai/dashboard/summary', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not configured' });
   try {
-    const [heartbeats, pending, logRecent] = await Promise.all([
+    const [heartbeats, pending, logRecent, pipeline, costs] = await Promise.all([
       pool.query('SELECT agent_name, tier, status, current_task, items_processed_today, items_in_queue, last_error, metadata, updated_at FROM agent_heartbeats ORDER BY tier, agent_name'),
       pool.query(`
         SELECT 'contacts' as table_name, COUNT(*) as count FROM sandbox_contacts WHERE status = 'pending'
@@ -1323,12 +1323,32 @@ app.get('/api/ai/dashboard/summary', async (req, res) => {
         UNION ALL SELECT 'signals', COUNT(*) FROM sandbox_signals WHERE status = 'pending'
         UNION ALL SELECT 'outreach', COUNT(*) FROM sandbox_outreach WHERE status = 'pending'
       `),
-      pool.query("SELECT agent_name, log_type, content, created_at FROM agent_logs ORDER BY created_at DESC LIMIT 20")
+      pool.query("SELECT agent_name, log_type, content, created_at FROM agent_logs ORDER BY created_at DESC LIMIT 20"),
+      // Pipeline stage counts
+      pool.query(`
+        SELECT
+          (SELECT COUNT(*) FROM sandbox_signals WHERE status = 'pending') as scout_queue,
+          (SELECT COUNT(*) FROM sandbox_enrichments WHERE status = 'pending') as enricher_queue,
+          (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'pending') as matcher_queue,
+          (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'approved') as approved,
+          (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'rejected') as rejected
+      `).catch(() => ({ rows: [{}] })),
+      // Cost totals (today + this month)
+      pool.query(`
+        SELECT
+          COALESCE(SUM(cost_usd) FILTER (WHERE created_at >= CURRENT_DATE), 0) as cost_today,
+          COALESCE(SUM(cost_usd) FILTER (WHERE created_at >= DATE_TRUNC('month', CURRENT_DATE)), 0) as cost_month,
+          COALESCE(SUM(tokens_used) FILTER (WHERE created_at >= CURRENT_DATE), 0) as tokens_today,
+          COUNT(*) FILTER (WHERE created_at >= CURRENT_DATE) as calls_today
+        FROM ai_usage_tracking
+      `).catch(() => ({ rows: [{}] })),
     ]);
     res.json({
       agents: heartbeats.rows,
       pending: pending.rows,
-      recentLogs: logRecent.rows
+      recentLogs: logRecent.rows,
+      pipeline: pipeline.rows[0] || {},
+      costs: costs.rows[0] || {},
     });
   } catch (err) {
     console.error('[ai/dashboard/summary] Error:', err.message);
