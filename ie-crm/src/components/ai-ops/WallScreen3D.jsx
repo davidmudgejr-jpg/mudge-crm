@@ -151,13 +151,26 @@ export default function WallScreen3D({
 // Blue screens cast #2244ff, green screens cast #004400
 // ---------------------------------------------------------------------------
 
-export function WallScreenLayout({ agents = [], pending = [], onZoomIn }) {
+export function WallScreenLayout({ agents = [], pending = [], pipeline = {}, costs = {}, onZoomIn }) {
   const pendingTotal = Array.isArray(pending)
     ? pending.reduce((sum, p) => sum + (parseInt(p.count) || 0), 0)
     : parseInt(pending) || 0;
 
   const errorAgents = agents.filter((a) => a.status === 'error');
   const hasErrors = errorAgents.length > 0;
+
+  // Pipeline stage counts from live DB
+  const scoutQ = parseInt(pipeline.scout_queue) || 0;
+  const enrichQ = parseInt(pipeline.enricher_queue) || 0;
+  const matchQ = parseInt(pipeline.matcher_queue) || 0;
+  const approved = parseInt(pipeline.approved) || 0;
+  const rejected = parseInt(pipeline.rejected) || 0;
+
+  // Cost data from live DB
+  const costToday = parseFloat(costs.cost_today) || 0;
+  const costMonth = parseFloat(costs.cost_month) || 0;
+  const tokensToday = parseInt(costs.tokens_today) || 0;
+  const callsToday = parseInt(costs.calls_today) || 0;
 
   return (
     <group>
@@ -171,8 +184,9 @@ export function WallScreenLayout({ agents = [], pending = [], onZoomIn }) {
         borderColor="#6366f1"
         glowColor="#2244ff"
         dataLines={[
-          'Scout > Enrich > Match > Review',
-          `${pendingTotal} pending`,
+          `Scout: ${scoutQ}  Enrich: ${enrichQ}  Match: ${matchQ}`,
+          `${pendingTotal} pending review`,
+          `${approved} approved  ${rejected} rejected`,
         ]}
         onClick={() => onZoomIn?.('pipeline')}
       />
@@ -190,7 +204,8 @@ export function WallScreenLayout({ agents = [], pending = [], onZoomIn }) {
           agents.slice(0, 5).map((a) => {
             const name = (a.agent_name || a.name || '').toLowerCase();
             const status = a.status || 'idle';
-            return `${name} - ${status}`;
+            const task = a.current_task ? ` — ${a.current_task}` : '';
+            return `${name} - ${status}${task}`;
           })
         }
         onClick={() => onZoomIn?.('agent-overview')}
@@ -206,8 +221,9 @@ export function WallScreenLayout({ agents = [], pending = [], onZoomIn }) {
         borderColor="#10b981"
         glowColor="#004400"
         dataLines={[
-          'Daily: $2.41',
-          'Monthly: $47.20',
+          `Today: $${costToday.toFixed(2)}`,
+          `Month: $${costMonth.toFixed(2)}`,
+          `${callsToday} calls  ${(tokensToday / 1000).toFixed(1)}k tokens`,
         ]}
         onClick={() => onZoomIn?.('costs')}
       />

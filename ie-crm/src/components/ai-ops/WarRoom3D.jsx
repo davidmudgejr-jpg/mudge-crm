@@ -292,6 +292,8 @@ export default function WarRoom3D({
   agents = [],
   pending = [],
   recentLogs = [],
+  pipeline = {},
+  costs = {},
   onZoomIn,
   activeView,
   onBack,
@@ -317,7 +319,7 @@ export default function WarRoom3D({
         <WarRoomScene onZoomIn={onZoomIn} />
         <OrbCore onClick={() => onHoustonActivate?.()} houstonActive={houstonActive} />
         <DustParticles />
-        <WallScreenLayout agents={agents} pending={pending} onZoomIn={onZoomIn} />
+        <WallScreenLayout agents={agents} pending={pending} pipeline={pipeline} costs={costs} onZoomIn={onZoomIn} />
         {/* Desks removed — clean briefing room */}
         <RoamingAgentGroup heartbeatAgents={agents} onZoomIn={onZoomIn} />
 

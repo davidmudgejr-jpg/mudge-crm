@@ -4,7 +4,7 @@ const API_BASE = import.meta.env.VITE_API_URL || '';
 const POLL_INTERVAL = 30000; // 30s
 
 export default function useAgentHeartbeats() {
-  const [data, setData] = useState({ agents: [], pending: [], recentLogs: [] });
+  const [data, setData] = useState({ agents: [], pending: [], recentLogs: [], pipeline: {}, costs: {} });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [stale, setStale] = useState(false);

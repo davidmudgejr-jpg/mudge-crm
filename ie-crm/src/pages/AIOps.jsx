@@ -26,7 +26,7 @@ export default function AIOps() {
   const navigate = useNavigate();
   const [activeView, setActiveView] = useState(null);
   const [houstonActive, setHoustonActive] = useState(false);
-  const { agents, pending, recentLogs, loading, error, stale } = useAgentHeartbeats();
+  const { agents, pending, recentLogs, pipeline, costs, loading, error, stale } = useAgentHeartbeats();
 
   // Simplified — no more DOM element / getBoundingClientRect needed
   const handleZoomIn = (viewKey) => {
@@ -105,6 +105,8 @@ export default function AIOps() {
         agents={agents}
         pending={pending}
         recentLogs={recentLogs}
+        pipeline={pipeline}
+        costs={costs}
         onZoomIn={handleZoomIn}
         activeView={activeView}
         onBack={handleZoomOut}
