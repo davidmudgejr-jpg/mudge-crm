@@ -101,9 +101,10 @@ export default function useHoustonVoice() {
       if (!res.ok) throw new Error('Failed to get signed URL');
       const { url: signedUrl } = await res.json();
 
-      // 2. Create AudioContext at 44.1kHz — matches ElevenLabs agent output format
+      // 2. Create AudioContext at 16kHz — ElevenLabs ConvAI always sends 16kHz PCM
+      // regardless of agent Advanced settings (those only affect REST TTS endpoints)
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 44100,
+        sampleRate: 16000,
       });
       audioCtxRef.current = audioCtx;
 
