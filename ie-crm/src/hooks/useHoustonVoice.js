@@ -101,10 +101,9 @@ export default function useHoustonVoice() {
       if (!res.ok) throw new Error('Failed to get signed URL');
       const { url: signedUrl } = await res.json();
 
-      // 2. Create AudioContext at 16kHz — matches ElevenLabs ConvAI output
-      // ElevenLabs sends PCM at 16000 Hz, so our playback must match
+      // 2. Create AudioContext at 44.1kHz — matches ElevenLabs agent output format
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)({
-        sampleRate: 16000,
+        sampleRate: 44100,
       });
       audioCtxRef.current = audioCtx;
 
