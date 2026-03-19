@@ -9,6 +9,7 @@ export default function ViewBar({
   activeViewId,
   isDirty,
   activeView,
+  filters,
   applyView,
   resetToAll,
   saveView,
@@ -21,7 +22,10 @@ export default function ViewBar({
   const [contextMenu, setContextMenu] = useState(null);
   const [renaming, setRenaming] = useState(null);
   const [renameValue, setRenameValue] = useState('');
+  const [naming, setNaming] = useState(false);
+  const [newViewName, setNewViewName] = useState('');
   const menuRef = useRef(null);
+  const nameInputRef = useRef(null);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -32,6 +36,11 @@ export default function ViewBar({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [contextMenu]);
+
+  // Focus name input when it appears
+  useEffect(() => {
+    if (naming && nameInputRef.current) nameInputRef.current.focus();
+  }, [naming]);
 
   const handleContextMenu = (e, view) => {
     e.preventDefault();
@@ -45,13 +54,27 @@ export default function ViewBar({
     setRenaming(null);
   };
 
+  const handleNewViewSave = async () => {
+    if (newViewName.trim()) {
+      try {
+        await saveView(newViewName.trim());
+        setNaming(false);
+        setNewViewName('');
+      } catch (err) {
+        console.error('[ViewBar] Failed to save view:', err);
+      }
+    }
+  };
+
+  const hasUnsavedFilters = !activeViewId && filters && filters.length > 0;
+
   return (
     <div className="flex items-center gap-1.5 px-5 py-2 border-b border-crm-border overflow-x-auto">
       {/* "All" tab — always first */}
       <button
-        onClick={resetToAll}
+        onClick={() => { resetToAll(); setNaming(false); }}
         className={`shrink-0 px-3.5 py-1.5 rounded-md text-xs font-semibold whitespace-nowrap transition-colors ${
-          !activeViewId
+          !activeViewId && !hasUnsavedFilters
             ? 'bg-crm-accent/15 text-crm-accent'
             : 'text-crm-muted hover:bg-crm-hover'
         }`}
@@ -63,7 +86,7 @@ export default function ViewBar({
       {views.map((view) => (
         <button
           key={view.view_id}
-          onClick={() => applyView(view.view_id)}
+          onClick={() => { applyView(view.view_id); setNaming(false); }}
           onContextMenu={(e) => handleContextMenu(e, view)}
           className={`shrink-0 px-3.5 py-1.5 rounded-md text-xs whitespace-nowrap transition-colors ${
             activeViewId === view.view_id
@@ -95,7 +118,7 @@ export default function ViewBar({
         </button>
       ))}
 
-      {/* Save button when dirty */}
+      {/* Save button when dirty on existing view */}
       {isDirty && activeViewId && (
         <button
           onClick={() => saveView(activeView?.view_name || 'View')}
@@ -103,6 +126,46 @@ export default function ViewBar({
         >
           Save
         </button>
+      )}
+
+      {/* Unsaved new filters — show "Save as View" button */}
+      {hasUnsavedFilters && !naming && (
+        <button
+          onClick={() => setNaming(true)}
+          className="shrink-0 px-3 py-1.5 rounded-md text-xs bg-crm-accent/80 text-white font-medium hover:bg-crm-accent transition-colors animate-fade-in"
+        >
+          Save as View
+        </button>
+      )}
+
+      {/* Inline naming input for new view */}
+      {naming && (
+        <div className="shrink-0 inline-flex items-center gap-1 animate-fade-in">
+          <input
+            ref={nameInputRef}
+            value={newViewName}
+            onChange={(e) => setNewViewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleNewViewSave();
+              if (e.key === 'Escape') { setNaming(false); setNewViewName(''); }
+            }}
+            placeholder="View name..."
+            className="bg-crm-hover/60 border border-crm-accent text-crm-text text-xs px-2.5 py-1 rounded-md w-40 outline-none"
+          />
+          <button
+            onClick={handleNewViewSave}
+            disabled={!newViewName.trim()}
+            className="text-[11px] bg-crm-accent/80 text-white px-2.5 py-1 rounded-md font-medium hover:bg-crm-accent transition-colors disabled:opacity-40"
+          >
+            Save
+          </button>
+          <button
+            onClick={() => { setNaming(false); setNewViewName(''); }}
+            className="text-[11px] text-crm-muted px-1.5 py-1 hover:text-crm-text transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
       )}
 
       {/* + New View */}

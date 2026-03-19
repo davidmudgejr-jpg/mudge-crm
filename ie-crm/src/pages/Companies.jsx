@@ -270,6 +270,7 @@ export default function Companies({ onCountChange }) {
         activeViewId={view.activeViewId}
         isDirty={view.isDirty}
         activeView={view.activeView}
+        filters={view.filters}
         applyView={view.applyView}
         resetToAll={view.resetToAll}
         saveView={view.saveView}

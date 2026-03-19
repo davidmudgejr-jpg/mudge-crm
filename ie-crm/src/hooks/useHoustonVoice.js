@@ -96,13 +96,16 @@ export default function useHoustonVoice({ currentUser } = {}) {
     setError(null);
 
     try {
-      // 1. Get signed WebSocket URL from our server (with auth token)
+      // 1. Fetch signed URL + user context in parallel
       const token = localStorage.getItem('crm-auth-token');
-      const res = await fetch(`${API_BASE}/api/houston/signed-url`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (!res.ok) throw new Error('Failed to get signed URL');
-      const { url: signedUrl } = await res.json();
+      const authHeaders = token ? { Authorization: `Bearer ${token}` } : {};
+      const [signedRes, ctxRes] = await Promise.all([
+        fetch(`${API_BASE}/api/houston/signed-url`, { headers: authHeaders }),
+        fetch(`${API_BASE}/api/houston/context`, { headers: authHeaders }).catch(() => null),
+      ]);
+      if (!signedRes.ok) throw new Error('Failed to get signed URL');
+      const { url: signedUrl } = await signedRes.json();
+      const houstonCtx = ctxRes?.ok ? await ctxRes.json() : {};
 
       // 2. Create AudioContext at 16kHz — ElevenLabs ConvAI always sends 16kHz PCM
       // regardless of agent Advanced settings (those only affect REST TTS endpoints)
@@ -155,17 +158,29 @@ export default function useHoustonVoice({ currentUser } = {}) {
         activeRef.current = true;
         setState('listening');
 
-        // Send init data with user identity for Houston personalization
-        // dynamic_variables are used in the ElevenLabs first message template
+        // Send init data with user identity + live CRM context
+        // dynamic_variables → ElevenLabs first message + system prompt templates
+        // custom_llm_extra_body → forwarded to /api/houston/completions (our RAG)
         const firstName = (currentUser?.display_name || 'there').split(' ')[0];
         ws.send(JSON.stringify({
           type: 'conversation_initiation_client_data',
           dynamic_variables: {
             user_name: firstName,
+            user_full_name: currentUser?.display_name || 'Unknown',
+            user_role: currentUser?.role || 'agent',
+            user_email: currentUser?.email || '',
+            active_deal_count: String(houstonCtx.active_deal_count ?? 0),
+            pending_tasks: String(houstonCtx.pending_tasks ?? 0),
+            time_of_day: houstonCtx.time_of_day || 'day',
           },
           custom_llm_extra_body: {
             user_name: currentUser?.display_name || null,
             user_id: currentUser?.user_id || null,
+            user_role: currentUser?.role || null,
+            active_deal_count: houstonCtx.active_deal_count ?? 0,
+            pending_tasks: houstonCtx.pending_tasks ?? 0,
+            time_of_day: houstonCtx.time_of_day || null,
+            last_login: houstonCtx.last_login || null,
           },
         }));
 
