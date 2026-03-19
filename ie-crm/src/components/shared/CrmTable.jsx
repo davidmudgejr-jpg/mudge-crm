@@ -5,6 +5,7 @@ import AddFieldPanel from './AddFieldPanel';
 import { FIELD_TYPE_MAP } from '../../config/fieldTypes';
 import InlineTableCellEditor from './InlineTableCellEditor';
 import ContextMenu from './ContextMenu';
+import ColumnFilterPopover from './ColumnFilterPopover';
 
 /* ── Inline cell editor for custom fields ───────────────────────────── */
 
@@ -310,6 +311,9 @@ export default function CrmTable({
   onShiftSelect,
   // Context menu
   onDeleteRow,
+  // Column filters
+  filters,           // current filter array from useViewEngine
+  onColumnFilter,    // (columnKey, conditions) => void — callback to update filters for a column
 }) {
   /* ── Column order: drag-to-reorder with localStorage persistence ─── */
   const colOrderKey = `crm_column_order_${tableKey}`;
@@ -373,6 +377,7 @@ export default function CrmTable({
   const [addFieldOpen, setAddFieldOpen] = useState(false);
   const [editingCell, setEditingCell] = useState(null); // { rowId, colKey }
   const [contextMenu, setContextMenu] = useState(null); // { x, y, row }
+  const [filterPopover, setFilterPopover] = useState(null); // { column, anchorRect }
   const addBtnRef = useRef(null);
 
   const allSelected = selected.size === rows.length && rows.length > 0;
@@ -417,40 +422,70 @@ export default function CrmTable({
             </th>
 
             {/* Regular columns (draggable for reorder) */}
-            {orderedColumns.map((col) => (
-              <th
-                key={col.key}
-                draggable
-                onDragStart={(e) => handleColDragStart(e, col.key)}
-                onDragEnd={handleColDragEnd}
-                onDragOver={(e) => handleColDragOver(e, col.key)}
-                onDragLeave={handleColDragLeave}
-                onDrop={(e) => handleColDrop(e, col.key)}
-                className={`group relative px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider select-none cursor-grab active:cursor-grabbing transition-colors ${
-                  dragCol === col.key ? 'opacity-30' : ''
-                } ${dragOverCol === col.key && dragCol !== col.key ? 'bg-crm-accent/10' : ''}`}
-                style={{
-                  width: widths[col.key] || col.defaultWidth || 150,
-                  minWidth: widths[col.key] || col.defaultWidth || 150,
-                  maxWidth: widths[col.key] || col.defaultWidth || 150,
-                  overflow: 'visible',
-                  ...(dragOverCol === col.key && dragCol !== col.key
-                    ? { boxShadow: 'inset 3px 0 0 0 #818cf8' }
-                    : {}),
-                }}
-              >
-                <ColumnHeader
-                  col={col}
-                  onSort={onSort}
-                  orderBy={orderBy}
-                  order={order}
-                  onRename={onRenameColumn}
-                  onHide={onHideColumn}
-                  deleteDisabled
-                  onResizeStart={onResizeStart}
-                />
-              </th>
-            ))}
+            {orderedColumns.map((col) => {
+              const hasActiveFilter = filters?.some(f => f.column === col.key);
+              return (
+                <th
+                  key={col.key}
+                  draggable
+                  onDragStart={(e) => handleColDragStart(e, col.key)}
+                  onDragEnd={handleColDragEnd}
+                  onDragOver={(e) => handleColDragOver(e, col.key)}
+                  onDragLeave={handleColDragLeave}
+                  onDrop={(e) => handleColDrop(e, col.key)}
+                  className={`group relative px-3 py-2 text-left text-xs font-medium text-crm-muted uppercase tracking-wider select-none cursor-grab active:cursor-grabbing transition-colors ${
+                    dragCol === col.key ? 'opacity-30' : ''
+                  } ${dragOverCol === col.key && dragCol !== col.key ? 'bg-crm-accent/10' : ''}`}
+                  style={{
+                    width: widths[col.key] || col.defaultWidth || 150,
+                    minWidth: widths[col.key] || col.defaultWidth || 150,
+                    maxWidth: widths[col.key] || col.defaultWidth || 150,
+                    overflow: 'visible',
+                    ...(dragOverCol === col.key && dragCol !== col.key
+                      ? { boxShadow: 'inset 3px 0 0 0 #818cf8' }
+                      : {}),
+                  }}
+                >
+                  <div className="flex items-center gap-0.5">
+                    <div className="flex-1 min-w-0">
+                      <ColumnHeader
+                        col={col}
+                        onSort={onSort}
+                        orderBy={orderBy}
+                        order={order}
+                        onRename={onRenameColumn}
+                        onHide={onHideColumn}
+                        deleteDisabled
+                        onResizeStart={onResizeStart}
+                      />
+                    </div>
+                    {col.type && onColumnFilter && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const rect = e.currentTarget.closest('th').getBoundingClientRect();
+                          setFilterPopover(
+                            filterPopover?.column?.key === col.key
+                              ? null
+                              : { column: col, anchorRect: rect }
+                          );
+                        }}
+                        className={`flex-shrink-0 transition-all p-0.5 rounded hover:bg-crm-hover ${
+                          hasActiveFilter
+                            ? 'opacity-100 text-crm-accent'
+                            : 'opacity-0 group-hover:opacity-40 text-crm-muted hover:text-crm-text'
+                        }`}
+                        title={`Filter by ${col.label}`}
+                      >
+                        <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                          <path d="M1.5 1.5h13l-5 6v5l-3 2v-7z"/>
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </th>
+              );
+            })}
 
             {/* Custom columns */}
             {customColumns.map((col) => (
@@ -680,6 +715,19 @@ export default function CrmTable({
             { label: 'Delete', danger: true, onClick: () => { onDeleteRow?.(contextMenu.row[idField]); setContextMenu(null); } },
           ]}
           onClose={() => setContextMenu(null)}
+        />
+      )}
+      {filterPopover && onColumnFilter && (
+        <ColumnFilterPopover
+          column={filterPopover.column}
+          anchorRect={filterPopover.anchorRect}
+          rows={rows}
+          currentFilter={filters?.find(f => f.column === filterPopover.column.key)}
+          onApply={(conditions) => {
+            onColumnFilter(filterPopover.column.key, conditions);
+            setFilterPopover(null);
+          }}
+          onClose={() => setFilterPopover(null)}
         />
       )}
     </div>
