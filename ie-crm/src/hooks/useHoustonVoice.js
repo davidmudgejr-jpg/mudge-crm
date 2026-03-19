@@ -153,8 +153,13 @@ export default function useHoustonVoice({ currentUser } = {}) {
         setState('listening');
 
         // Send init data with user identity for Houston personalization
+        // dynamic_variables are used in the ElevenLabs first message template
+        const firstName = (currentUser?.display_name || 'there').split(' ')[0];
         ws.send(JSON.stringify({
           type: 'conversation_initiation_client_data',
+          dynamic_variables: {
+            user_name: firstName,
+          },
           custom_llm_extra_body: {
             user_name: currentUser?.display_name || null,
             user_id: currentUser?.user_id || null,
