@@ -257,6 +257,12 @@ export default function Contacts({ onCountChange }) {
     }
   }, [addToast]);
 
+  const handleColumnFilter = useCallback((columnKey, conditions) => {
+    const otherFilters = view.filters.filter(f => f.column !== columnKey);
+    const merged = [...otherFilters, ...conditions];
+    view.updateFilters(merged, view.filterLogic);
+  }, [view]);
+
   const handleBulkCampaign = async (campaignId) => {
     setShowCampaignPicker(false);
     try {
@@ -414,6 +420,8 @@ export default function Contacts({ onCountChange }) {
             onSelectOnly={selectOnly}
             onShiftSelect={shiftSelect}
             onDeleteRow={deleteRow}
+            filters={view.filters}
+            onColumnFilter={handleColumnFilter}
           />
         )}
       </div>
