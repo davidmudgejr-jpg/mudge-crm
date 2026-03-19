@@ -7,13 +7,29 @@ const isElectron = () => typeof window !== 'undefined' && !!window.iecrm;
 // Base URL for HTTP mode — empty string uses relative URLs (same origin)
 const API_BASE = '';
 
+function getAuthHeaders() {
+  const token = localStorage.getItem('crm-auth-token');
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
+function handle401(res) {
+  if (res.status === 401) {
+    localStorage.removeItem('crm-auth-token');
+    window.location.hash = '#/';
+    window.location.reload();
+  }
+}
+
 async function httpPost(path, body = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: getAuthHeaders(),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
+    handle401(res);
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
@@ -21,8 +37,11 @@ async function httpPost(path, body = {}) {
 }
 
 async function httpGet(path) {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) {
+    handle401(res);
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }

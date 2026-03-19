@@ -25,6 +25,8 @@ import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
 import { DevModeProvider, useDevMode } from './components/shared/DevModeContext';
+import { AuthProvider, useAuth } from './contexts/AuthContext';
+import Login from './pages/Login';
 import SlideOver, { SlideOverHeader } from './components/shared/SlideOver';
 import CommandPalette from './components/shared/CommandPalette';
 import PropertyDetail from './pages/PropertyDetail';
@@ -138,16 +140,36 @@ function AppShell() {
   );
 }
 
-export default function App() {
+function AuthGate() {
+  const { user, loading } = useAuth();
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-crm-bg flex items-center justify-center">
+        <div className="text-crm-muted text-sm">Loading...</div>
+      </div>
+    );
+  }
+
+  if (!user) return <Login />;
+
   return (
-    <Router future={routerFutureFlags}>
-      <DevModeProvider>
+    <DevModeProvider>
       <ToastProvider>
         <SlideOverProvider>
           <AppShell />
         </SlideOverProvider>
       </ToastProvider>
-      </DevModeProvider>
+    </DevModeProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <Router future={routerFutureFlags}>
+      <AuthProvider>
+        <AuthGate />
+      </AuthProvider>
     </Router>
   );
 }

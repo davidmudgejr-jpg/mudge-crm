@@ -77,6 +77,7 @@ You can execute any SQL against the database. When the user gives you a command:
 DATABASE SCHEMA:
 ${schemaText}
 
+${context.userName ? `CURRENT USER: ${context.userName} (team member of Leanne Associates)` : ''}
 ${context.currentTable ? `Current view: ${context.currentTable}` : ''}
 ${context.rowCount ? `Row count: ${context.rowCount}` : ''}
 

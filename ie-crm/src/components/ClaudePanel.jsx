@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { sendMessage, parseClaudeResponse, SUGGESTED_COMMANDS, getStatus as getClaudeStatus } from '../api/claude';
 import { query, logUndo, executeUndo } from '../api/database';
 import { file as fileBridge } from '../api/bridge';
+import { useAuth } from '../contexts/AuthContext';
 
 function highlightSQL(sql) {
   if (!sql) return '';
@@ -270,6 +271,7 @@ function MessageBubble({ message, onExecute, onUndo }) {
 
 // ── Main panel ─────────────────────────────────────────────────
 export default function ClaudePanel({ isOpen, onToggle, currentTable, rowCount, hasAnyPanel }) {
+  const { user } = useAuth();
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -384,7 +386,7 @@ export default function ClaudePanel({ isOpen, onToggle, currentTable, rowCount, 
     setLoading(true);
 
     try {
-      const response = await sendMessage(newMessages, { currentTable, rowCount });
+      const response = await sendMessage(newMessages, { currentTable, rowCount, userName: user?.display_name });
       const content = response.content && response.content.trim().length > 0
         ? response.content
         : '(No response from Claude — the model returned empty content. Try again.)';

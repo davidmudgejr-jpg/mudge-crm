@@ -3,6 +3,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import useHoustonVoice from '../../hooks/useHoustonVoice';
+import { useAuth } from '../../contexts/AuthContext';
 
 const STATE_LABELS = {
   idle: '',
@@ -21,6 +22,7 @@ const STATE_COLORS = {
 };
 
 export default function HoustonVoice({ active, onAnalyserReady }) {
+  const { user } = useAuth();
   const {
     state,
     houstonText,
@@ -30,7 +32,7 @@ export default function HoustonVoice({ active, onAnalyserReady }) {
     deactivate,
     interrupt,
     getAnalyser,
-  } = useHoustonVoice();
+  } = useHoustonVoice({ currentUser: user });
 
   const scrollRef = useRef(null);
 
