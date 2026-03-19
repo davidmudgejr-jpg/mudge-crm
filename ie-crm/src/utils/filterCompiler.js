@@ -36,6 +36,42 @@ export function compileFilters(filters, columnDefs, startIndex = 1) {
 
 const MAX_DEPTH = 2;
 
+const RELATIVE_DATE_OPS = new Set([
+  'in_next_n_days', 'in_last_n_days', 'this_week', 'this_month',
+  'this_quarter', 'this_year', 'is_overdue',
+]);
+
+function compileRelativeDate(column, operator, value) {
+  const n = parseInt(value) || 30;
+  let sql;
+  switch (operator) {
+    case 'in_next_n_days':
+      sql = `${column} >= CURRENT_DATE AND ${column} <= CURRENT_DATE + INTERVAL '${n} days'`;
+      break;
+    case 'in_last_n_days':
+      sql = `${column} >= CURRENT_DATE - INTERVAL '${n} days' AND ${column} <= CURRENT_DATE`;
+      break;
+    case 'this_week':
+      sql = `${column} >= date_trunc('week', CURRENT_DATE) AND ${column} < date_trunc('week', CURRENT_DATE) + INTERVAL '7 days'`;
+      break;
+    case 'this_month':
+      sql = `${column} >= date_trunc('month', CURRENT_DATE) AND ${column} < date_trunc('month', CURRENT_DATE) + INTERVAL '1 month'`;
+      break;
+    case 'this_quarter':
+      sql = `${column} >= date_trunc('quarter', CURRENT_DATE) AND ${column} < date_trunc('quarter', CURRENT_DATE) + INTERVAL '3 months'`;
+      break;
+    case 'this_year':
+      sql = `${column} >= date_trunc('year', CURRENT_DATE) AND ${column} < date_trunc('year', CURRENT_DATE) + INTERVAL '1 year'`;
+      break;
+    case 'is_overdue':
+      sql = `${column} < CURRENT_DATE AND ${column} IS NOT NULL`;
+      break;
+    default:
+      return null;
+  }
+  return { sql: `(${sql})`, params: [], paramCount: 0 };
+}
+
 const OPERATOR_SQL = {
   equals:       (col, i) => ({ sql: `${col} = $${i}`, count: 1 }),
   not_equals:   (col, i) => ({ sql: `${col} != $${i}`, count: 1 }),
@@ -57,6 +93,13 @@ const OPERATOR_SQL = {
 function compileSingleCondition(cond, allowedColumns, idx) {
   const { column, operator, value } = cond;
   if (!allowedColumns.has(column)) return null;
+
+  // Check relative date operators before standard OPERATOR_SQL lookup
+  if (RELATIVE_DATE_OPS.has(operator)) {
+    const result = compileRelativeDate(column, operator, value);
+    if (!result) return null;
+    return { sql: result.sql, params: [], consumed: 0 };
+  }
 
   const opFn = OPERATOR_SQL[operator];
   if (!opFn) return null;
