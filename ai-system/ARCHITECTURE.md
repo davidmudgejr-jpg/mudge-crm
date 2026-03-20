@@ -739,13 +739,601 @@ TOTAL: 9 OpenClaw instances, 9 Telegram bots
 
 ---
 
+## 📊 MODEL 6: MVA (MARKET VALUE ALIGNMENT) — THE DEAL HUNTER
+
+### What MVA Is
+
+MVA answers the question TPE doesn't: **"Is this property mispriced?"**
+
+TPE tells you a property is likely to transact. MVA tells you if it's a good deal. When BOTH scores are high, that's your #1 call — a property that's likely to sell AND is underpriced. That's the deal your competitors are missing.
+
+```
+TPE alone:  "This property WILL transact"       → HIGH score
+            "But is it a good DEAL?"             → 🤷 no idea
+
+TPE + MVA:  "This property WILL transact"        → HIGH TPE
+            "AND it's underpriced by 18%"         → HIGH MVA
+            "COMBINED: this is your #1 call"      → 🔥🔥🔥
+```
+
+### MVA Scoring (0-100)
+
+```
+CATEGORY 1: Price vs. Comps (30 pts max)
+  Listed 20%+ below avg comp/SF    → 30 pts (screaming deal)
+  Listed 15-20% below              → 22 pts
+  Listed 10-15% below              → 15 pts
+  Listed 5-10% below               → 8 pts
+  At or above market               → 0 pts
+  DATA SOURCE: RE Apps comps (daily pull) vs AIR listings
+
+CATEGORY 2: Assessment Gap (20 pts max)
+  Tax assessment 30%+ below market  → 20 pts
+  Tax assessment 20-30% below       → 14 pts
+  Tax assessment 10-20% below       → 8 pts
+  Owner may not know true value
+  DATA SOURCE: County Assessor (automated scrape)
+
+CATEGORY 3: Listing Staleness (15 pts max)
+  DOM > 300 days                    → 15 pts
+  DOM 200-300 days                  → 12 pts
+  DOM 150-200 days                  → 8 pts
+  DOM 120-150 days                  → 4 pts
+  Longer = more motivated seller
+  DATA SOURCE: AIR super sheets (daily email parse)
+
+CATEGORY 4: Zoning Upside (15 pts max)
+  Zoning allows use 2+ tiers higher → 15 pts
+  Zoning allows 1 tier higher       → 8 pts
+  Current use = highest & best      → 0 pts
+  DATA SOURCE: County/city zoning portals
+
+CATEGORY 5: Catalyst Proximity (20 pts max)
+  Infrastructure project within 1 mi → 15 pts
+  New major tenant/employer nearby   → 10 pts
+  Rezoning application nearby        → 8 pts
+  Multiple catalysts stacked         → up to 20 pts
+  Price doesn't reflect what's coming
+  DATA SOURCE: City council agendas, permit filings
+
+MVA_SCORE = MIN(comps + assessment + staleness
+               + zoning + catalyst, 100)
+```
+
+### Updated Blended Priority Formula (3-Factor Model)
+
+```
+CURRENT (2-factor):
+  BLENDED = 0.70 × TPE + 0.30 × ECV
+
+PROPOSED (3-factor):
+  BLENDED = 0.50 × TPE + 0.25 × ECV + 0.25 × MVA
+
+  WHY THESE WEIGHTS:
+  ├── TPE still dominates (50%) — no point finding a deal
+  │   if the owner won't sell
+  ├── ECV stays important (25%) — commission matters
+  └── MVA is the new edge (25%) — finds the hidden gems
+
+  All weights configurable in tpe_config table.
+```
+
+### New tpe_config Rows
+
+```sql
+-- Blended weights (update existing)
+UPDATE tpe_config SET config_value = 0.50 WHERE config_key = 'tpe_weight';
+UPDATE tpe_config SET config_value = 0.25 WHERE config_key = 'ecv_weight';
+INSERT INTO tpe_config VALUES ('blended', 'mva_weight', 0.25, 'MVA weight in 3-factor blend');
+
+-- MVA category weights
+INSERT INTO tpe_config VALUES ('mva', 'comp_gap_20pct_pts', 30, 'Points for 20%+ below comps');
+INSERT INTO tpe_config VALUES ('mva', 'comp_gap_15pct_pts', 22, 'Points for 15-20% below comps');
+INSERT INTO tpe_config VALUES ('mva', 'comp_gap_10pct_pts', 15, 'Points for 10-15% below comps');
+INSERT INTO tpe_config VALUES ('mva', 'comp_gap_5pct_pts', 8, 'Points for 5-10% below comps');
+INSERT INTO tpe_config VALUES ('mva', 'assessment_gap_30pct_pts', 20, 'Points for 30%+ assessment gap');
+INSERT INTO tpe_config VALUES ('mva', 'assessment_gap_20pct_pts', 14, 'Points for 20-30% assessment gap');
+INSERT INTO tpe_config VALUES ('mva', 'assessment_gap_10pct_pts', 8, 'Points for 10-20% assessment gap');
+INSERT INTO tpe_config VALUES ('mva', 'dom_300_pts', 15, 'Points for 300+ DOM');
+INSERT INTO tpe_config VALUES ('mva', 'dom_200_pts', 12, 'Points for 200-300 DOM');
+INSERT INTO tpe_config VALUES ('mva', 'dom_150_pts', 8, 'Points for 150-200 DOM');
+INSERT INTO tpe_config VALUES ('mva', 'dom_120_pts', 4, 'Points for 120-150 DOM');
+INSERT INTO tpe_config VALUES ('mva', 'zoning_2tier_pts', 15, 'Points for 2+ tier zoning upside');
+INSERT INTO tpe_config VALUES ('mva', 'zoning_1tier_pts', 8, 'Points for 1 tier zoning upside');
+INSERT INTO tpe_config VALUES ('mva', 'catalyst_infra_pts', 15, 'Points for infrastructure catalyst');
+INSERT INTO tpe_config VALUES ('mva', 'catalyst_employer_pts', 10, 'Points for major employer catalyst');
+INSERT INTO tpe_config VALUES ('mva', 'catalyst_rezone_pts', 8, 'Points for rezoning catalyst');
+INSERT INTO tpe_config VALUES ('mva', 'catalyst_cap', 20, 'Max points for catalyst category');
+```
+
+### New Database Tables
+
+```sql
+-- Active listings (fed by AIR super sheets + CoStar alerts)
+CREATE TABLE mva_listings (
+  id SERIAL PRIMARY KEY,
+  property_id INTEGER REFERENCES properties(id),
+  address TEXT NOT NULL,
+  city TEXT,
+  submarket TEXT,
+  sf NUMERIC,
+  listing_type TEXT CHECK (listing_type IN ('sale', 'lease')),
+  asking_price NUMERIC,          -- total for sale, $/SF/mo for lease
+  asking_price_psf NUMERIC,      -- normalized $/SF
+  date_listed DATE,
+  days_on_market INTEGER,
+  broker_name TEXT,
+  broker_company TEXT,
+  source TEXT DEFAULT 'air_super_sheet',  -- air_super_sheet, costar_alert, manual
+  raw_pdf_date DATE,             -- which super sheet this came from
+  status TEXT DEFAULT 'active',  -- active, sold, leased, withdrawn
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Closed comps (fed by RE Apps daily pull)
+CREATE TABLE mva_comps (
+  id SERIAL PRIMARY KEY,
+  property_id INTEGER REFERENCES properties(id),
+  address TEXT NOT NULL,
+  city TEXT,
+  submarket TEXT,
+  sf NUMERIC,
+  comp_type TEXT CHECK (comp_type IN ('sale', 'lease')),
+  closed_price NUMERIC,
+  closed_price_psf NUMERIC,
+  close_date DATE,
+  buyer_tenant TEXT,
+  seller_landlord TEXT,
+  source TEXT DEFAULT 'reapps',  -- reapps, air_super_sheet, manual
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Tax assessment data (fed by county assessor scrape)
+CREATE TABLE mva_assessments (
+  id SERIAL PRIMARY KEY,
+  property_id INTEGER REFERENCES properties(id),
+  address TEXT NOT NULL,
+  assessed_value NUMERIC,
+  estimated_market_value NUMERIC,  -- calculated from comps
+  gap_percentage NUMERIC,          -- (market - assessed) / market
+  assessment_year INTEGER,
+  source TEXT DEFAULT 'county_assessor',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Infrastructure & development catalysts
+CREATE TABLE mva_catalysts (
+  id SERIAL PRIMARY KEY,
+  catalyst_type TEXT CHECK (catalyst_type IN (
+    'infrastructure', 'employer', 'rezoning', 'development', 'transit'
+  )),
+  description TEXT NOT NULL,
+  location_lat NUMERIC,
+  location_lng NUMERIC,
+  radius_miles NUMERIC DEFAULT 1.0,
+  estimated_impact TEXT,          -- 'high', 'medium', 'low'
+  source_url TEXT,
+  approval_date DATE,
+  completion_date DATE,
+  status TEXT DEFAULT 'approved', -- proposed, approved, under_construction, complete
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Enrichment task queue (human-in-the-loop)
+CREATE TABLE enrichment_queue (
+  id SERIAL PRIMARY KEY,
+  property_id INTEGER REFERENCES properties(id),
+  contact_name TEXT,
+  entity_name TEXT,              -- LLC/Corp name
+  entity_address TEXT,           -- from OpenCorporates
+  priority TEXT DEFAULT 'medium', -- high, medium, low
+  tpe_tier TEXT,                 -- A, B, C, D
+  mva_score NUMERIC,
+  search_instructions TEXT,      -- agent-generated instructions for manual lookup
+  sites_to_check TEXT[],         -- ['beenverified', 'whitepages', 'zoominfo']
+  status TEXT DEFAULT 'pending', -- pending, in_progress, completed, skipped, not_found
+  result_phone TEXT,
+  result_email TEXT,
+  result_address TEXT,
+  result_confidence NUMERIC,     -- 0-100, calculated after cross-reference
+  neverbounce_result TEXT,       -- valid, invalid, unknown
+  completed_by TEXT,             -- 'david', 'agent', 'team'
+  completed_at TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### How MVA Shows Up in the TPE Page
+
+```
+TPE PAGE — NEW COLUMNS:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Address      | TPE | ECV | MVA | Blended | Tier | Signal
+─────────────|─────|─────|─────|─────────|──────|────────
+1234 Commerce|  72 |  85 |  91 |   80    |  A+  | 🔥 DEAL
+5678 Main St |  65 |  70 |  45 |   61    |  A   |
+9012 Industry|  42 |  55 |  88 |   57    |  A   | 📊 MISPRICED
+3456 Freight |  85 |  60 |  12 |   60    |  A   |
+7890 Logistics| 35 |  40 |  78 |   46    |  B   | 📊 MISPRICED
+
+NOTICE: Without MVA, property 9012 Industry would be Tier C (TPE 42).
+WITH MVA, it jumps to Tier A because it's massively underpriced.
+THAT'S THE DEAL YOUR COMPETITORS ARE MISSING.
+```
+
+---
+
+## 📡 DATA SOURCE PIPELINE — COMPLETE MAP
+
+### David's Actual Data Sources (March 2026)
+
+Every data source David uses, how it connects to the agent system, and what feeds what.
+
+### Tier 1: Direct Agent Access (Fully Automated)
+
+| Source | Data | API/Method | Cost | Feeds |
+|--------|------|-----------|------|-------|
+| **RE Apps** (company internal DB) | Lease comps, sale comps | Agent logs in directly, pulls daily | Free (company tool) | `mva_comps` table — THE most important comp source |
+| **UniCourt** | Court cases: divorce, bankruptcy, liens, lawsuits | REST API | ~$99-300/mo | `property_distress` table + MVA distress signals |
+| **OpenCorporates** | LLC/corp data: owner names, registered agents, addresses | REST API | Free tier + ~$100/mo | `contacts` enrichment + enrichment queue generation |
+| **NeverBounce** | Email verification (valid/invalid/unknown) | REST API | ~$8/1000 verifications | Contact confidence scoring |
+| **Instantly** | Email campaign sending (12 addresses) | REST API | Already paying | Outreach campaigns after approval |
+| **County Assessor** | Tax assessments, property details, assessed values | Public records scrape | Free | `mva_assessments` table → MVA assessment gap score |
+| **County Recorder** | Deeds, mortgages, liens, ownership transfers | Public records scrape | Free | `property_distress` + ownership change detection |
+
+### Tier 2: Email Pipeline (Agent Parses Forwarded Emails)
+
+```
+HOW IT WORKS:
+  1. Create dedicated email inboxes on your fleet email domain
+  2. Set up auto-forwarding rules from your existing accounts
+  3. Agent checks inbox every hour, downloads attachments
+  4. Parses PDF/HTML content using local LLM
+  5. Writes structured data to CRM database
+```
+
+| Source | Data | Email Format | Forward To | Feeds |
+|--------|------|-------------|-----------|-------|
+| **AIR Daily Super Sheets** | New listings (sale + lease), price changes, sold/leased, rates | PDF attachment | `air-feed@fleet-email.com` | `mva_listings` table — primary listing source |
+| **CoStar Email Alerts** | Listing alerts matching your saved searches | HTML email body | `costar-feed@fleet-email.com` | `mva_listings` table — supplementary listings |
+| **Title Company** (quarterly) | Loan maturity dates, debt data, LTV ratios | PDF/Excel attachment | `title-feed@fleet-email.com` | `loan_maturities` table (already in TPE) |
+
+**The AIR Super Sheet Pipeline (David's idea):**
+```
+AIR sends daily PDF to your email
+       │
+       ▼
+Auto-forward rule → air-feed@fleet-email.com
+       │
+       ▼
+Ingester Agent checks inbox every hour
+       │
+       ▼
+Downloads PDF attachment
+       │
+       ▼
+Local LLM parses PDF → extracts:
+  • New sale listings (address, SF, price, broker)
+  • New lease listings (address, SF, rate, broker)
+  • Price changes (which property, old price, new price)
+  • Closed deals (address, SF, closed price, date)
+  • Current market rates by submarket
+       │
+       ▼
+Writes to mva_listings + mva_comps tables
+       │
+       ▼
+Deal Hunter calculates MVA scores using this data
+       │
+       ▼
+Properties with high MVA appear in your TPE page
+```
+
+### Tier 3: Supervised Enrichment (Agent Preps, David Executes)
+
+These are sites that can't be automated due to cost or anti-bot protections. The agent does ALL the thinking and processing — David just does the manual lookup.
+
+| Source | Data | Why No API | Agent's Role | David's Role |
+|--------|------|-----------|-------------|-------------|
+| **BeenVerified** | Owner contact info: phone, email, address | No API / ToS restrictions | Generates search instructions, cross-references results | 3-min lookup per owner |
+| **WhitePages** | Contact cross-reference: verify BeenVerified data | No API / ToS restrictions | Cross-references against BeenVerified, calculates confidence | 2-min lookup per owner |
+| **ZoomInfo** | Tenant contact info (best source for tenants) | API too expensive ($$$) | Generates search instructions for priority tenants | 3-min lookup per tenant |
+| **CoStar** (deep research) | Detailed property data, full comp reports | API way too expensive | Queues specific research tasks | Occasional manual deep-dive |
+
+**The Supervised Enrichment Workflow:**
+```
+WHAT THE AGENT DOES (automated, overnight):
+  1. OpenCorporates API → finds LLC owner name + address
+  2. UniCourt API → checks for court cases (divorce, bankruptcy)
+  3. Cross-references against existing CRM contacts
+  4. Calculates priority based on TPE + MVA scores
+  5. Generates a detailed enrichment task with:
+     - Exactly what to search on BeenVerified
+     - Exactly what to search on WhitePages
+     - What address/phone to look for (to confirm identity)
+     - Email guessing patterns to try if no email found
+
+WHAT DAVID DOES (morning, 15-20 minutes total):
+  1. Opens enrichment queue in CRM
+  2. Sees prioritized list of owners to research
+  3. For each owner (~3 minutes per):
+     a. Opens BeenVerified, searches the name + city
+     b. Finds the match (agent told him which address to look for)
+     c. Grabs phone + email
+     d. Opens WhitePages, same search
+     e. Confirms match (or notes discrepancy)
+     f. Enters data in CRM, clicks [Complete]
+  4. Agent takes over automatically:
+     → Sends email to NeverBounce API → verified?
+     → Cross-references address against LLC filing → match?
+     → Calculates confidence score:
+       - Both sites agree on email → HIGH
+       - Both sites agree on phone → HIGH
+       - Address matches LLC filing → CONFIRMED identity
+     → Writes verified contact to CRM
+     → Property moves to "Ready to Call" status
+
+OPTIONAL — OpenClaw Computer-Use Assist:
+  For BeenVerified and WhitePages, OpenClaw can:
+  ✅ Navigate to the site
+  ✅ Type the search query
+  ✅ Read and extract results from the screen
+  ✅ Copy data into the CRM
+  ❌ Cannot reliably solve CAPTCHAs (see note below)
+
+  RECOMMENDED: "Supervised Batching" mode
+  → OpenClaw drives the browser, does all typing/reading
+  → David clicks CAPTCHAs when they appear (~1 sec each)
+  → OpenClaw processes results, cross-references, writes to CRM
+  → 8 owners in 24 minutes vs 2 hours fully manual
+
+CAPTCHA NOTE:
+  Simple checkbox CAPTCHAs ("I'm not a robot") may work
+  initially but Google tracks behavioral patterns over time.
+  Image puzzles are unreliable (~60-70% success rate).
+  DO NOT attempt full automation — risk of account ban
+  outweighs the time saved. Supervised batching is the
+  sweet spot: agent does 95% of the work, you click
+  1 button every 3 minutes.
+```
+
+### Data Sources NOT Currently Used (Future Additions)
+
+| Source | Data | Status | Priority |
+|--------|------|--------|----------|
+| **Reonomy** | Ownership + debt data | Not using | Medium — could supplement title company data |
+| **PropStream** | Owner data, liens, pre-foreclosure | Not using | Medium — ~$99/mo, good distress data |
+| **ATTOM Data** | Deep property records | Not using | Low — $200-500/mo, may be overkill |
+| **LandVision** | Ownership, building info | Using but not critical | Low — covered by other sources |
+
+### Cross-Reference Logic (David's Secret Sauce, Encoded in Agent Instructions)
+
+David's manual enrichment process is a sophisticated multi-source verification system. The agent must follow this EXACT logic:
+
+```
+STEP 1: OpenCorporates (automated)
+  → Get LLC name + registered agent name + filing address
+  → This is the ANCHOR — everything else cross-references against this
+
+STEP 2: BeenVerified (manual lookup)
+  → Search: [owner name] + [city from LLC filing]
+  → LOOK FOR: address matching LLC filing address
+  → GRAB: phone, email, other addresses
+  → If multiple results: pick the one with matching address
+
+STEP 3: WhitePages (manual lookup)
+  → Search: same name + city
+  → LOOK FOR: same address match
+  → GRAB: phone, email
+
+STEP 4: Cross-Reference (automated by agent)
+  → BeenVerified email = WhitePages email?
+     YES → HIGH confidence (90%+)
+     NO  → MEDIUM confidence, flag for review
+  → BeenVerified phone = WhitePages phone?
+     YES → Confirms identity
+     NO  → Use the one that matches more sources
+  → Address matches LLC filing?
+     YES → CONFIRMED this is the right person
+     NO  → May be a different John Smith, flag for review
+
+STEP 5: Email Verification (automated)
+  → If email found → NeverBounce API → valid/invalid
+  → If NO email found → try common patterns:
+     [first].[last]@[company-domain].com
+     [first initial][last]@[company-domain].com
+     [first]@[company-domain].com
+  → Run all patterns through NeverBounce
+  → Use whichever comes back valid
+
+STEP 6: UniCourt Enhancement (automated)
+  → Search owner name in court records
+  → If DIVORCE filing found → add distress signal
+  → If BANKRUPTCY filing found → add distress signal
+  → If TAX LIEN found → add distress signal
+  → These feed back into both TPE distress score AND MVA
+
+CONFIDENCE SCORING:
+  95-100%: 3+ sources agree on email + phone + address matches LLC
+  85-94%:  2 sources agree on email, address matches LLC
+  70-84%:  1 source has email (NeverBounce verified), address matches
+  50-69%:  Email guessed + NeverBounce verified, partial address match
+  Below 50%: Flag for manual review, do not auto-enter
+```
+
+---
+
+## 🤖 UPDATED AGENT ROSTER — WITH DATA COLLECTION AGENTS
+
+### New Agents for MVA Data Collection
+
+**Agent: "The Comp Puller" (RE Apps)**
+- **Machine:** Mac Mini 48GB
+- **LLM:** Qwen 3.5 (local Ollama)
+- **Source:** RE Apps (company internal database — direct login)
+- **Schedule:** Daily at 4:00 AM
+- **What it does:**
+  - Logs into RE Apps using company credentials
+  - Pulls all new lease comps from the last 24 hours
+  - Pulls all new sale comps from the last 24 hours
+  - Extracts: address, SF, price/rate, date, parties, submarket
+  - Writes to `mva_comps` table
+  - This is the BACKBONE of MVA — real comps from real deals
+- **Why it matters:** RE Apps has your company's actual closed deals. This is more accurate than any third-party source. Your competitors are guessing at comps — you have the real numbers, updated daily.
+
+**Agent: "The Ingester" (Email Parser)**
+- **Machine:** Mac Mini 48GB
+- **LLM:** Qwen 3.5 (local Ollama)
+- **Source:** Dedicated email inboxes (AIR, CoStar, title company)
+- **Schedule:** Every hour
+- **What it does:**
+  - Checks `air-feed@fleet-email.com` for AIR daily super sheets
+  - Checks `costar-feed@fleet-email.com` for CoStar alerts
+  - Checks `title-feed@fleet-email.com` for title company reports
+  - Downloads PDF/HTML attachments
+  - Parses content using local LLM to extract structured data
+  - AIR super sheets → `mva_listings` (new listings, price changes, closings)
+  - CoStar alerts → `mva_listings` (supplementary listing data)
+  - Title reports → `loan_maturities` (quarterly debt/maturity data)
+
+**Agent: "The Public Records Agent"**
+- **Machine:** Mac Mini 64GB
+- **LLM:** Local Ollama
+- **Source:** County Assessor + County Recorder (public records)
+- **Schedule:** Daily at 3:00 AM
+- **What it does:**
+  - Scrapes county assessor for tax assessment data
+  - Scrapes county recorder for new deeds, liens, mortgages, transfers
+  - Detects ownership changes (new deed = someone just bought/sold)
+  - Feeds `mva_assessments` table (assessment gap score)
+  - Feeds `property_distress` table (new liens, new mortgages)
+
+**Agent: "The Court Monitor" (UniCourt)**
+- **Machine:** Mac Mini 64GB
+- **LLM:** Local Ollama + UniCourt API
+- **Source:** UniCourt API
+- **Schedule:** Weekly (Sunday night)
+- **What it does:**
+  - Takes all property owner names from CRM
+  - Searches UniCourt API for court cases
+  - Flags: divorce, bankruptcy, foreclosure, tax liens, lawsuits
+  - Matches case parties against property owners
+  - Updates `property_distress` table with court-sourced signals
+  - This is a HUGE competitive advantage — nobody else is checking court records against property ownership
+
+**Agent: "The Deal Hunter" (MVA Calculator)**
+- **Machine:** Mac Studio 128GB
+- **LLM:** Llama 70B (local — needs the big brain for analysis)
+- **Source:** All MVA tables (mva_comps, mva_listings, mva_assessments, mva_catalysts, property_distress)
+- **Schedule:** Daily at 5:00 AM (after all data collection agents finish)
+- **What it does:**
+  - For every active listing in `mva_listings`:
+    1. Pulls comparable comps from `mva_comps` (RE Apps data) within 2 mi, same type, same size range, last 12 months
+    2. Calculates price gap: (avg comp $/SF - asking $/SF) / avg comp $/SF
+    3. Pulls assessment from `mva_assessments`, calculates gap
+    4. Calculates days on market from `date_listed`
+    5. Checks for nearby catalysts in `mva_catalysts`
+    6. Checks for owner distress signals in `property_distress`
+    7. Stacks all signals → MVA score (0-100)
+  - Writes MVA scores to property records
+  - Identifies "stacked misalignments" (3+ signals on one property)
+  - Generates the morning deal report for Houston
+
+### Updated Full Agent Roster
+
+```
+MAC MINI 48GB — "Data Collection + Workers"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📊 Comp Puller      → RE Apps login        → 4:00 AM daily
+  📧 Ingester         → Email parsing (AIR, CoStar, title) → hourly
+  🔍 Enricher         → OpenCorporates API + enrichment queue → nightly
+  🌐 Researcher       → Internet intel gathering → continuous
+  🎯 Matcher          → AIR report → outreach matching → on new reports
+
+MAC MINI 64GB — "Intelligence + QA"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🏛️ Public Records   → County assessor + recorder → 3:00 AM daily
+  ⚖️ Court Monitor    → UniCourt API → Sunday nights
+  📡 Scout            → AI/tech news scanning → continuous
+  📝 Logger           → Daily activity documentation → end of day
+  ✅ GPT Validator    → QA (GPT-4 API) → every 10-15 min
+  ✅ Gemini Validator → QA (Gemini API) → every 10-15 min
+
+MAC STUDIO 128GB — "Brain + Analysis"
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🧠 Houston          → Claude Opus API → 6:00 AM briefing + on-demand
+  🎯 Deal Hunter      → MVA calculation → 5:00 AM daily
+  📣 Publisher        → Social media content → daily
+  🤝 Relationship Mgr → Client nurture → continuous
+
+TOTAL: 14 agents across 3 machines
+       7 use local Ollama models (FREE)
+       1 uses Llama 70B local (FREE)
+       3 use cloud APIs (Claude, GPT, Gemini)
+       3 are hybrid (local LLM + external API calls)
+```
+
+### Nightly Data Pipeline Timeline
+
+```
+ 2:00 AM — Public Records Agent scrapes county assessor + recorder
+ 3:00 AM — Court Monitor runs UniCourt API batch (weekly only)
+ 4:00 AM — Comp Puller logs into RE Apps, pulls latest comps ← KEY
+ 4:30 AM — Ingester checks email for AIR super sheet + CoStar alerts
+ 5:00 AM — Deal Hunter runs MVA calculations:
+              RE Apps comps vs AIR listings → price gaps
+            + County assessor data → assessment gaps
+            + DOM calculation → staleness scoring
+            + UniCourt matches → owner distress signals
+            + Catalyst proximity → infrastructure value
+            = MVA SCORES CALCULATED FOR ALL PROPERTIES
+ 5:30 AM — Enricher generates enrichment queue:
+              Top MVA properties missing contact data
+            + OpenCorporates → LLC owner names
+            + Pre-fills search instructions for David
+ 6:00 AM — Houston reviews everything, sends morning briefing:
+
+    "Good morning David. Overnight results:
+
+     📊 RE Apps: 4 new comps pulled
+        Avg industrial lease rate: $1.12/SF (up $0.03)
+
+     📋 AIR Super Sheet: 6 new listings, 2 price drops
+
+     🔥 TOP DEAL: 1234 Commerce Dr
+        MVA: 94 | TPE: 72 | Blended: 81 (Tier A+)
+        Listed $69/SF, RE Apps comps say $82/SF (16% below)
+        UniCourt: DIVORCE FILING 3 months ago ⚠️
+        Assessment: $2.1M vs est. market $3.5M
+        DOM: 247 days
+        ALL SIGNALS STACKED. THIS IS YOUR DEAL.
+
+     📋 Enrichment queue: 4 owners to look up (~15 min)
+        #1 John Smith (Commerce Dr) — PRIORITY HIGH"
+
+ 7:00 AM — David spends 15-20 min on supervised enrichment:
+              OpenClaw drives browser
+              David clicks CAPTCHAs
+              Agent cross-references + verifies
+ 7:30 AM — Call sheet ready, fully enriched, go make money
+```
+
+---
+
 ## 🎯 PRIORITY ORDER
 
 1. **Contact Verification Workflow** — immediate ROI, feeds every campaign
-2. **AIR Report Matching + Outreach** — direct deal flow generation  
-3. **Market Intelligence Monitoring** — ongoing signal gathering
-4. **Self-improvement loop** — Claude reviewing logs + refining agents
-5. **Voice team member on Zoom** — fun project once foundation is solid
+2. **RE Apps Comp Puller + AIR Ingester** — feeds MVA scoring, the deal-finding edge
+3. **MVA Score Integration into TPE** — the feature that finds deals competitors miss
+4. **AIR Report Matching + Outreach** — direct deal flow generation
+5. **Market Intelligence Monitoring** — ongoing signal gathering
+6. **Supervised Enrichment Queue** — 10x faster contact research with OpenClaw assist
+7. **Self-improvement loop** — Claude reviewing logs + refining agents
+8. **Social Media Publisher** — positions David as market expert
+9. **Voice team member on Zoom** — fun project once foundation is solid
 
 ---
 
