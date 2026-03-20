@@ -15,7 +15,48 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+const ALLOWED_ORIGINS = [
+  'https://ie-crm.vercel.app',
+  'https://ie-crm-davidmudgejr-3693s-projects.vercel.app',
+];
+
+// Allow localhost in development
+if (process.env.NODE_ENV !== 'production') {
+  ALLOWED_ORIGINS.push('http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173');
+}
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+    if (ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS blocked: ${origin}`));
+  },
+  credentials: true,
+}));
+
+const rateLimit = require('express-rate-limit');
+
+// General API rate limit: 200 requests per minute per IP
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests, please try again later' },
+});
+
+// Strict limiter for auth endpoints: 10 attempts per 15 minutes
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts, please try again in 15 minutes' },
+});
+
+app.use('/api', apiLimiter);
+
 app.use(express.json({ limit: '50mb' }));
 
 // ============================================================
@@ -73,7 +114,7 @@ const bcrypt = require('bcryptjs');
 const { requireAuth, optionalAuth, signToken } = require('./middleware/auth');
 
 // POST /api/auth/login — email + password → JWT
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authLimiter, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not configured' });
   try {
     const { email, password } = req.body;
@@ -121,7 +162,7 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
 });
 
 // POST /api/auth/change-password
-app.post('/api/auth/change-password', requireAuth, async (req, res) => {
+app.post('/api/auth/change-password', authLimiter, requireAuth, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not configured' });
   try {
     const { currentPassword, newPassword } = req.body;
