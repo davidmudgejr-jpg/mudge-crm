@@ -972,17 +972,19 @@ THAT'S THE DEAL YOUR COMPETITORS ARE MISSING.
 
 Every data source David uses, how it connects to the agent system, and what feeds what.
 
-### Tier 1: Direct Agent Access (Fully Automated)
+### Tier 1: Direct Agent Access (Fully Automated, 24/7)
 
 | Source | Data | API/Method | Cost | Feeds |
 |--------|------|-----------|------|-------|
-| **RE Apps** (company internal DB) | Lease comps, sale comps | Agent logs in directly, pulls daily | Free (company tool) | `mva_comps` table — THE most important comp source |
-| **UniCourt** | Court cases: divorce, bankruptcy, liens, lawsuits | REST API | ~$99-300/mo | `property_distress` table + MVA distress signals |
-| **OpenCorporates** | LLC/corp data: owner names, registered agents, addresses | REST API | Free tier + ~$100/mo | `contacts` enrichment + enrichment queue generation |
-| **NeverBounce** | Email verification (valid/invalid/unknown) | REST API | ~$8/1000 verifications | Contact confidence scoring |
+| **Reonomy** 🏆 | TRUE OWNER behind LLCs, owner contacts, property data, debt, portfolio info. 30M+ owners, 54M+ commercial properties. **The #1 data source for CRE.** | REST API | ~$200-400/mo | Replaces OpenCorporates + ATTOM + BatchData. Feeds contacts, mva_assessments, property ownership, portfolio intelligence |
+| **RE Apps** (company internal DB) | Lease comps, sale comps from actual closed deals | Agent logs in directly | Free (company tool) | `mva_comps` table — THE most important comp source. Real data from real deals, not estimates |
+| **UniCourt** | Court cases: divorce, bankruptcy, liens, lawsuits, foreclosure | REST API | ~$99-300/mo | `property_distress` table + MVA distress signals. Matches owner names against court records |
+| **NeverBounce** | Email verification (valid/invalid/unknown) | REST API | ~$8/1000 verifications | Contact confidence scoring. Fires on-demand whenever any agent finds an email |
 | **Instantly** | Email campaign sending (12 addresses) | REST API | Already paying | Outreach campaigns after approval |
 | **County Assessor** | Tax assessments, property details, assessed values | Public records scrape | Free | `mva_assessments` table → MVA assessment gap score |
 | **County Recorder** | Deeds, mortgages, liens, ownership transfers | Public records scrape | Free | `property_distress` + ownership change detection |
+
+**Why Reonomy is the centerpiece:** Reonomy's "True Owner" feature identifies the actual person behind an LLC — the thing David currently spends hours doing manually with OpenCorporates + BeenVerified + WhitePages. One Reonomy API call returns: true owner name, contact info, connected entities, full property portfolio, mortgage data, and assessed value. It replaces 3-4 separate tools.
 
 ### Tier 2: Email Pipeline (Agent Parses Forwarded Emails)
 
@@ -1100,68 +1102,100 @@ CAPTCHA NOTE:
   1 button every 3 minutes.
 ```
 
-### Data Sources NOT Currently Used (Future Additions)
+### Data Sources NOT Currently Used (Future Additions If Needed)
 
 | Source | Data | Status | Priority |
 |--------|------|--------|----------|
-| **Reonomy** | Ownership + debt data | Not using | Medium — could supplement title company data |
-| **PropStream** | Owner data, liens, pre-foreclosure | Not using | Medium — ~$99/mo, good distress data |
-| **ATTOM Data** | Deep property records | Not using | Low — $200-500/mo, may be overkill |
-| **LandVision** | Ownership, building info | Using but not critical | Low — covered by other sources |
+| **People Data Labs** | B2B people data, 3B+ profiles | Not using — Reonomy covers owner contacts | Low — add only if Reonomy's contact data is insufficient for non-owner lookups |
+| **ATTOM Data** | Deep property records, 158M+ properties | Not using — Reonomy covers property data | Low — add only if Reonomy's property data is insufficient |
+| **BatchData** | Property + skip tracing | Not using — Reonomy covers this | Low — Reonomy is superior for CRE |
+| **PropStream** | Owner data, liens, pre-foreclosure | Not using | Low — ~$99/mo, Reonomy + county records cover this |
+| **LandVision** | Ownership, building info | Using but not critical | Low — covered by Reonomy |
+| **Spokeo** | Social media + public records aggregation | Not using | Low — mixed accuracy reviews, not CRE-specific |
 
 ### Cross-Reference Logic (David's Secret Sauce, Encoded in Agent Instructions)
 
 David's manual enrichment process is a sophisticated multi-source verification system. The agent must follow this EXACT logic:
 
 ```
-STEP 1: OpenCorporates (automated)
-  → Get LLC name + registered agent name + filing address
-  → This is the ANCHOR — everything else cross-references against this
+STEP 1: Reonomy API (automated — THE NEW ANCHOR)
+  → Input: property address or owner entity name
+  → Returns: TRUE OWNER name, contact info, mailing address,
+    connected LLCs, full property portfolio, mortgage data
+  → This replaces the old OpenCorporates step AND gives
+    contact data that used to require manual lookups
+  → Example: "XYZ Holdings LLC" → "John A. Smith,
+    john@smithcapital.com, (909) 555-1234,
+    456 Oak Ave, Rancho Cucamonga. Also owns 5 other
+    properties via Smith Industrial LLC."
 
-STEP 2: BeenVerified (manual lookup)
-  → Search: [owner name] + [city from LLC filing]
-  → LOOK FOR: address matching LLC filing address
-  → GRAB: phone, email, other addresses
-  → If multiple results: pick the one with matching address
+STEP 2: UniCourt API (automated — runs immediately after Step 1)
+  → Search: owner name from Reonomy + county
+  → Flags: divorce, bankruptcy, foreclosure, tax liens, lawsuits
+  → These feed into BOTH TPE distress score AND MVA
+  → Example: "John A. Smith — DIVORCE FILING Dec 2025 ⚠️"
 
-STEP 3: WhitePages (manual lookup)
-  → Search: same name + city
-  → LOOK FOR: same address match
-  → GRAB: phone, email
-
-STEP 4: Cross-Reference (automated by agent)
-  → BeenVerified email = WhitePages email?
-     YES → HIGH confidence (90%+)
-     NO  → MEDIUM confidence, flag for review
-  → BeenVerified phone = WhitePages phone?
-     YES → Confirms identity
-     NO  → Use the one that matches more sources
-  → Address matches LLC filing?
-     YES → CONFIRMED this is the right person
-     NO  → May be a different John Smith, flag for review
-
-STEP 5: Email Verification (automated)
-  → If email found → NeverBounce API → valid/invalid
-  → If NO email found → try common patterns:
+STEP 3: NeverBounce API (automated — runs immediately after Step 1)
+  → Verify email from Reonomy → valid/invalid
+  → If NO email from Reonomy → try common patterns:
      [first].[last]@[company-domain].com
      [first initial][last]@[company-domain].com
      [first]@[company-domain].com
   → Run all patterns through NeverBounce
   → Use whichever comes back valid
 
-STEP 6: UniCourt Enhancement (automated)
-  → Search owner name in court records
-  → If DIVORCE filing found → add distress signal
-  → If BANKRUPTCY filing found → add distress signal
-  → If TAX LIEN found → add distress signal
-  → These feed back into both TPE distress score AND MVA
+STEP 4: Agent Pre-Confidence Scoring (automated)
+  → Reonomy True Owner identified? +30 points
+  → Reonomy has email? +20 points
+  → NeverBounce verified email? +15 points
+  → Reonomy has phone? +15 points
+  → Reonomy address matches property records? +10 points
+  → UniCourt search completed (clean or distress)? +10 points
+  → PRE-CONFIDENCE = sum of above (max 100)
 
-CONFIDENCE SCORING:
-  95-100%: 3+ sources agree on email + phone + address matches LLC
-  85-94%:  2 sources agree on email, address matches LLC
-  70-84%:  1 source has email (NeverBounce verified), address matches
-  50-69%:  Email guessed + NeverBounce verified, partial address match
-  Below 50%: Flag for manual review, do not auto-enter
+  IF PRE-CONFIDENCE ≥ 85:
+    → Auto-enter contact into CRM (high confidence from API data alone)
+    → Queue for morning VERIFICATION (not enrichment — just confirm)
+    → David's morning task: quick 1-min confirm on BeenVerified/WhitePages
+
+  IF PRE-CONFIDENCE 60-84:
+    → Queue for morning ENRICHMENT (need manual data to fill gaps)
+    → Agent generates specific search instructions
+    → David's morning task: 3-min lookup on BeenVerified + WhitePages
+
+  IF PRE-CONFIDENCE < 60:
+    → Queue but lower priority — Reonomy didn't find much
+    → Might need CoStar deep research or ZoomInfo
+
+STEP 5: Manual Verification/Enrichment (David, morning, only if needed)
+  → BeenVerified: search [owner name] + [city]
+     LOOK FOR: address matching Reonomy's mailing address
+     GRAB: any additional phone, email, addresses
+  → WhitePages: same search
+     LOOK FOR: same address match
+     CROSS-REFERENCE: Does WhitePages confirm Reonomy's data?
+
+STEP 6: Final Cross-Reference (automated by agent)
+  → Reonomy email = BeenVerified email = WhitePages email?
+     ALL 3 MATCH → 98%+ confidence (bulletproof)
+  → Reonomy email + NeverBounce valid, BeenVerified confirms?
+     → 95% confidence
+  → Reonomy data only, NeverBounce valid, no manual verify?
+     → 85% confidence (still very good — Reonomy is reliable)
+  → Write final contact to CRM with confidence score
+
+CONFIDENCE SCORING (updated for Reonomy-anchored flow):
+  95-100%: Reonomy + NeverBounce + BeenVerified/WhitePages all agree
+  85-94%:  Reonomy + NeverBounce verified, no manual verification yet
+  70-84%:  Reonomy found owner but missing email or phone
+  50-69%:  Reonomy partial match, email guessed + NeverBounce verified
+  Below 50%: Reonomy couldn't identify true owner, needs manual research
+
+KEY INSIGHT: With Reonomy as the anchor, MOST contacts will
+pre-score at 85%+ before David even wakes up. The morning
+verification session becomes a CONFIRMATION step, not a
+research step. David goes from "finding" contacts to
+"confirming" contacts the agent already found.
 ```
 
 ---
@@ -1276,32 +1310,75 @@ TOTAL: 14 agents across 3 machines
        3 are hybrid (local LLM + external API calls)
 ```
 
-### Nightly Data Pipeline Timeline
+### Agent Processing Rhythms — Continuous, Not Batch
+
+**Key principle:** Agents run 24/7. Data is processed as it arrives, not in nightly batches. The only scheduled events are the morning briefing and end-of-day summary. Everything else is continuous or event-triggered.
 
 ```
- 2:00 AM — Public Records Agent scrapes county assessor + recorder
- 3:00 AM — Court Monitor runs UniCourt API batch (weekly only)
- 4:00 AM — Comp Puller logs into RE Apps, pulls latest comps ← KEY
- 4:30 AM — Ingester checks email for AIR super sheet + CoStar alerts
- 5:00 AM — Deal Hunter runs MVA calculations:
-              RE Apps comps vs AIR listings → price gaps
-            + County assessor data → assessment gaps
-            + DOM calculation → staleness scoring
-            + UniCourt matches → owner distress signals
-            + Catalyst proximity → infrastructure value
-            = MVA SCORES CALCULATED FOR ALL PROPERTIES
- 5:30 AM — Enricher generates enrichment queue:
-              Top MVA properties missing contact data
-            + OpenCorporates → LLC owner names
-            + Pre-fills search instructions for David
- 6:00 AM — Houston reviews everything, sends morning briefing:
+ALWAYS RUNNING (24/7 continuous):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🔍 Enricher — New contact/property? → Reonomy lookup IMMEDIATELY
+     → Don't wait until morning. Enrich NOW.
+     → Triggers UniCourt + NeverBounce in cascade
+     → By the time David sees it, it's already enriched
 
-    "Good morning David. Overnight results:
+  📧 Ingester — Checks email every 15-30 minutes
+     → AIR super sheet arrives at 10 AM? Parsed by 10:15 AM
+     → CoStar alert at 2 PM? In database by 2:15 PM
+     → Title company report? Processed immediately
+
+  🌐 Researcher — Continuously scanning for market signals
+  📡 Scout — Continuously scanning AI/tech news
+
+EVENT-TRIGGERED (fires when new data arrives):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📊 Comp Puller — Checks RE Apps every 2-4 hours
+     → New comp at 11 AM? Pulled by noon. Not tomorrow.
+
+  ⚖️ Court Monitor — Fires per-owner when Enricher finds a name
+     → ALSO does full database sweep weekly (Sunday night)
+
+  🏛️ Public Records — Checks county sites every 4-6 hours
+     → New lien at 1 PM? Detected by 5 PM
+
+  ✅ Verifier — Fires INSTANTLY when any agent finds an email
+     → No schedule. Pure on-demand.
+
+  🎯 Deal Hunter — Re-runs when significant new data arrives
+     → 5+ new comps? → Recalculate affected MVA scores NOW
+     → New AIR super sheet parsed? → Recalculate NOW
+     → New price reduction detected? → Recalculate NOW
+
+SCHEDULED (specific times, for compiled reporting):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🧠 Houston — 6 AM morning briefing (compiled overnight results)
+              + 2:30 PM afternoon update (if Deal Hunter found something midday)
+              + Real-time Telegram alerts for 🔥 high-MVA deals anytime
+  📝 Logger — Continuous logging + 10 PM end-of-day summary
+  📣 Publisher — Posts at optimal times: 7 AM, 12 PM, 5 PM
+  ✅ GPT/Gemini QA — Validates agent output every 10-15 minutes
+```
+
+**Why continuous beats batch:** An AIR super sheet arriving at 10 AM with a price reduction shouldn't wait 19 hours to be processed. With continuous processing, David gets a Telegram alert by 10:50 AM and can call the owner before lunch. Competitors who batch-process won't know about it until tomorrow.
+
+### What a Typical Day Actually Looks Like
+
+```
+OVERNIGHT (you're sleeping, agents are working):
+  Throughout the night, agents continuously:
+  → Pull new comps from RE Apps (every 2-4 hours)
+  → Check county records for new filings (every 4-6 hours)
+  → Enrich any new contacts via Reonomy + UniCourt + NeverBounce
+  → Deal Hunter recalculates MVA whenever new data arrives
+
+6:00 AM — Houston compiles the morning briefing:
+    "Good morning David. Since last night:
 
      📊 RE Apps: 4 new comps pulled
         Avg industrial lease rate: $1.12/SF (up $0.03)
 
-     📋 AIR Super Sheet: 6 new listings, 2 price drops
+     📋 AIR Super Sheet (yesterday 10:15 AM): already processed
+        6 new listings, 2 price drops — all in your TPE
 
      🔥 TOP DEAL: 1234 Commerce Dr
         MVA: 94 | TPE: 72 | Blended: 81 (Tier A+)
@@ -1311,15 +1388,42 @@ TOTAL: 14 agents across 3 machines
         DOM: 247 days
         ALL SIGNALS STACKED. THIS IS YOUR DEAL.
 
-     📋 Enrichment queue: 4 owners to look up (~15 min)
-        #1 John Smith (Commerce Dr) — PRIORITY HIGH"
+        Owner: John A. Smith (Reonomy True Owner ✅)
+        Email: john@smithcapital.com (NeverBounce verified ✅)
+        Phone: (909) 555-1234
+        PRE-CONFIDENCE: 88%
+        Portfolio: 6 properties across IE, ~$14M total
 
- 7:00 AM — David spends 15-20 min on supervised enrichment:
+     📋 Verification queue: 4 owners to CONFIRM (~10 min)
+        Most already pre-enriched by Reonomy overnight.
+        Just need quick BeenVerified/WhitePages confirm."
+
+7:00 AM — David spends 10-15 min on supervised VERIFICATION:
+              (not research — just confirming what agents found)
               OpenClaw drives browser
               David clicks CAPTCHAs
-              Agent cross-references + verifies
- 7:30 AM — Call sheet ready, fully enriched, go make money
+              Agent confirms Reonomy data against BV/WP
+7:15 AM — Call sheet ready, fully enriched, go make money
+
+10:15 AM — New AIR super sheet arrives → parsed in 15 min
+10:50 AM — Houston Telegram alert:
+    "🔥 Price drop detected: 5678 Industrial just reduced
+     from $3.8M to $3.4M. Now 12% below comps.
+     MVA jumped from 52 → 76.
+     Reonomy lookup in progress..."
+
+11:00 AM — Enricher already has the owner enriched:
+    "Owner found. Sarah Chen, Chen Capital LLC.
+     Phone + email verified. Ready to call."
+
+2:30 PM — Houston afternoon update:
+    "3 new comps pulled from RE Apps since this morning.
+     No significant MVA changes. All systems nominal."
+
+10:00 PM — Logger end-of-day summary
 ```
+
+**API cost is roughly the same** whether you batch or run continuously. Reonomy only fires when there's a NEW contact to look up (not re-checking existing ones). UniCourt only searches new names. NeverBounce is ~$0.008 per email. The difference is you get data 19 hours sooner.
 
 ---
 
@@ -1419,26 +1523,64 @@ This architecture document describes the foundational 3-tier (Local → QA → C
 
 ---
 
-## 💰 MONTHLY COST ESTIMATE (Full Fleet)
+## 💰 MONTHLY COST ESTIMATE (Full Fleet + Data Sources)
+
+### Agent Compute Costs
 
 | Agent | LLM | Cost | Machine |
 |-------|-----|------|---------|
 | Enricher | Qwen 3.5 (local Ollama) | **Free** | 48GB Mini |
+| Comp Puller | Qwen 3.5 (local Ollama) | **Free** | 48GB Mini |
+| Ingester | Qwen 3.5 (local Ollama) | **Free** | 48GB Mini |
 | Researcher | MiniMax 2.5 (local Ollama) | **Free** | 48GB Mini |
 | Matcher | Qwen 3.5 (local Ollama) | **Free** | 48GB Mini |
+| Public Records | Local Ollama | **Free** | 64GB Mini |
+| Court Monitor | Local Ollama | **Free** | 64GB Mini |
 | Scout | MiniMax 2.5 (local Ollama) | **Free** | 64GB Mini |
 | Logger | Qwen 3.5 (local Ollama) | **Free** | 64GB Mini |
 | GPT Validator | GPT-4 API (cloud) | ~$5-10/mo | 64GB Mini |
 | Gemini Validator | Gemini Pro API (cloud) | ~$3-8/mo | 64GB Mini |
 | Houston | Claude Opus API (cloud) | ~$15-30/mo | 128GB Studio |
-| Analyst | Llama 70B (local Ollama) | **Free** | 128GB Studio |
-| **Electricity** | 3 machines 24/7 | ~$15-25/mo | All |
-| **TOTAL** | | **~$40-75/month** | |
+| Deal Hunter | Llama 70B (local Ollama) | **Free** | 128GB Studio |
+| Publisher | Local Ollama | **Free** | 128GB Studio |
+| Relationship Mgr | Local Ollama | **Free** | 128GB Studio |
 
-The big win: 6 out of 9 agents run on FREE local models. You already paid for the hardware — the ongoing cost is just electricity + cloud API calls for the 3 brains that need it (Houston, GPT, Gemini).
+### Data Source Costs
+
+| Source | What It Provides | Monthly Cost |
+|--------|-----------------|-------------|
+| **Reonomy** 🏆 | True Owner, contacts, property data, portfolio, debt | ~$200-400/mo |
+| **UniCourt** | Court cases (divorce, bankruptcy, liens) | ~$99-300/mo |
+| **NeverBounce** | Email verification | ~$10/mo (~1200 verifications) |
+| **RE Apps** | Lease + sale comps (company internal) | **Free** |
+| **AIR** | Daily super sheets (email parsing) | **Free** (existing subscription) |
+| **County Assessor** | Tax assessments | **Free** (public records) |
+| **County Recorder** | Deeds, liens, mortgages | **Free** (public records) |
+| **BeenVerified** | Manual verification/cross-reference | ~$27/mo |
+| **WhitePages** | Manual verification/cross-reference | ~$27/mo |
+| **Instantly** | Email campaign sending (12 addresses) | Existing subscription |
+| **Electricity** | 3 machines running 24/7 | ~$15-25/mo |
+
+### Total Monthly Operating Cost
+
+```
+AGENT CLOUD APIs:     ~$25-50/mo   (Houston + GPT + Gemini)
+DATA SOURCE APIs:     ~$310-710/mo (Reonomy + UniCourt + NeverBounce)
+MANUAL TOOLS:         ~$54/mo      (BeenVerified + WhitePages)
+INFRASTRUCTURE:       ~$15-25/mo   (electricity)
+LOCAL MODEL COMPUTE:  FREE         (11 agents on local Ollama)
+═══════════════════════════════════════════════════
+TOTAL:                ~$404-839/mo
+
+THE ROI:
+  One commercial RE deal commission: $25K-250K+
+  Annual system cost: ~$5K-10K
+  System pays for itself with ONE DEAL per year.
+  Everything after that is pure profit advantage.
+```
 
 ---
 
 *Created: March 2026*
-*Updated: March 2026 — Added OpenClaw fleet architecture, 3-machine phased setup, fleet Apple ID, Tier 2 as full OpenClaw agents, monthly cost estimate*
+*Updated: March 2026 — Added OpenClaw fleet architecture, 3-machine phased setup, fleet Apple ID, Tier 2 as full OpenClaw agents, MVA scoring system, Reonomy as primary data source, continuous 24/7 agent processing, full data source pipeline with cross-referencing, supervised enrichment workflow*
 *For: IE CRM / Inland Empire Commercial Real Estate*
