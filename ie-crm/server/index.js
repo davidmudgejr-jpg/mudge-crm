@@ -434,6 +434,178 @@ app.get('/api/claude/status', (_req, res) => {
 });
 
 // ============================================================
+// AI PROXY ROUTES (OAuth Bearer token — Claude Max subscription)
+// ============================================================
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+const AI_MODEL = 'claude-sonnet-4-6';
+const AI_MAX_TOKENS = 4096;
+
+// Rate limiter for AI endpoints: 30 requests/minute per user
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => req.user?.user_id || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'AI rate limit reached. Try again in a minute.' },
+});
+
+function getOAuthToken() {
+  const token = process.env.ANTHROPIC_OAUTH_TOKEN;
+  if (!token) return null;
+  return token;
+}
+
+function buildAnthropicPayload(body) {
+  const { messages, system, max_tokens } = body;
+  if (!messages || !Array.isArray(messages) || messages.length === 0) {
+    return { error: 'messages array is required' };
+  }
+  return {
+    model: AI_MODEL,
+    max_tokens: max_tokens || AI_MAX_TOKENS,
+    messages,
+    ...(system ? { system } : {}),
+  };
+}
+
+function handleAnthropicError(status, data) {
+  if (status === 429) return { code: 429, message: 'Claude is rate limited. Please wait a moment and try again.' };
+  if (status === 529) return { code: 529, message: 'Claude is temporarily overloaded. Try again in a few seconds.' };
+  if (status === 401) return { code: 401, message: 'OAuth token is invalid or expired. Check ANTHROPIC_OAUTH_TOKEN on Railway.' };
+  return { code: status, message: data?.error?.message || `Anthropic API error (${status})` };
+}
+
+// POST /api/ai/chat — SSE streaming proxy
+app.post('/api/ai/chat', aiLimiter, async (req, res) => {
+  const token = getOAuthToken();
+  if (!token) return res.status(503).json({ error: 'AI not configured. Set ANTHROPIC_OAUTH_TOKEN on Railway.' });
+
+  const payload = buildAnthropicPayload(req.body);
+  if (payload.error) return res.status(400).json({ error: payload.error });
+
+  // Set SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  res.flushHeaders();
+
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({ ...payload, stream: true }),
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      const err = handleAnthropicError(response.status, errData);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`);
+      res.end();
+      return;
+    }
+
+    // Pipe the SSE stream from Anthropic to the client
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const chunk = decoder.decode(value, { stream: true });
+      res.write(chunk);
+    }
+
+    res.end();
+  } catch (err) {
+    console.error('[ai/chat] Stream error:', err.message);
+    res.write(`data: ${JSON.stringify({ type: 'error', error: 'Connection to Claude failed' })}\n\n`);
+    res.end();
+  }
+});
+
+// POST /api/ai/chat/sync — non-streaming JSON response
+app.post('/api/ai/chat/sync', aiLimiter, async (req, res) => {
+  const token = getOAuthToken();
+  if (!token) return res.status(503).json({ error: 'AI not configured. Set ANTHROPIC_OAUTH_TOKEN on Railway.' });
+
+  const payload = buildAnthropicPayload(req.body);
+  if (payload.error) return res.status(400).json({ error: payload.error });
+
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const err = handleAnthropicError(response.status, data);
+      return res.status(err.code).json({ error: err.message });
+    }
+
+    // Extract text content from response
+    const text = (data.content || [])
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('\n\n');
+
+    res.json({
+      content: text,
+      model: data.model,
+      usage: data.usage,
+      stop_reason: data.stop_reason,
+    });
+  } catch (err) {
+    console.error('[ai/chat/sync] Error:', err.message);
+    res.status(500).json({ error: 'Failed to reach Claude' });
+  }
+});
+
+// GET /api/ai/status — health check (validates OAuth token)
+app.get('/api/ai/status', async (_req, res) => {
+  const token = getOAuthToken();
+  if (!token) return res.json({ status: 'not_configured', message: 'ANTHROPIC_OAUTH_TOKEN not set' });
+
+  try {
+    const response = await fetch(ANTHROPIC_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        max_tokens: 10,
+        messages: [{ role: 'user', content: 'ping' }],
+      }),
+    });
+
+    if (response.ok) {
+      res.json({ status: 'connected', model: AI_MODEL });
+    } else {
+      const data = await response.json().catch(() => ({}));
+      const err = handleAnthropicError(response.status, data);
+      res.json({ status: 'error', message: err.message });
+    }
+  } catch (err) {
+    res.json({ status: 'error', message: err.message });
+  }
+});
+
+// ============================================================
 // FILE PARSING ROUTES
 // ============================================================
 app.post('/api/file/parse', async (req, res) => {
