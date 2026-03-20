@@ -189,6 +189,111 @@ app.post('/api/auth/change-password', authLimiter, requireAuth, async (req, res)
 app.use('/api', requireAuth);
 
 // ============================================================
+// USER MANAGEMENT (admin only)
+// ============================================================
+app.get('/api/users', requireRole('admin'), async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const result = await pool.query(
+      'SELECT user_id, email, display_name, role, avatar_color, created_at, last_login FROM users ORDER BY created_at'
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[users] List error:', err.message);
+    res.status(500).json({ error: 'Failed to list users' });
+  }
+});
+
+app.post('/api/users', requireRole('admin'), async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { email, display_name, password, role, avatar_color } = req.body;
+    if (!email || !display_name || !password) {
+      return res.status(400).json({ error: 'Email, name, and password required' });
+    }
+    if (!['admin', 'broker', 'readonly'].includes(role || 'broker')) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+
+    const existing = await pool.query('SELECT user_id FROM users WHERE email = $1', [email.toLowerCase().trim()]);
+    if (existing.rows.length > 0) {
+      return res.status(409).json({ error: 'Email already in use' });
+    }
+
+    const password_hash = await bcrypt.hash(password, 10);
+    const result = await pool.query(
+      `INSERT INTO users (email, display_name, password_hash, role, avatar_color)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING user_id, email, display_name, role, avatar_color, created_at`,
+      [email.toLowerCase().trim(), display_name, password_hash, role || 'broker', avatar_color || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[users] Create error:', err.message);
+    res.status(500).json({ error: 'Failed to create user' });
+  }
+});
+
+app.put('/api/users/:id', requireRole('admin'), async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { id } = req.params;
+    const { display_name, role, avatar_color } = req.body;
+
+    const sets = [];
+    const params = [];
+    let idx = 1;
+
+    if (display_name !== undefined) { sets.push(`display_name = $${idx++}`); params.push(display_name); }
+    if (role !== undefined) {
+      if (!['admin', 'broker', 'readonly'].includes(role)) {
+        return res.status(400).json({ error: 'Invalid role' });
+      }
+      sets.push(`role = $${idx++}`); params.push(role);
+    }
+    if (avatar_color !== undefined) { sets.push(`avatar_color = $${idx++}`); params.push(avatar_color); }
+
+    if (sets.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+    params.push(id);
+    const result = await pool.query(
+      `UPDATE users SET ${sets.join(', ')} WHERE user_id = $${idx}
+       RETURNING user_id, email, display_name, role, avatar_color, created_at, last_login`,
+      params
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[users] Update error:', err.message);
+    res.status(500).json({ error: 'Failed to update user' });
+  }
+});
+
+app.post('/api/users/:id/reset-password', requireRole('admin'), async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    const result = await pool.query(
+      'UPDATE users SET password_hash = $1 WHERE user_id = $2 RETURNING user_id',
+      [hash, id]
+    );
+
+    if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[users] Reset password error:', err.message);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+// ============================================================
 // DATABASE ROUTES
 // ============================================================
 app.post('/api/db/query', async (req, res) => {
