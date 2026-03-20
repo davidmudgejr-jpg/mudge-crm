@@ -111,7 +111,8 @@ app.get('/robots.txt', (req, res) => {
 // AUTHENTICATION
 // ============================================================
 const bcrypt = require('bcryptjs');
-const { requireAuth, optionalAuth, signToken } = require('./middleware/auth');
+const { requireAuth, optionalAuth, requireRole, signToken } = require('./middleware/auth');
+const denyReadOnly = requireRole('admin', 'broker');
 
 // POST /api/auth/login — email + password → JWT
 app.post('/api/auth/login', authLimiter, async (req, res) => {
@@ -480,7 +481,7 @@ const TABLE_ID_COL = {
 };
 
 // ── Bulk delete records ──────────────────────────────────────────
-app.post('/api/bulk-delete', async (req, res) => {
+app.post('/api/bulk-delete', requireRole('admin'), async (req, res) => {
   try {
     const { table, ids } = req.body;
     const idCol = TABLE_ID_COL[table];
@@ -587,7 +588,7 @@ app.post('/api/import/preview', async (req, res) => {
 });
 
 // Batch import — insert rows in a single transaction
-app.post('/api/import/batch', async (req, res) => {
+app.post('/api/import/batch', denyReadOnly, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected' });
   try {
     const { target, rows, source, matchProperties, matchCompanies, linkRecords: doLinkRecords, onDuplicate = 'skip' } = req.body;
