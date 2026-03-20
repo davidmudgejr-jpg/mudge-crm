@@ -16,6 +16,7 @@ function extractUser(req) {
       user_id: payload.user_id,
       email: payload.email,
       display_name: payload.display_name,
+      role: payload.role || 'broker',
     };
   } catch {
     return null;
@@ -38,13 +39,31 @@ function optionalAuth(req, res, next) {
   next();
 }
 
+// Factory: returns middleware that checks user has one of the allowed roles
+function requireRole(...roles) {
+  return (req, res, next) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    if (!roles.includes(req.user.role)) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+    next();
+  };
+}
+
 // Generate a JWT for a user
 function signToken(user) {
   return jwt.sign(
-    { user_id: user.user_id, email: user.email, display_name: user.display_name },
+    {
+      user_id: user.user_id,
+      email: user.email,
+      display_name: user.display_name,
+      role: user.role || 'broker',
+    },
     JWT_SECRET,
     { expiresIn: '30d' }
   );
 }
 
-module.exports = { requireAuth, optionalAuth, signToken };
+module.exports = { requireAuth, optionalAuth, requireRole, signToken };
