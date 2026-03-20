@@ -64,7 +64,7 @@ export default function Settings() {
 
     try {
       const claudeRes = await claudeBridge.status();
-      setClaudeStatus(claudeRes?.configured || false);
+      setClaudeStatus(claudeRes?.status === 'connected' || claudeRes?.configured || false);
     } catch {
       setClaudeStatus(false);
     }
