@@ -6,38 +6,58 @@
 
 ## Overview
 
-Every agent in this system is a **separate OpenClaw instance** — its own process with its own memory, instruction files, and model assignment. They need to:
+Every agent in this system is a **separate OpenClaw instance** — its own process with its own memory, instruction files, model assignment, and Telegram bot. They need to:
 
-1. Start automatically when the Mac Mini boots
+1. Start automatically when each Mac boots
 2. Stay running 24/7 without babysitting
 3. Recover from crashes without losing work
-4. Not compete for resources on a 48GB machine
+4. Not compete for resources on their host machine
 5. Be individually controllable (start, stop, restart one agent without touching others)
 
-This document covers the full stack: from macOS process management to resource allocation to the supervisor that watches everything.
+**The fleet runs across 3 machines** (arriving in phases):
+- **Mac Mini 48GB** — "The Starter" — Tier 3 worker agents (arrives first)
+- **Mac Mini 64GB** — "The Specialist" — Tier 2 QA validators + support agents (arrives second)
+- **Mac Studio 128GB** — "The Beast" — Houston (Commander) + premium models (arrives third)
+
+This document covers the full stack: from macOS process management to resource allocation to the supervisor that watches everything across the fleet.
 
 ---
 
 ## Architecture Layers
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  macOS LaunchAgent                                  │
-│  (auto-starts on login, restarts on crash)          │
-│  └── agent-supervisor.py                            │
-│      ├── Enricher (OpenClaw + Qwen 3.5)             │
-│      ├── Researcher (OpenClaw + MiniMax 2.5)        │
-│      ├── Matcher (OpenClaw + Qwen 3.5 or MiniMax)   │
-│      ├── Scout (OpenClaw + MiniMax 2.5)             │
-│      ├── Logger (OpenClaw + lightweight)             │
-│      └── Tier 2 Scheduler (Ralph Loop cron)         │
-├─────────────────────────────────────────────────────┤
-│  Ollama (model server)                              │
-│  (also runs as LaunchAgent, serves models via API)  │
-├─────────────────────────────────────────────────────┤
-│  macOS                                              │
-│  (Mac Mini 48GB → later Mac Studio 128GB)            │
-└─────────────────────────────────────────────────────┘
+┌─── MAC MINI 48GB "The Starter" ─────────────────────┐
+│  macOS LaunchAgent                                   │
+│  └── agent-supervisor.py                             │
+│      ├── Enricher  (OpenClaw + Qwen 3.5 local)      │
+│      ├── Researcher(OpenClaw + MiniMax 2.5 local)    │
+│      └── Matcher   (OpenClaw + Qwen 3.5 local)      │
+│  Ollama (serves Qwen 3.5 + MiniMax 2.5)             │
+└──────────────────────────────────────────────────────┘
+
+┌─── MAC MINI 64GB "The Specialist" ──────────────────┐
+│  macOS LaunchAgent                                   │
+│  └── agent-supervisor.py                             │
+│      ├── Scout         (OpenClaw + MiniMax 2.5 local)│
+│      ├── Logger        (OpenClaw + Qwen 3.5 local)   │
+│      ├── GPT Validator (OpenClaw + GPT-4 API cloud)  │
+│      └── Gemini Valid. (OpenClaw + Gemini API cloud)  │
+│  Ollama (serves Qwen 3.5 + MiniMax 2.5)             │
+└──────────────────────────────────────────────────────┘
+
+┌─── MAC STUDIO 128GB "The Beast" ────────────────────┐
+│  macOS LaunchAgent                                   │
+│  └── agent-supervisor.py                             │
+│      ├── Houston   (OpenClaw + Claude Opus API cloud)│
+│      └── Analyst   (OpenClaw + Llama 70B local)      │
+│  Ollama (serves Llama 70B + Qwen 3.5 + more)        │
+└──────────────────────────────────────────────────────┘
+
+All 3 machines connect to:
+  → Neon Postgres (shared CRM database)
+  → Priority Board (shared coordination table)
+  → Sandbox DB (shared sandbox tables)
+  → No direct machine-to-machine communication needed
 ```
 
 ---
@@ -90,57 +110,63 @@ Create a LaunchAgent so Ollama starts automatically on login and stays running.
 launchctl load ~/Library/LaunchAgents/com.ollama.serve.plist
 ```
 
-### Resource Reality: Mac Mini M4 Pro (48GB Unified Memory)
+### Resource Reality: 3-Machine Fleet
 
-**Exact specs:** M4 Pro, 12-core CPU, 16-core GPU, 16-core Neural Engine, 48GB unified memory, 1TB SSD, Gigabit Ethernet. Arrives Mar 17-24, 2026.
+Apple Silicon unified memory is key — the GPU can access all RAM directly (no PCIe bus bottleneck). LLM inference on Ollama uses the GPU cores, pushing tokens significantly faster than CPU-only inference.
 
-Apple Silicon unified memory is key — the GPU can access all 48GB directly (no PCIe bus bottleneck). LLM inference on Ollama uses the GPU cores, so the 16-core GPU will push tokens significantly faster than CPU-only inference. M4 Pro memory bandwidth is ~273 GB/s.
+**All 3 machines use the same Fleet Apple ID** (separate from David's personal Apple ID). See ARCHITECTURE.md for full Apple ID strategy.
+
+#### Mac Mini 48GB — "The Starter" (Arrives First)
+
+**Specs:** M4 Pro, 12-core CPU, 16-core GPU, 48GB unified memory, 1TB SSD, Gigabit Ethernet. ~273 GB/s bandwidth.
+
+**Role:** Tier 3 worker agents — Enricher, Researcher, Matcher
 
 | Component | RAM Usage | Notes |
 |-----------|-----------|-------|
 | macOS + system | ~5 GB | Baseline OS overhead |
-| Qwen 3.5 (20B) | ~12-14 GB | Enricher, Matcher, Logger |
+| Qwen 3.5 (20B) | ~12-14 GB | Enricher, Matcher (shared model) |
 | MiniMax 2.5 | ~6-8 GB | Researcher |
-| OpenClaw instances (x5) | ~1-2 GB total | Lightweight Node.js processes |
-| **Available headroom** | **~19-24 GB** | Room for larger models or experimentation |
+| OpenClaw instances (x3) | ~1-2 GB total | ~300-600MB each |
+| **Available headroom** | **~19-26 GB** | Room for larger models or experimentation |
 
-**Both models stay loaded simultaneously.** No time-slicing. No model swap delays. All 4 agents run 24/7 at full speed from day one.
+Both models stay loaded simultaneously. No time-slicing. No model swap delays.
 
-### Model Strategy (48GB Mac Mini)
+#### Mac Mini 64GB — "The Specialist" (Arrives Second)
 
-```
-Qwen 3.5 (20B):   Always loaded — serves Enricher, Matcher, and Logger
-MiniMax 2.5:       Always loaded — serves Researcher
-Both models hot:   ~20-22 GB combined
-Remaining RAM:     ~21-23 GB for OS, OpenClaw instances, and headroom
-GPU acceleration:  16-core GPU handles inference — expect 30-50+ tokens/sec on 20B model
-```
+**Specs:** M4 Pro, 12-core CPU, 16-core GPU, 64GB unified memory, 1TB SSD, Gigabit Ethernet. ~273 GB/s bandwidth.
 
-The 24GB of headroom also means you could experiment with a third smaller model (e.g., a fast 7B model for the Logger, freeing Qwen for heavier tasks) without any resource pressure.
-
-### Mac Studio M4 Max (128GB Unified Memory) — Scale-Up Machine
-
-**Exact specs:** M4 Max, 16-core CPU, 40-core GPU, 16-core Neural Engine, 128GB unified memory, 2TB SSD, 10Gb Ethernet.
-
-```
-128GB unified memory + 40-core GPU + ~546 GB/s memory bandwidth
-= a completely different class of machine
-```
+**Role:** Tier 2 QA validators (GPT + Gemini) + Scout + Logger
 
 | Component | RAM Usage | Notes |
 |-----------|-----------|-------|
-| macOS + system | ~5 GB | Baseline OS |
-| Qwen 3.5 full (30B+) | ~20-25 GB | Larger, more capable variant |
-| MiniMax 2.5 full | ~10-15 GB | Larger research model |
-| **Available headroom** | **~83-93 GB** | Massive room for expansion |
+| macOS + system | ~5 GB | Baseline OS overhead |
+| Qwen 3.5 (20B) | ~12-14 GB | Logger (local) |
+| MiniMax 2.5 | ~6-8 GB | Scout (local) |
+| OpenClaw instances (x4) | ~1.5-2.5 GB | GPT/Gemini validators use cloud APIs — minimal local RAM |
+| **Available headroom** | **~34-40 GB** | Room for a 30B+ specialist model |
+
+GPT Validator and Gemini Validator use cloud APIs (GPT-4, Gemini Pro), so they barely touch local RAM. The 64GB gives massive headroom for future specialist models.
+
+#### Mac Studio 128GB — "The Beast" (Arrives Third)
+
+**Specs:** M4 Max, 16-core CPU, 40-core GPU, 128GB unified memory, 2TB SSD, 10Gb Ethernet. ~546 GB/s bandwidth.
+
+**Role:** Houston (Commander / Chief of Staff) + premium large model inference
+
+| Component | RAM Usage | Notes |
+|-----------|-----------|-------|
+| macOS + system | ~8 GB | Baseline OS |
+| Llama 3 70B (Q4) | ~36 GB | Premium local analysis |
+| Qwen 3.5 (20B) | ~14 GB | Backup / secondary tasks |
+| OpenClaw instances (x2) | ~1 GB | Houston uses cloud API — lightweight locally |
+| **Available headroom** | **~69 GB** | Massive room for experimentation |
 
 What 128GB + 40-core GPU unlocks:
-- **70B+ parameter models** — could run Llama 3 70B or Qwen 72B for dramatically better reasoning
-- **Multiple model copies** — 2x Qwen instances for parallel enrichment (double throughput)
-- **2.5x inference speed** — 40 GPU cores vs 16 = proportionally faster token generation
-- **10Gb Ethernet** — if you network the Mac Mini and Studio together, they can share workloads
-- **2TB SSD** — cache many model variants on disk, swap between them instantly
-- Mac Mini becomes backup/secondary or dedicated to a specific agent role (e.g., always-on Researcher)
+- **70B+ parameter models** — dramatically better reasoning than 20B
+- **2.5x inference speed** — 40 GPU cores vs 16
+- **2TB SSD** — cache many model variants on disk
+- Houston + premium analysis on the most powerful machine
 
 ---
 
@@ -158,17 +184,27 @@ A Python script that manages all agent processes. It's the single process that m
 7. **Schedule Tier 2** — trigger the Ralph Loop every 10 minutes
 8. **Schedule Tier 1** — trigger Claude's daily review at 6 AM
 
-### Supervisor Config File
+### Supervisor Config Files
 
-**File:** `/AI-Agents/supervisor-config.json`
+Each machine has its own `supervisor-config.json` with only the agents that run on that machine. All machines share the same pricing config and CRM health check URL.
+
+**File:** `/AI-Agents/supervisor-config.json` — Mac Mini 48GB "The Starter"
 ```json
 {
+  "machine": {
+    "name": "starter",
+    "role": "Tier 3 Workers",
+    "hardware": "Mac Mini M4 Pro 48GB"
+  },
   "agents": [
     {
       "name": "enricher",
       "enabled": true,
       "openclaw_dir": "/AI-Agents/enricher",
+      "openclaw_port": 3001,
       "model": "qwen3.5:20b",
+      "model_provider": "ollama_local",
+      "telegram_bot": "@IE_Enricher_bot",
       "startup_delay_seconds": 0,
       "restart_policy": "always",
       "max_restart_attempts": 5,
@@ -176,17 +212,16 @@ A Python script that manages all agent processes. It's the single process that m
       "hang_detection": {
         "heartbeat_stale_threshold_seconds": 300,
         "same_task_threshold_seconds": 1800
-      },
-      "schedule": {
-        "type": "continuous",
-        "active_hours": null
       }
     },
     {
       "name": "researcher",
       "enabled": true,
       "openclaw_dir": "/AI-Agents/researcher",
+      "openclaw_port": 3002,
       "model": "minimax2.5",
+      "model_provider": "ollama_local",
+      "telegram_bot": "@IE_Researcher_bot",
       "startup_delay_seconds": 30,
       "restart_policy": "always",
       "max_restart_attempts": 5,
@@ -194,17 +229,16 @@ A Python script that manages all agent processes. It's the single process that m
       "hang_detection": {
         "heartbeat_stale_threshold_seconds": 300,
         "same_task_threshold_seconds": 3600
-      },
-      "schedule": {
-        "type": "continuous",
-        "active_hours": null
       }
     },
     {
       "name": "matcher",
       "enabled": true,
       "openclaw_dir": "/AI-Agents/matcher",
+      "openclaw_port": 3003,
       "model": "qwen3.5:20b",
+      "model_provider": "ollama_local",
+      "telegram_bot": "@IE_Matcher_bot",
       "startup_delay_seconds": 60,
       "restart_policy": "always",
       "max_restart_attempts": 5,
@@ -212,74 +246,12 @@ A Python script that manages all agent processes. It's the single process that m
       "hang_detection": {
         "heartbeat_stale_threshold_seconds": 300,
         "same_task_threshold_seconds": 1800
-      },
-      "schedule": {
-        "type": "continuous",
-        "active_hours": null
-      }
-    },
-    {
-      "name": "scout",
-      "enabled": true,
-      "openclaw_dir": "/AI-Agents/scout",
-      "model": "minimax2.5",
-      "startup_delay_seconds": 90,
-      "restart_policy": "always",
-      "max_restart_attempts": 5,
-      "restart_backoff_seconds": [10, 30, 60, 120, 300],
-      "hang_detection": {
-        "heartbeat_stale_threshold_seconds": 600,
-        "same_task_threshold_seconds": 3600
-      },
-      "schedule": {
-        "type": "continuous",
-        "active_hours": null
-      }
-    },
-    {
-      "name": "logger",
-      "enabled": true,
-      "openclaw_dir": "/AI-Agents/logger",
-      "model": "qwen3.5:20b",
-      "startup_delay_seconds": 120,
-      "restart_policy": "always",
-      "max_restart_attempts": 5,
-      "restart_backoff_seconds": [10, 30, 60, 120, 300],
-      "hang_detection": {
-        "heartbeat_stale_threshold_seconds": 600,
-        "same_task_threshold_seconds": 7200
-      },
-      "schedule": {
-        "type": "continuous",
-        "active_hours": null
       }
     }
   ],
-  "cron_jobs": [
-    {
-      "job_name": "security_audit",
-      "agent": "scout",
-      "schedule": "15 3 * * *",
-      "timeout_minutes": 30,
-      "priority": "high",
-      "description": "4-perspective security audit of entire system"
-    }
-  ],
-  "tier2": {
-    "enabled": false,
-    "cycle_minutes": 10,
-    "provider": "chatgpt",
-    "notes": "Disabled until Phase 2. David is the manual Ralph Loop in Phase 1."
-  },
-  "tier1": {
-    "enabled": false,
-    "daily_review_time": "06:00",
-    "provider": "claude",
-    "notes": "Disabled until Phase 3. Daily review triggered manually at first."
-  },
   "global": {
     "stagger_startup": true,
-    "startup_order": ["enricher", "researcher", "matcher", "scout", "logger"],
+    "startup_order": ["enricher", "researcher", "matcher"],
     "ollama_health_check_url": "http://localhost:11434/api/tags",
     "crm_health_check_url": "https://your-railway-app.up.railway.app/api/ai/health",
     "log_dir": "/AI-Agents/supervisor-logs",
@@ -295,6 +267,176 @@ A Python script that manages all agent processes. It's the single process that m
     "google/gemini-pro":     { "input_per_1m": 1.25,  "output_per_1m": 5.00 },
     "ollama/*":              { "input_per_1m": 0.00,  "output_per_1m": 0.00 },
     "_default":              { "input_per_1m": 1.00,  "output_per_1m": 3.00 }
+  }
+}
+```
+
+**File:** `/AI-Agents/supervisor-config.json` — Mac Mini 64GB "The Specialist"
+```json
+{
+  "machine": {
+    "name": "specialist",
+    "role": "Tier 2 QA + Support Agents",
+    "hardware": "Mac Mini M4 Pro 64GB"
+  },
+  "agents": [
+    {
+      "name": "scout",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/scout",
+      "openclaw_port": 3001,
+      "model": "minimax2.5",
+      "model_provider": "ollama_local",
+      "telegram_bot": "@IE_Scout_bot",
+      "startup_delay_seconds": 0,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 600,
+        "same_task_threshold_seconds": 3600
+      }
+    },
+    {
+      "name": "logger",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/logger",
+      "openclaw_port": 3002,
+      "model": "qwen3.5:20b",
+      "model_provider": "ollama_local",
+      "telegram_bot": "@IE_Logger_bot",
+      "startup_delay_seconds": 30,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 600,
+        "same_task_threshold_seconds": 7200
+      }
+    },
+    {
+      "name": "gpt_validator",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/gpt-validator",
+      "openclaw_port": 3003,
+      "model": "gpt-4o",
+      "model_provider": "openai_api",
+      "telegram_bot": "@IE_GPT_Val_bot",
+      "startup_delay_seconds": 60,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 300,
+        "same_task_threshold_seconds": 1800
+      },
+      "tier2_config": {
+        "cycle_minutes": 10,
+        "role": "qa_validator",
+        "notes": "Full OpenClaw instance with persistent memory — remembers validation patterns"
+      }
+    },
+    {
+      "name": "gemini_validator",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/gemini-validator",
+      "openclaw_port": 3004,
+      "model": "gemini-pro",
+      "model_provider": "google_api",
+      "telegram_bot": "@IE_Gemini_Val_bot",
+      "startup_delay_seconds": 90,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 300,
+        "same_task_threshold_seconds": 1800
+      },
+      "tier2_config": {
+        "cycle_minutes": 10,
+        "role": "qa_validator",
+        "notes": "Cross-validates alongside GPT Validator — different perspective, different LLM"
+      }
+    }
+  ],
+  "cron_jobs": [
+    {
+      "job_name": "security_audit",
+      "agent": "scout",
+      "schedule": "15 3 * * *",
+      "timeout_minutes": 30,
+      "priority": "high",
+      "description": "4-perspective security audit of entire system"
+    }
+  ],
+  "global": {
+    "stagger_startup": true,
+    "startup_order": ["scout", "logger", "gpt_validator", "gemini_validator"],
+    "ollama_health_check_url": "http://localhost:11434/api/tags",
+    "crm_health_check_url": "https://your-railway-app.up.railway.app/api/ai/health",
+    "log_dir": "/AI-Agents/supervisor-logs",
+    "status_file": "/AI-Agents/supervisor-status.json"
+  }
+}
+```
+
+**File:** `/AI-Agents/supervisor-config.json` — Mac Studio 128GB "The Beast"
+```json
+{
+  "machine": {
+    "name": "beast",
+    "role": "Commander + Premium Analysis",
+    "hardware": "Mac Studio M4 Max 128GB"
+  },
+  "agents": [
+    {
+      "name": "houston",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/chief-of-staff",
+      "openclaw_port": 3001,
+      "model": "claude-opus-4-6",
+      "model_provider": "anthropic_api",
+      "telegram_bot": "@IE_Houston_bot",
+      "startup_delay_seconds": 0,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 600,
+        "same_task_threshold_seconds": 3600
+      },
+      "tier1_config": {
+        "daily_review_time": "06:00",
+        "council_briefing": true,
+        "dual_channel_output": true,
+        "notes": "Commander — delegates to all agents, runs council briefings, morning Telegram briefings"
+      }
+    },
+    {
+      "name": "analyst",
+      "enabled": true,
+      "openclaw_dir": "/AI-Agents/analyst",
+      "openclaw_port": 3002,
+      "model": "llama3:70b-q4",
+      "model_provider": "ollama_local",
+      "telegram_bot": "@IE_Analyst_bot",
+      "startup_delay_seconds": 30,
+      "restart_policy": "always",
+      "max_restart_attempts": 5,
+      "restart_backoff_seconds": [10, 30, 60, 120, 300],
+      "hang_detection": {
+        "heartbeat_stale_threshold_seconds": 600,
+        "same_task_threshold_seconds": 3600
+      }
+    }
+  ],
+  "global": {
+    "stagger_startup": true,
+    "startup_order": ["houston", "analyst"],
+    "ollama_health_check_url": "http://localhost:11434/api/tags",
+    "crm_health_check_url": "https://your-railway-app.up.railway.app/api/ai/health",
+    "log_dir": "/AI-Agents/supervisor-logs",
+    "status_file": "/AI-Agents/supervisor-status.json"
   }
 }
 ```
@@ -492,28 +634,52 @@ Usage:
   agentctl config                    # Show current supervisor config
 ```
 
-### Example: `agentctl status`
+### Example: `agentctl status` (Full Fleet — Phase 3)
 ```
-AI Agent Fleet — Status
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Ollama:       ● Running (2 models loaded)
-CRM API:      ● Reachable (latency: 45ms)
-Supervisor:   ● Running (uptime: 3d 14h 22m)
+AI Agent Fleet — Status (3 machines)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Agent         Model          Status     Uptime      Restarts  Today
-────────────  ─────────────  ─────────  ──────────  ────────  ─────
-enricher      qwen3.5:20b    ● Running  3d 14h 22m  0         47 items
-researcher    minimax2.5     ● Running  3d 14h 21m  1         156 scans
-matcher       qwen3.5:20b    ● Running  3d 14h 20m  0         12 drafts
-logger        qwen3.5:20b    ● Running  3d 14h 19m  0         —
+MAC MINI 48GB "The Starter" (192.168.1.50)
+  Ollama:     ● Running (2 models loaded)
+  Supervisor: ● Running (uptime: 14d 6h 12m)
 
+  Agent         Model           Port  Status     Uptime      Today
+  ────────────  ──────────────  ────  ─────────  ──────────  ─────
+  enricher      qwen3.5:20b     3001  ● Running  14d 6h 12m  47 items
+  researcher    minimax2.5      3002  ● Running  14d 6h 11m  156 scans
+  matcher       qwen3.5:20b     3003  ● Running  14d 6h 10m  12 drafts
+
+MAC MINI 64GB "The Specialist" (192.168.1.51)
+  Ollama:     ● Running (2 models loaded)
+  Supervisor: ● Running (uptime: 7d 2h 45m)
+
+  Agent            Model           Port  Status     Uptime     Today
+  ───────────────  ──────────────  ────  ─────────  ─────────  ─────
+  scout            minimax2.5      3001  ● Running  7d 2h 45m  23 scans
+  logger           qwen3.5:20b     3002  ● Running  7d 2h 44m  —
+  gpt_validator    gpt-4o (API)    3003  ● Running  7d 2h 43m  34 reviews
+  gemini_validator gemini-pro(API) 3004  ● Running  7d 2h 42m  34 reviews
+
+MAC STUDIO 128GB "The Beast" (192.168.1.52)
+  Ollama:     ● Running (2 models loaded)
+  Supervisor: ● Running (uptime: 3d 8h 15m)
+
+  Agent       Model              Port  Status     Uptime     Today
+  ──────────  ─────────────────  ────  ─────────  ─────────  ─────
+  houston     opus-4.6 (API)     3001  ● Running  3d 8h 15m  1 briefing
+  analyst     llama3:70b-q4      3002  ● Running  3d 8h 14m  5 analyses
+
+CRM API:        ● Reachable (latency: 45ms)
 Priority Board: 3 pending | 12 completed today | 0 expired
 Sandbox Queue:  8 pending review | 34 approved today
+Ralph Loop:     ● GPT + Gemini agree on 31/34 items (3 escalated to Houston)
 ```
 
 ---
 
-## Startup Sequence (What Happens When Mac Mini Boots)
+## Startup Sequence (What Happens When Any Fleet Machine Boots)
+
+This sequence is the same on all 3 machines — only the agents listed in that machine's `supervisor-config.json` differ.
 
 ```
 1. macOS boots → user auto-login (configure in System Settings)
@@ -522,27 +688,29 @@ Sandbox Queue:  8 pending review | 34 approved today
      ↓ (wait ~10 seconds for Ollama to be ready)
 3. LaunchAgent starts agent-supervisor.py
      ↓
-4. Supervisor checks: is Ollama responding? (retry up to 30 seconds)
+4. Supervisor reads its local supervisor-config.json
      ↓
-5. Supervisor checks: is Neon Postgres reachable? (retry up to 60 seconds)
+5. Supervisor checks: is Ollama responding? (retry up to 30 seconds)
+     ↓
+6. Supervisor checks: is Neon Postgres reachable? (retry up to 60 seconds)
      ↓ (if unreachable, start agents in "offline mode" — queue to disk)
-6. Supervisor starts agents with staggered delays:
-     t=0s:   enricher starts
-     t=30s:  researcher starts
-     t=60s:  matcher starts
-     t=90s:  logger starts
+7. Supervisor starts THIS machine's agents with staggered delays
+     (e.g., on 48GB Mini: enricher → researcher → matcher)
+     (e.g., on 64GB Mini: scout → logger → gpt_validator → gemini_validator)
+     (e.g., on Studio: houston → analyst)
      ↓
-7. Each agent: loads its agent.md, connects to Ollama, sends first heartbeat
+8. Each agent: loads its agent.md, connects to model, sends first heartbeat
      ↓
-8. System is fully operational (~2-3 minutes after boot)
+9. Machine is fully operational (~2-3 minutes after boot)
 ```
 
 ### Auto-Login Configuration
-The Mac Mini should auto-login to a dedicated user account:
+All fleet machines auto-login to the same dedicated user account:
 - **System Settings → Users & Groups → Login Options → Automatic Login**
-- Use a dedicated `ai-agent` user account (not David's personal account)
+- Use the Fleet Apple ID user account `ai-fleet` (NOT David's personal account)
 - This account has access to `/AI-Agents/` and network, nothing else
 - Lock the screen after login if needed (agents don't need the GUI)
+- All machines signed into the same Fleet Apple ID (ie-ai-fleet@icloud.com)
 
 ---
 
@@ -647,43 +815,55 @@ When network returns:
 
 ## Tier 2 Scheduling (Ralph Loop)
 
-The Tier 2 validator runs on a 10-minute cycle. It's NOT a persistent OpenClaw instance — it's an API call that runs and completes.
+Tier 2 validators are **persistent OpenClaw instances** running on the 64GB Mac Mini. Each validator has its own memory, Telegram bot, and cloud LLM backend. They actively monitor the sandbox queue and validate agent output.
 
 ### Phase 1 (No Tier 2 — David is the Ralph Loop)
-- Supervisor has `tier2.enabled = false`
+- 48GB Mac Mini only — no validators yet
 - David manually reviews the sandbox queue in the Agent Dashboard
 - This is intentional — David needs to understand what good/bad agent output looks like before automating the check
 
-### Phase 2 (Automated Ralph Loop)
-- Supervisor spawns a Tier 2 review every 10 minutes
-- Implementation: API call to ChatGPT (via OAuth) with:
-  - The Tier 2 validator instructions (from `tier2-validator.md`)
-  - The current pending sandbox queue
-  - Recent heartbeats
-- ChatGPT processes the queue and posts approve/reject/escalate decisions
-- Results written to sandbox tables and agent_logs
+### Phase 2 (64GB Mac Mini arrives — Automated Ralph Loop)
+- GPT Validator and Gemini Validator are full OpenClaw instances on the 64GB Mini
+- Each runs continuously, checking the sandbox queue every 10 minutes
+- Each has **persistent memory** — remembers past validation patterns, common errors, what David approves/rejects
+- Each has its own Telegram bot — David can text them directly for ad-hoc validation
 
-### Tier 2 Cron (Inside Supervisor)
-```python
-def check_tier2_schedule(self):
-    if not config.tier2.enabled:
-        return
-    if minutes_since_last_tier2_run() >= config.tier2.cycle_minutes:
-        self.run_tier2_cycle()
+### How the Ralph Loop Works Now
 
-def run_tier2_cycle(self):
-    pending = fetch("/api/ai/queue/pending")
-    if not pending:
-        return  # nothing to review, skip this cycle
+```
+Every 10 minutes, BOTH validators check the sandbox queue:
 
-    # Build the prompt with tier2-validator.md instructions + pending items
-    prompt = build_tier2_prompt(pending)
+GPT Validator (OpenClaw + GPT-4 API):
+  → Reads pending sandbox items
+  → Validates against its learned patterns + quality rules
+  → Posts: approve / reject / escalate for each item
+  → Remembers: "Enricher tends to get phone numbers wrong for LLC entities"
 
-    # Call ChatGPT via OAuth
-    response = chatgpt_api.complete(prompt)
+Gemini Validator (OpenClaw + Gemini Pro API):
+  → Same queue, different perspective
+  → Cross-validates independently
+  → Remembers: "Australian contact data needs extra verification"
 
-    # Parse and apply decisions
-    apply_tier2_decisions(response)
+AGREEMENT LOGIC:
+  → Both approve → auto-promote to production
+  → Both reject → auto-reject, log reason
+  → DISAGREE → escalate to Houston
+  → Houston can't decide → escalate to David via Telegram
+```
+
+### Validator Memory Example
+Because they're full OpenClaw instances (not one-shot API calls), they accumulate knowledge:
+
+```
+GPT Validator memory/patterns.md:
+  "Enricher false positive pattern: When company name contains 'LLC'
+   and registered agent is CSC/CT Corp, the person name is often the
+   agent service, not the actual owner. Flag these for manual review."
+
+Gemini Validator memory/patterns.md:
+  "Matcher outreach drafts mentioning 'recent expansion' should be
+   cross-checked with Researcher signals. 3 times this month the
+   expansion was >6 months old. Require signal freshness <90 days."
 ```
 
 ---
@@ -727,7 +907,9 @@ Council reviewer prompts stored in `/AI-Agents/chief-of-staff/council/`:
 
 ---
 
-## Folder Structure on Mac Mini
+## Folder Structure (Same Layout on Every Machine)
+
+Each machine has the same `/AI-Agents/` structure, but only the agents that run on that machine have populated directories. The supervisor only starts agents listed in its local `supervisor-config.json`.
 
 ```
 /AI-Agents/
@@ -735,19 +917,18 @@ Council reviewer prompts stored in `/AI-Agents/chief-of-staff/council/`:
 │   ├── agent-supervisor.py        # Main supervisor script
 │   ├── agentctl                   # CLI control tool
 │   └── requirements.txt          # Python dependencies
-├── supervisor-config.json         # Agent configuration
+├── supervisor-config.json         # THIS machine's agent configuration
 ├── supervisor-status.json         # Current status (written every 60s)
-├── supervisor-logs/               # Supervisor's own logs
-│   ├── stdout.log
-│   ├── stderr.log
-│   └── restarts.log
+├── supervisor-logs/
+│
+│── # TIER 3 WORKERS (Mac Mini 48GB)
 ├── enricher/
-│   ├── agent.md                   # Instructions (from repo)
+│   ├── agent.md                   # Instructions
 │   ├── pre-filter-rules.json     # Stage 0 filter configuration
-│   ├── memory/                    # Agent's persistent memory
-│   ├── logs/                      # Per-agent daily logs
+│   ├── memory/                    # Persistent memory (OpenClaw)
+│   ├── logs/
 │   ├── versions/                  # Backed-up previous agent.md versions
-│   └── checkpoint.json            # Resume state after crash (if applicable)
+│   └── checkpoint.json            # Resume state after crash
 ├── researcher/
 │   ├── agent.md
 │   ├── memory/
@@ -759,6 +940,8 @@ Council reviewer prompts stored in `/AI-Agents/chief-of-staff/council/`:
 │   ├── memory/
 │   ├── logs/
 │   └── versions/
+│
+│── # TIER 2 QA + SUPPORT (Mac Mini 64GB)
 ├── scout/
 │   ├── agent.md
 │   ├── memory/
@@ -768,36 +951,47 @@ Council reviewer prompts stored in `/AI-Agents/chief-of-staff/council/`:
 │   ├── agent.md
 │   ├── memory/
 │   └── logs/
-├── chief-of-staff/
-│   ├── council/                  # Council reviewer prompts
+├── gpt-validator/                 # NEW — Tier 2 OpenClaw instance
+│   ├── agent.md                   # Validation instructions + learned patterns
+│   ├── memory/                    # Remembers validation patterns over time
+│   └── logs/
+├── gemini-validator/              # NEW — Tier 2 OpenClaw instance
+│   ├── agent.md
+│   ├── memory/
+│   └── logs/
+│
+│── # TIER 1 COMMANDER + PREMIUM (Mac Studio 128GB)
+├── chief-of-staff/                # Houston's home
+│   ├── agent.md
+│   ├── memory/
+│   ├── council/                   # Council reviewer prompts
 │   │   ├── deal-hunter.md
 │   │   ├── revenue-guardian.md
 │   │   └── market-skeptic.md
-│   └── ...
-├── daily-logs/                    # Logger writes daily summaries here
-│   ├── 2026-03-10.md
-│   ├── 2026-03-11.md
-│   └── ...
+│   └── logs/
+├── analyst/                       # NEW — Premium analysis agent
+│   ├── agent.md
+│   ├── memory/
+│   └── logs/
+│
+│── # SHARED ACROSS ALL MACHINES
+├── daily-logs/
 ├── security/
-│   └── injection-rules.json        # Deterministic injection sanitizer patterns
+│   └── injection-rules.json
 ├── prompting-guides/
-│   ├── opus-4.6.md                 # Prompting guide for Claude Opus 4.6 (Tier 1)
-│   ├── qwen-3.5.md                 # Prompting guide for Qwen 3.5 (Tier 3)
-│   └── minimax-2.5.md              # Prompting guide for MiniMax 2.5 (Tier 3)
-├── shared/                       # Shared utilities used by all agents
-│   ├── cost-tracker.py           # Per-call LLM cost tracking
-│   └── audit-log.py              # Structured JSONL audit logging
+│   ├── opus-4.6.md
+│   ├── qwen-3.5.md
+│   └── minimax-2.5.md
+├── shared/
+│   ├── cost-tracker.py
+│   └── audit-log.py
 ├── logs/
-│   ├── audit/                    # JSONL audit logs (one file per day)
-│   │   ├── 2026-03-25.jsonl
-│   │   └── ...
-│   └── council/                  # Council briefing traces
-│       ├── 2026-03-25.json
-│       └── ...
-├── offline-buffer/                # Buffered data during network outages
+│   ├── audit/                     # JSONL audit logs (one file per day)
+│   └── council/                   # Council briefing traces
+├── offline-buffer/
 │   ├── signals/
 │   └── logs/
-└── launchagents/                  # LaunchAgent plist files (symlinked)
+└── launchagents/
     ├── com.ollama.serve.plist
     └── com.iecrm.agent-supervisor.plist
 ```
@@ -828,7 +1022,7 @@ Council reviewer prompts stored in `/AI-Agents/chief-of-staff/council/`:
 
 ## Day One Setup Script
 
-A single script that sets up everything on a fresh Mac Mini:
+A single script that sets up the base stack on any fleet machine (Mac Mini or Mac Studio). Run once per machine. The supervisor-config.json is the only file that differs per machine — it determines which agents start.
 
 ```bash
 #!/bin/bash
@@ -905,102 +1099,109 @@ David isn't sitting at the Mac Mini. He's on his laptop or phone. The Agent Dash
 
 ---
 
-## Fleet Split Strategy (Mac Mini + Mac Studio)
+## Fleet Strategy — 3-Machine Phased Deployment
 
-When the Mac Studio arrives, the fleet should be split across both machines for maximum performance. Each machine has a clear role.
+The fleet grows as machines arrive. Each phase adds capability without disrupting what's already running.
 
-### Phase 1: Mac Mini Only (Day One — Weeks 1-8+)
+### Phase 1: Mac Mini 48GB Only (Weeks 1-2)
+
+**Everything starts on one machine.** All agents, all tiers (with Tier 1 & 2 running as simple API calls initially).
 
 ```
-Mac Mini (48GB M4 Pro)
-├── Ollama serving: Qwen 3.5 (20B) + MiniMax 2.5
-├── OpenClaw: Enricher (Qwen)
-├── OpenClaw: Researcher (MiniMax)
-├── OpenClaw: Matcher (Qwen)
-├── OpenClaw: Logger (Qwen)
+Mac Mini 48GB "The Starter"
+├── Ollama: Qwen 3.5 (20B) + MiniMax 2.5
+├── OpenClaw: Enricher   (port 3001) → @IE_Enricher_bot
+├── OpenClaw: Researcher (port 3002) → @IE_Researcher_bot
+├── OpenClaw: Matcher    (port 3003) → @IE_Matcher_bot
+├── OpenClaw: Scout      (port 3004) → @IE_Scout_bot
+├── OpenClaw: Logger     (port 3005) → @IE_Logger_bot
+├── Tier 2: David reviews sandbox manually (Ralph Loop = David)
+├── Tier 1: Houston via API call (no dedicated instance yet)
 └── Supervisor process
 ```
 
-All 4 agents, both models, one machine. Both models stay loaded in memory simultaneously. No swapping needed — 48GB handles this comfortably with ~24GB headroom.
+All 5 agents, both models, one machine. Both models stay loaded in memory simultaneously. No swapping — 48GB handles this with ~18-24GB headroom.
 
-### Phase 2: Mac Studio Arrives — Recommended Split
+### Phase 2: Mac Mini 64GB Arrives (Weeks 3-4)
 
-**Strategy: Studio = Precision, Mini = Volume**
-
-The Mac Studio's 128GB and 40-core GPU unlocks dramatically smarter models. Use that horsepower where accuracy matters most — contact verification and outreach matching. The Mac Mini handles volume work where speed matters more than raw intelligence.
+**Scout and Logger migrate. Tier 2 validators become full agents.**
 
 ```
-Mac Studio (128GB M4 Max) — "The Precision Machine"
-├── Ollama serving: Qwen 72B (~45GB) — dramatically smarter than 20B
-├── OpenClaw: Enricher (Qwen 72B) — contact verification needs highest accuracy
-├── OpenClaw: Matcher (Qwen 72B) — outreach matching needs nuance and judgment
-├── Supervisor instance (primary)
-└── Headroom: ~70GB free — room for experimentation, larger models, parallel instances
+Mac Mini 48GB "The Starter" — now JUST the heavy workers
+├── Ollama: Qwen 3.5 (20B) + MiniMax 2.5
+├── OpenClaw: Enricher   (port 3001) → @IE_Enricher_bot
+├── OpenClaw: Researcher (port 3002) → @IE_Researcher_bot
+├── OpenClaw: Matcher    (port 3003) → @IE_Matcher_bot
+└── Headroom: ~28-34 GB free (faster inference, room to grow)
 
-Mac Mini (48GB M4 Pro) — "The Volume Machine"
-├── Ollama serving: MiniMax 2.5 + Qwen 3.5 (20B)
-├── OpenClaw: Researcher (MiniMax 2.5) — volume scanning, speed over precision
-├── OpenClaw: Scout (MiniMax 2.5) — AI/tech intelligence, shares model with Researcher
-├── OpenClaw: Logger (Qwen 3.5 20B) — lightweight, doesn't need 72B intelligence
-├── Supervisor instance (secondary — reports to primary)
-└── Headroom: ~24GB — can add more Researcher instances for parallel scanning
+Mac Mini 64GB "The Specialist" — QA + support
+├── Ollama: Qwen 3.5 (20B) + MiniMax 2.5
+├── OpenClaw: Scout          (port 3001) → @IE_Scout_bot
+├── OpenClaw: Logger         (port 3002) → @IE_Logger_bot
+├── OpenClaw: GPT Validator  (port 3003, GPT-4 API) → @IE_GPT_Val_bot
+├── OpenClaw: Gemini Valid.  (port 3004, Gemini API) → @IE_Gemini_Val_bot
+└── Headroom: ~34-40 GB free (room for 30B+ specialist model)
 ```
 
-### Why This Split
+**What's new in Phase 2:**
+- GPT and Gemini validators are now full OpenClaw instances with persistent memory
+- They learn validation patterns over time — get smarter, not just check-and-forget
+- Both agree → auto-promote. Both disagree → escalate to Houston → escalate to David
+- David can text either validator directly on Telegram for ad-hoc checks
 
-| Factor | Mac Studio | Mac Mini |
-|--------|-----------|----------|
-| **Model size** | Qwen 72B (~45GB) — 3.6x more parameters = dramatically better reasoning | Qwen 20B + MiniMax 2.5 — good enough for scanning and logging |
-| **GPU cores** | 40 — faster inference on large models | 16 — fine for smaller models |
-| **Memory bandwidth** | ~546 GB/s — fast token generation even on 72B | ~273 GB/s — half the speed |
-| **Critical tasks** | Enrichment (accuracy = money) + Matching (judgment = deal quality) | Research (volume = coverage) + Logging (lightweight) |
-| **Inference speed** | Qwen 72B at ~15-25 tok/s (still fast enough for enrichment) | MiniMax at ~40-60 tok/s (speed matters for scanning) |
+### Phase 3: Mac Studio 128GB Arrives (Month 2+)
+
+**Houston gets a dedicated home. Premium models come online.**
+
+```
+Mac Mini 48GB "The Starter" — Tier 3 Workers
+├── Ollama: Qwen 3.5 (20B) + MiniMax 2.5
+├── OpenClaw: Enricher   (port 3001) → @IE_Enricher_bot
+├── OpenClaw: Researcher (port 3002) → @IE_Researcher_bot
+├── OpenClaw: Matcher    (port 3003) → @IE_Matcher_bot
+└── Supervisor
+
+Mac Mini 64GB "The Specialist" — Tier 2 QA + Support
+├── Ollama: Qwen 3.5 (20B) + MiniMax 2.5
+├── OpenClaw: Scout          (port 3001) → @IE_Scout_bot
+├── OpenClaw: Logger         (port 3002) → @IE_Logger_bot
+├── OpenClaw: GPT Validator  (port 3003) → @IE_GPT_Val_bot
+├── OpenClaw: Gemini Valid.  (port 3004) → @IE_Gemini_Val_bot
+└── Supervisor
+
+Mac Studio 128GB "The Beast" — Commander + Premium
+├── Ollama: Llama 3 70B (Q4) + Qwen 3.5 (20B)
+├── OpenClaw: Houston  (port 3001, Claude Opus API) → @IE_Houston_bot
+├── OpenClaw: Analyst  (port 3002, Llama 70B local) → @IE_Analyst_bot
+└── Supervisor
+
+TOTAL: 9 OpenClaw instances across 3 machines
+```
 
 ### Cross-Machine Communication
 
-Both machines talk to the same backend:
+All 3 machines talk to the same cloud backend — no direct machine-to-machine communication needed:
 
 ```
-Mac Studio ──┐
-             ├──→ Neon Postgres (IE CRM database)
-Mac Mini  ───┘    Railway (IE CRM API)
-                  Priority Board (same table)
-                  Sandbox DB (same tables)
+Mac Mini 48GB  ──┐
+Mac Mini 64GB  ──┼──→ Neon Postgres (IE CRM database)
+Mac Studio 128 ──┘    Railway (IE CRM API)
+                      Priority Board (same table)
+                      Sandbox DB (same tables)
+                      Agent heartbeats (same table)
 ```
 
-Agents don't need to know which machine the other agents are on. They communicate through the Priority Board — same as before. The Researcher (Mini) posts a priority, the Enricher (Studio) picks it up. No direct machine-to-machine communication needed.
+Agents don't need to know which machine the other agents are on. The Researcher (48GB Mini) posts a priority, the Enricher (48GB Mini) picks it up. The GPT Validator (64GB Mini) reads sandbox items, Houston (Studio) reads escalations. All through the shared database.
 
-### Alternative Splits (For Different Needs)
+### If One Machine Goes Down
 
-**If you want maximum enrichment throughput:**
-```
-Mac Studio: 2x Enricher instances (both using Qwen 72B) — double the contact verification speed
-Mac Mini: Researcher + Matcher + Logger
-```
+| Machine Down | Impact | Recovery |
+|---|---|---|
+| 48GB Mini (workers) | No new enrichment/research/matching | 64GB Mini can run worker agents temporarily |
+| 64GB Mini (QA) | No automated validation — David reviews manually | Workers still produce, just piles up for review |
+| 128GB Studio (Houston) | No morning briefings, no commander | Validators and workers continue independently |
 
-**If you want to experiment with new models:**
-```
-Mac Studio: Enricher + Matcher (production — Qwen 72B)
-Mac Mini: Researcher + Logger (production — MiniMax + Qwen 20B)
-           + Experimental model testing (use the 24GB headroom)
-```
-
-**If one machine goes down:**
-Either machine can run the full fleet solo at reduced performance. The supervisor detects the outage and can redistribute agents. Mac Mini becomes the fallback for everything — models are smaller but the fleet stays alive.
-
-### Migration Procedure (Mini → Studio Split)
-
-```
-1. Set up Mac Studio (same setup script as Mac Mini)
-2. Pull Qwen 72B on Mac Studio via Ollama (this is a large download — plan ahead)
-3. Test: run Enricher on Studio pointing at Qwen 72B, verify output quality
-4. Compare: is Qwen 72B producing better enrichment than Qwen 20B?
-5. If yes: migrate Enricher + Matcher to Studio permanently
-6. Update supervisor-config.json on both machines
-7. Mac Mini supervisor switches to "secondary" mode
-8. Monitor for 48 hours — verify cross-machine Priority Board works
-9. Done — fleet is split
-```
+Any single machine can run the full fleet solo at reduced performance if needed.
 
 ---
 
@@ -1130,7 +1331,9 @@ def check_nightly_schedule(self):
 ---
 
 *Created: March 2026*
-*Updated: March 2026 — Added fleet split strategy for Mac Mini + Mac Studio*
+*Updated: March 2026 — 3-machine fleet architecture (48GB Mini + 64GB Mini + 128GB Studio)*
+*Updated: March 2026 — Tier 2 validators as full OpenClaw instances with persistent memory*
+*Updated: March 2026 — Per-machine supervisor configs, phased deployment, fleet Apple ID*
 *Updated: March 2026 — Added parallel sub-agent spawning, nightly self-maintenance cron*
 *Updated: March 2026 — Added council briefing, cost tracking, audit logging, pre-filter config*
 *For: IE CRM AI Master System — Process Management & Orchestration*

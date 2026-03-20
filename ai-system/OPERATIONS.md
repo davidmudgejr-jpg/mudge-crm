@@ -56,12 +56,23 @@ GET  /api/ai/queue/escalations?urgency=critical  — Filter by urgency
 POST /api/ai/queue/escalation-response   — Tier 1 responds to escalation
 ```
 
-### David's Notification Path (Future)
+### David's Notification Path
 
-For now, David checks the Dashboard. Future enhancements:
-- Push notification on phone when critical escalation fires
+With 9 OpenClaw instances each having their own Telegram bot, David has direct access to every agent:
+
+**Primary channels (active now):**
+- **@IE_Houston_bot** — Morning briefings, escalations, strategic decisions
+- **@IE_GPT_Val_bot / @IE_Gemini_Val_bot** — Tier 2 disagreements that need David's call
+- **IE CRM Agent Dashboard** — Full fleet overview, sandbox queue, approvals
+
+**Future enhancements:**
 - SMS via Twilio for true emergencies (agent fleet down, spam complaint)
-- Daily morning briefing emailed at 6:30 AM (after Claude's review runs at 6 AM)
+- Daily morning briefing emailed at 6:30 AM (after Houston's review runs at 6 AM)
+
+**David can also text any agent directly:**
+- Text @IE_Enricher_bot: "What's your queue look like?"
+- Text @IE_Researcher_bot: "Research ABC Company for me"
+- Text @IE_Houston_bot: "Give me an update on the fleet"
 
 ---
 
@@ -365,9 +376,10 @@ Running this system has real costs. Tracking them helps optimize spending and pr
 
 | Category | Service | Pricing Model | Estimated Monthly |
 |----------|---------|--------------|-------------------|
-| **Claude API** | Anthropic | Per token (input/output) | $20-100 depending on daily review depth |
-| **ChatGPT OAuth** | OpenAI | $250/mo flat | $250 (fixed) |
-| **Gemini** | Google | Per token or free tier | $0-50 |
+| **Claude API (Houston)** | Anthropic | Per token (input/output) | $15-30 (daily reviews + council briefings) |
+| **GPT-4 API (Validator)** | OpenAI | Per token (input/output) | $5-10 (10-min QA cycle) |
+| **Gemini Pro API (Validator)** | Google | Per token | $3-8 (10-min QA cycle) |
+| **Local Models (Ollama)** | Self-hosted | Free (hardware already paid for) | $0 |
 | **NeverBounce** | NeverBounce | Per verification (~$0.008/ea) | $20-50 (2,500-6,000 verifications) |
 | **White Pages** | WhitePages Premium | Monthly subscription | ~$30-50/mo |
 | **BeenVerified** | BeenVerified | Monthly subscription | ~$30-50/mo |
@@ -375,10 +387,13 @@ Running this system has real costs. Tracking them helps optimize spending and pr
 | **Open Corporates** | Open Corporates | Free tier or API plan | $0-50 |
 | **Neon Postgres** | Neon | Based on compute + storage | ~$20-50 |
 | **Railway** | Railway | Based on usage | ~$5-20 |
-| **Hardware** | Mac Mini (one-time) | Amortized over 3 years | ~$60/mo |
-| **Hardware** | Mac Studio (one-time) | Amortized over 3 years | ~$115/mo |
-| **Electricity** | Mac Mini 24/7 | ~15-30W typical | ~$5/mo |
-| **Total estimated** | | | **$470-860/mo** |
+| **Hardware** | Mac Mini 48GB (amortized 3yr) | One-time | ~$50/mo |
+| **Hardware** | Mac Mini 64GB (amortized 3yr) | One-time | ~$65/mo |
+| **Hardware** | Mac Studio 128GB (amortized 3yr) | One-time | ~$115/mo |
+| **Electricity** | 3 machines 24/7 | ~15-30W each | ~$15-25/mo |
+| **Total estimated** | | | **$360-600/mo** |
+
+**Note:** Previous estimates included $250/mo flat ChatGPT OAuth. By switching to GPT-4 API calls via the OpenClaw GPT Validator instance, Tier 2 costs dropped from ~$300/mo to ~$8-18/mo — a massive savings. All 3 Tier 2 brains (Claude, GPT, Gemini) now use pay-per-token API pricing.
 
 ### Usage Tracking Table
 
@@ -503,15 +518,18 @@ VALUE SIDE:
 ```
 This Month's Costs
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Claude API:      $45.20  (daily reviews)
-ChatGPT:         $250.00 (flat — Ralph Loop)
+Claude API:      $22.40  (Houston daily reviews + council)
+GPT-4 API:       $7.80   (GPT Validator — 10min QA cycles)
+Gemini Pro API:  $4.20   (Gemini Validator — 10min QA cycles)
+Local Models:    $0.00   (Ollama — 6 agents, all free)
 NeverBounce:     $18.40  (2,300 verifications)
 White Pages:     $29.99  (subscription)
 BeenVerified:    $29.99  (subscription)
 Postmark:        $15.00  (email sends)
 Neon + Railway:  $35.00  (infrastructure)
+Electricity:     $18.00  (3 machines 24/7)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Total:           $423.58
+Total:           $180.78
 
 This Month's Output
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1054,5 +1072,7 @@ This operations document covers escalation, testing, versioning, retention, and 
 ---
 
 *Created: March 2026*
-*Updated: March 2026 — Added feedback loop system, auto-promotion rules, audit queryability, crash recovery, 47-tier evolution reference*
+*Updated: March 2026 — Updated for 3-machine fleet (48GB Mini + 64GB Mini + 128GB Studio)*
+*Updated: March 2026 — Updated costs: GPT/Gemini now API-based ($8-18/mo vs $300/mo OAuth), Telegram bot notifications*
+*Updated: March 2026 — Added feedback loop system, auto-promotion rules, audit queryability, crash recovery*
 *For: IE CRM AI Master System — System Operations*
