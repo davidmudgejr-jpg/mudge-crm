@@ -68,11 +68,12 @@ export const db = {
 export const claude = {
   chat: (messages, systemPrompt, options) => {
     if (isElectron()) return window.iecrm.claude.chat(messages, systemPrompt, options);
-    return httpPost('/api/claude/chat', { messages, systemPrompt, options });
+    // Use OAuth proxy route (Bearer token via ANTHROPIC_OAUTH_TOKEN)
+    return httpPost('/api/ai/chat/sync', { messages, system: systemPrompt, options });
   },
   status: () => {
     if (isElectron()) return window.iecrm.claude.status();
-    return httpGet('/api/claude/status');
+    return httpGet('/api/ai/status');
   },
 };
 
