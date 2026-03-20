@@ -18,6 +18,7 @@ const PORT = process.env.PORT || 3001;
 const ALLOWED_ORIGINS = [
   'https://ie-crm.vercel.app',
   'https://ie-crm-davidmudgejr-3693s-projects.vercel.app',
+  'https://ie-crm-git-main-davidmudgejr-3693s-projects.vercel.app',
 ];
 
 // Allow localhost in development
