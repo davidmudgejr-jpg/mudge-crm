@@ -202,7 +202,7 @@ function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayNam
       />
 
       {/* Text input */}
-      <div className="flex-1 bg-crm-card/60 rounded-2xl border border-crm-border/30 focus-within:border-blue-500/50 transition-colors">
+      <div className="flex-1 bg-crm-card/60 rounded-2xl border border-crm-border/30 focus-within:border-crm-accent/40 transition-colors overflow-hidden">
         <textarea
           ref={inputRef}
           value={text}
@@ -210,8 +210,8 @@ function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayNam
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
           rows={1}
-          className="w-full bg-transparent text-sm text-crm-text placeholder-crm-muted/50 px-4 py-2.5 resize-none outline-none max-h-32"
-          style={{ minHeight: '38px' }}
+          className="w-full bg-transparent text-sm text-crm-text placeholder-crm-muted/50 px-4 py-2.5 resize-none outline-none max-h-32 rounded-2xl"
+          style={{ minHeight: '38px', WebkitAppearance: 'none' }}
         />
       </div>
 
@@ -499,7 +499,7 @@ export default function TeamChat({ isOpen, onClose }) {
         // Map entity type to table and search column
         const tableMap = { property: 'properties', contact: 'contacts', company: 'companies', deal: 'deals' };
         const searchCol = { property: 'address', contact: 'full_name', company: 'company_name', deal: 'deal_name' };
-        const idCol = { property: 'id', contact: 'contact_id', company: 'company_id', deal: 'deal_id' };
+        const idCol = { property: 'property_id', contact: 'contact_id', company: 'company_id', deal: 'deal_id' };
         const table = tableMap[et];
         const col = searchCol[et];
         const id = idCol[et];
