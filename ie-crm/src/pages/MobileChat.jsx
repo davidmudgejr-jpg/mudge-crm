@@ -224,12 +224,7 @@ export default function MobileChat() {
       {/* ── Header ── */}
       <div className="flex-shrink-0 bg-crm-bg/90 backdrop-blur-xl border-b border-crm-border/20" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="flex items-center justify-between px-4 py-2">
-          <a href="#/" className="text-crm-accent text-sm font-medium flex items-center gap-1">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
-            </svg>
-            CRM
-          </a>
+          <div className="w-12" /> {/* Spacer */}
           <div className="text-center">
             <h1 className="text-[15px] font-semibold">
               {mode === 'houston' ? '\u26A1 Houston' : 'Team Chat'}
