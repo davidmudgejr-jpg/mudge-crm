@@ -7,7 +7,7 @@ const routerFutureFlags = {
   v7_relativeSplatPath: true,
 };
 import Sidebar from './components/Sidebar';
-import ClaudePanel from './components/ClaudePanel';
+// ClaudePanel removed — Houston Direct in TeamChat replaces it
 import Properties from './pages/Properties';
 import Contacts from './pages/Contacts';
 import Companies from './pages/Companies';
@@ -69,7 +69,7 @@ function SlideOverRenderer() {
 }
 
 function AppShell() {
-  const [claudeOpen, setClaudeOpen] = useState(false);
+  // Claude panel removed — Houston Direct in TeamChat replaces it
   const [currentTable, setCurrentTable] = useState('properties');
   const [rowCount, setRowCount] = useState(0);
   const { devMode } = useDevMode();
@@ -110,7 +110,7 @@ function AppShell() {
       <Sidebar onTableChange={setCurrentTable} />
 
       {/* Main Content */}
-      <main className={`flex-1 pt-8 overflow-hidden transition-all duration-200 ${claudeOpen ? 'mr-[300px]' : ''}`}>
+      <main className="flex-1 pt-8 overflow-hidden">
         <Routes>
           <Route path="/" element={<Properties onCountChange={setRowCount} />} />
           <Route path="/properties" element={<Properties onCountChange={setRowCount} />} />
@@ -129,14 +129,7 @@ function AppShell() {
         </Routes>
       </main>
 
-      {/* Claude AI Panel */}
-      <ClaudePanel
-        isOpen={claudeOpen}
-        onToggle={() => setClaudeOpen(!claudeOpen)}
-        currentTable={currentTable}
-        rowCount={rowCount}
-        hasAnyPanel={hasAnyPanel}
-      />
+      {/* Claude Panel removed — Houston Direct in TeamChat replaces it */}
 
       {/* Nested SlideOver panels */}
       <SlideOverRenderer />
@@ -148,18 +141,7 @@ function AppShell() {
       <TeamChat isOpen={chatOpen} onClose={() => setChatOpen(false)} />
       {!chatOpen && <ChatToggleButton onClick={() => setChatOpen(true)} unreadCount={chatUnread} />}
 
-      {/* Toggle button when panel is closed — rendered AFTER SlideOver so it sits on top */}
-      {!claudeOpen && (
-        <button
-          onClick={(e) => { e.stopPropagation(); setClaudeOpen(true); }}
-          className={`fixed bottom-4 z-[45] bg-crm-accent hover:bg-crm-accent-hover text-white rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-all duration-200 ${hasAnyPanel ? 'right-[540px]' : 'right-4'}`}
-          title="Open Claude"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-          </svg>
-        </button>
-      )}
+      {/* Claude toggle button removed — Houston is in the Team Chat widget */}
     </div>
   );
 }

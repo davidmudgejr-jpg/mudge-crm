@@ -3,7 +3,7 @@
 // Non-blocking: stays open while using the CRM, draggable anywhere
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useChat, fetchChannels, seedChannels, uploadFile, fetchUnreadCount } from '../hooks/useChat';
+import { useChat, fetchChannels, seedChannels, uploadFile, fetchUnreadCount, fetchHoustonDmChannel } from '../hooks/useChat';
 import { useAuth } from '../contexts/AuthContext';
 
 // ── Avatar colors for team members ──
@@ -325,8 +325,10 @@ function useResize(initialSize) {
 // ============================================================
 export default function TeamChat({ isOpen, onClose }) {
   const { user } = useAuth();
-  const [channels, setChannels] = useState([]);
-  const [activeChannelId, setActiveChannelId] = useState(null);
+  const [teamChannelId, setTeamChannelId] = useState(null);
+  const [houstonChannelId, setHoustonChannelId] = useState(null);
+  const [mode, setMode] = useState('team'); // 'team' | 'houston'
+  const activeChannelId = mode === 'houston' ? houstonChannelId : teamChannelId;
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [imagePreview, setImagePreview] = useState(null);
   const [minimized, setMinimized] = useState(false);
@@ -378,14 +380,14 @@ export default function TeamChat({ isOpen, onClose }) {
 
   async function loadChannels() {
     try {
-      // Seed default channels first (idempotent)
+      // Team channel
       await seedChannels();
       const chs = await fetchChannels(user.user_id);
-      setChannels(chs);
-      // Auto-select first channel
-      if (chs.length > 0 && !activeChannelId) {
-        setActiveChannelId(chs[0].id);
-      }
+      if (chs.length > 0) setTeamChannelId(chs[0].id);
+
+      // Houston DM channel (auto-created per user)
+      const { channelId: houstonId } = await fetchHoustonDmChannel(user.user_id);
+      setHoustonChannelId(houstonId);
     } catch (err) {
       console.error('[TeamChat] Failed to load channels:', err);
     }
@@ -512,22 +514,31 @@ export default function TeamChat({ isOpen, onClose }) {
           className="flex items-center justify-between px-4 py-3 border-b border-crm-border/30 bg-crm-bg/90 backdrop-blur-sm cursor-grab active:cursor-grabbing select-none flex-shrink-0"
           onMouseDown={onMouseDown}
         >
-          <div className="flex items-center gap-3">
-            <div className="flex -space-x-2">
-              <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-crm-bg">
-                {'\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67'}
-              </div>
-              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-crm-bg" style={{ backgroundColor: HOUSTON_COLOR }}>
-                {'\u26A1'}
-              </div>
+          <div className="flex items-center gap-2">
+            {/* Mode toggle */}
+            <div className="flex bg-crm-hover/60 rounded-full p-0.5">
+              <button
+                onClick={(e) => { e.stopPropagation(); setMode('team'); prevMsgCountRef.current = 0; setScrollReady(false); }}
+                className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                  mode === 'team' ? 'bg-crm-accent text-white' : 'text-crm-muted'
+                }`}
+              >
+                Team
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setMode('houston'); prevMsgCountRef.current = 0; setScrollReady(false); }}
+                className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors ${
+                  mode === 'houston' ? 'bg-emerald-500 text-white' : 'text-crm-muted'
+                }`}
+              >
+                {'\u26A1'} Houston
+              </button>
             </div>
             <div>
-              <h3 className="text-sm font-semibold text-crm-text">Team Chat</h3>
               <div className="flex items-center gap-1.5">
                 <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
                 <span className="text-[10px] text-crm-muted">
-                  {connected ? 'Connected' : 'Reconnecting...'}
-                  {connected && ' \u00B7 Houston online'}
+                  {connected ? 'Houston online' : 'Reconnecting...'}
                 </span>
               </div>
             </div>
