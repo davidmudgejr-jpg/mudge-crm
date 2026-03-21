@@ -29,6 +29,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './pages/Login';
 import SlideOver, { SlideOverHeader } from './components/shared/SlideOver';
 import CommandPalette from './components/shared/CommandPalette';
+import TeamChat, { ChatToggleButton } from './components/TeamChat';
 import PropertyDetail from './pages/PropertyDetail';
 import ContactDetail from './pages/ContactDetail';
 import CompanyDetail from './pages/CompanyDetail';
@@ -73,6 +74,7 @@ function AppShell() {
   const { hasAnyPanel } = useSlideOver();
 
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
 
   useKeyboardShortcuts({
     onNewRecord: () => { /* wired in Task 7 */ },
@@ -123,6 +125,10 @@ function AppShell() {
 
       {/* Command Palette */}
       <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
+
+      {/* Team Chat */}
+      <TeamChat isOpen={chatOpen} onClose={() => setChatOpen(false)} />
+      {!chatOpen && <ChatToggleButton onClick={() => setChatOpen(true)} />}
 
       {/* Toggle button when panel is closed — rendered AFTER SlideOver so it sits on top */}
       {!claudeOpen && (

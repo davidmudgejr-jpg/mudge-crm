@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-18 (AI Ops 3D War Room complete, Houston voice activation next)
-> Previous session: "Complete rebuild of AI Ops Dashboard from flat SVG to full Three.js 3D war room. Polyhaven PBR textures on all surfaces, @react-three/postprocessing Bloom, gyroscopic orbital rings (OrbRings.jsx — LOCKED), 5 roaming AI agents with 3-state machine (walk/pause/look) and platform collision avoidance, 4 wall screens with live data + RectAreaLight glow, tiered stone amphitheater platform with glowing center bowl, cinematic dark lighting (orb as primary light source), FogExp2 atmospheric fog, dust particles. Star Wars Clone Wars briefing room aesthetic."
-> Next task: **Houston Voice Activation** — Click orb triggers GSAP camera swoop to floor level, ElevenLabs voice synthesis ("What do you need, David?"), Web Speech API mic input, Claude API with CRM database RAG context, orb pulses in sync with voice amplitude. Clone architecture from Elowen personal AI assistant.
+> Updated: 2026-03-20 (Phase 5C: Team Chat + Houston AI brain + RAG memory)
+> Previous sessions: (1) AI fleet architecture — 3-machine OpenClaw fleet, MVA scoring as TPE Model 6, Reonomy-anchored data pipeline, 14 agents, continuous 24/7 processing. (2) Team Chat — Socket.io + Houston AI brain with Claude Sonnet, RAG memory system (preferences, key facts, relationships), infinite scroll message history, CRM context queries with per-section error isolation. Migration 020_team_chat.sql applied.
+> Next tasks: **Image analysis** (Houston reading uploaded screenshots), **"+ New View" save flow** (plan exists in .claude/plans/), **Git cleanup** (merge feature branches), **Email strategies session**, **Auth/RBAC (Phase 4)**.
 
 ---
 
@@ -193,6 +193,19 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [ ] **Design data fan-out mapping** — one Excel row → properties + companies + contacts + lease_comps + junction tables
 - [ ] **Build dedicated wizard page** — separate from generic CSV import, smart field mapping, preview before commit
 - [ ] **Auto-link logic** — find-or-create for properties (by address), companies (by name), contacts (by name/email), then create junction links with correct roles
+
+### AI Fleet Architecture + MVA + Data Pipeline (2026-03-20)
+- [x] **3-machine OpenClaw fleet architecture** — Mac Mini 48GB (workers), Mac Mini 64GB (QA + intelligence), Mac Studio 128GB (Houston + premium). 14 total agents across 3 machines, each as its own OpenClaw instance with Telegram bot. Fleet Apple ID strategy (separate from personal iCloud).
+- [x] **MVA (Market Value Alignment) scoring** — TPE Model 6 with 5 categories: price vs comps (30pts), assessment gap (20pts), listing staleness (15pts), zoning upside (15pts), catalyst proximity (20pts). Updated blended priority to 3-factor: TPE 50% + ECV 25% + MVA 25%. All weights configurable in tpe_config.
+- [x] **Reonomy as primary data source** — Replaces OpenCorporates + ATTOM + BatchData. "True Owner" feature identifies people behind LLCs in one API call. Returns owner name, contact info, connected entities, full portfolio, mortgage data.
+- [x] **Complete data source pipeline** — Tier 1 automated (Reonomy, RE Apps, UniCourt, NeverBounce, county sites), Tier 2 email parsing (AIR super sheets, CoStar alerts, title company), Tier 3 supervised (BeenVerified, WhitePages, ZoomInfo with OpenClaw computer-use assist).
+- [x] **Continuous 24/7 processing** — Changed from nightly batch to continuous. Enricher fires immediately on new contacts, Ingester checks email every 15-30 min, Comp Puller checks RE Apps every 2-4 hours. Deal Hunter re-runs on significant new data, not just 5 AM.
+- [x] **Supervised enrichment workflow** — OpenClaw drives browser for BeenVerified/WhitePages, David clicks CAPTCHAs. Agent does 95% of work. 8 owners in 24 min vs 2 hours manual.
+- [x] **Cross-reference logic encoded** — Reonomy as anchor → UniCourt cascade → NeverBounce verification → BeenVerified/WhitePages confirmation. Pre-confidence scoring: 85%+ auto-enters, 60-84% queues for manual.
+- [x] **5 new database tables designed** — mva_listings, mva_comps, mva_assessments, mva_catalysts, enrichment_queue (schemas in ARCHITECTURE.md)
+- [x] **5 new agents designed** — Comp Puller (RE Apps), Ingester (email parser), Public Records (county), Court Monitor (UniCourt), Deal Hunter (MVA calculator)
+- [x] **Monthly cost estimate** — ~$404-839/mo total (Reonomy ~$300, UniCourt ~$150, cloud APIs ~$50, tools ~$54, electricity ~$20). One deal covers 2+ years.
+- [x] **Commits:** `4c7acde` (OpenClaw fleet), `3eac801` (MVA + data pipeline), `0905a94` (Reonomy + continuous processing)
 
 ### AI System Architecture Updates (2026-03-13)
 - [x] **YouTube Transcript MCP** — installed `@kimtaeyoon83/mcp-server-youtube-transcript` for both Claude Desktop and Claude Code (project-level `.mcp.json`). Drop any YouTube URL in future sessions and Claude can pull the transcript.

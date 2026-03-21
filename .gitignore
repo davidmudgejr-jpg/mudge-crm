@@ -6,3 +6,8 @@ build/
 *.log
 .claude/
 .worktrees/
+
+.playwright-mcp/
+.superpowers/
+ie-crm/uploads/
+docs/~$*
