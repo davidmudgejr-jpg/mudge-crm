@@ -14,18 +14,16 @@ let claudeClient = null;
 
 function getClaudeClient() {
   if (claudeClient) return claudeClient;
-  const token = process.env.ANTHROPIC_OAUTH_TOKEN;
+  // Use API key for SDK calls (OAuth tokens don't work with x-api-key header)
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (token) {
-    claudeClient = new Anthropic({ apiKey: token });
-  } else if (apiKey) {
+  if (apiKey) {
     claudeClient = new Anthropic({ apiKey });
   }
   return claudeClient;
 }
 
-function getOAuthToken() {
-  return process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY || null;
+function isClaudeAvailable() {
+  return Boolean(process.env.ANTHROPIC_API_KEY);
 }
 
 /**
@@ -61,11 +59,10 @@ function initChat(socketServer, dbPool) {
   io = socketServer;
   pool = dbPool;
 
-  const token = getOAuthToken();
-  if (token) {
-    console.log('[chat/houston] Brain online — OAuth token configured (Claude Max)');
+  if (isClaudeAvailable()) {
+    console.log('[chat/houston] Brain online — Claude API connected');
   } else {
-    console.warn('[chat/houston] No ANTHROPIC_OAUTH_TOKEN — Houston will use placeholder responses');
+    console.warn('[chat/houston] No ANTHROPIC_API_KEY — Houston will use placeholder responses');
   }
 
   io.on('connection', (socket) => {
@@ -589,7 +586,7 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
 
     let houstonBody;
 
-    if (getOAuthToken()) {
+    if (isClaudeAvailable()) {
       // Use Claude API via OAuth (Claude Max subscription)
       try {
         const responseText = await callClaude({
@@ -654,7 +651,7 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
       houstonMeta: {
         trigger: triggerType,
         trigger_message_id: triggerMessage.id,
-        model: getOAuthToken() ? HOUSTON_MODEL : 'placeholder',
+        model: isClaudeAvailable() ? HOUSTON_MODEL : 'placeholder',
         context_messages: recentMessages.length,
         crm_entities_referenced: crmContext?.entitiesFound || 0,
         memories_used: memories?.length || 0,
@@ -666,7 +663,7 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
     io.to(`channel:${triggerMessage.channel_id}`).emit('chat:message:new', houstonMsg);
 
     // Store this interaction as a memory
-    if (getOAuthToken()) {
+    if (isClaudeAvailable()) {
       storeMemory(triggerMessage, houstonBody).catch(err =>
         console.error('[chat/houston] Memory storage error:', err.message)
       );
@@ -1029,7 +1026,7 @@ async function storeMemory(triggerMessage, houstonResponse) {
   if (userMsg.length < 15 && houstonMsg.length < 30) return;
 
   try {
-    if (getOAuthToken()) {
+    if (isClaudeAvailable()) {
       // Use Claude to extract structured memories from this exchange
       const responseText = await callClaude({
         system: `You extract memories from chat exchanges for a CRM AI assistant named Houston.
