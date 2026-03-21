@@ -527,7 +527,7 @@ export default function TeamChat({ isOpen, onClose }) {
                 <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
                 <span className="text-[10px] text-crm-muted">
                   {connected ? 'Connected' : 'Reconnecting...'}
-                  {connected && ' \u00B7 Houston listening'}
+                  {connected && ' \u00B7 Houston online'}
                 </span>
               </div>
             </div>
