@@ -491,8 +491,20 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
     // Pull CRM context — relevant deals, properties, contacts
     const crmContext = await buildCrmContext(triggerMessage.body);
 
-    // Pull Houston's memories about this user
-    const memories = await getRelevantMemories(triggerMessage.sender_id, triggerMessage.body);
+    // Determine channel type for memory pool separation
+    let channelType = 'team'; // default to team for group channels
+    try {
+      const chTypeResult = await pool.query(
+        `SELECT channel_type FROM chat_channels WHERE id = $1`,
+        [triggerMessage.channel_id]
+      );
+      if (chTypeResult.rows[0]?.channel_type === 'houston_dm') {
+        channelType = 'personal';
+      }
+    } catch {}
+
+    // Pull Houston's memories about this user (pool-aware)
+    const memories = await getRelevantMemories(triggerMessage.sender_id, triggerMessage.body, channelType);
 
     let systemPrompt;
     let mergedHistory;
@@ -673,9 +685,9 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
     // Broadcast Houston's response
     io.to(`channel:${triggerMessage.channel_id}`).emit('chat:message:new', houstonMsg);
 
-    // Store this interaction as a memory
+    // Store this interaction as a memory (pool-aware)
     if (isClaudeAvailable()) {
-      storeMemory(triggerMessage, houstonBody).catch(err =>
+      storeMemory(triggerMessage, houstonBody, channelType).catch(err =>
         console.error('[chat/houston] Memory storage error:', err.message)
       );
     }
@@ -1429,11 +1441,25 @@ async function buildCrmContext(messageBody) {
  * Get relevant memories for RAG context
  * Uses keyword matching + entity linking + importance scoring for relevance
  */
-async function getRelevantMemories(userId, messageBody) {
+async function getRelevantMemories(userId, messageBody, channelType = 'personal') {
   if (!pool || !userId) return [];
 
   try {
     const body = (messageBody || '').toLowerCase();
+
+    // Build the pool filter based on channel type:
+    // - personal (houston_dm): sees personal memories + team memories
+    // - team: only sees shared team memories
+    let poolFilter;
+    let poolParams;
+    if (channelType === 'team') {
+      poolFilter = `channel_type = 'team'`;
+      poolParams = []; // no user_id needed for team-only pool
+    } else {
+      // Personal chat sees both personal AND team memories
+      poolFilter = `((user_id = $1 AND channel_type = 'personal') OR channel_type = 'team')`;
+      poolParams = [userId];
+    }
 
     // Extract keywords for matching (remove stop words, keep meaningful terms)
     const stopWords = new Set(['the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'been',
@@ -1455,19 +1481,19 @@ async function getRelevantMemories(userId, messageBody) {
     // Strategy 1: Keyword-matched memories (content contains relevant terms)
     let keywordMemories = [];
     if (keywords.length > 0) {
-      // Build an OR pattern for keyword matching
-      const keywordPattern = keywords.slice(0, 8).join('|'); // Cap at 8 keywords
+      const keywordPattern = keywords.slice(0, 8).join('|');
+      const paramOffset = poolParams.length;
       const kmResult = await pool.query(`
         SELECT category, content, created_at, importance,
-               entity_type, entity_id,
+               entity_type, entity_id, channel_type,
                1 AS match_type
         FROM houston_memories
-        WHERE user_id = $1
+        WHERE ${poolFilter}
           AND (expires_at IS NULL OR expires_at > NOW())
-          AND content ~* $2
+          AND content ~* $${paramOffset + 1}
         ORDER BY importance DESC, created_at DESC
         LIMIT 5
-      `, [userId, keywordPattern]);
+      `, [...poolParams, keywordPattern]);
       keywordMemories = kmResult.rows;
     }
 
@@ -1480,7 +1506,6 @@ async function getRelevantMemories(userId, messageBody) {
     const entityKeywords = body.match(/deal|property|contact|company|comp/gi) || [];
 
     if (mentionedCity || entityKeywords.length > 0) {
-      // Look for memories linked to entities in the mentioned city or entity type
       const entityTypes = [];
       if (body.includes('deal')) entityTypes.push('deal');
       if (body.includes('propert') || body.includes('building') || mentionedCity) entityTypes.push('property');
@@ -1488,17 +1513,18 @@ async function getRelevantMemories(userId, messageBody) {
       if (body.includes('company') || body.includes('tenant') || body.includes('owner')) entityTypes.push('company');
 
       if (entityTypes.length > 0) {
+        const paramOffset = poolParams.length;
         const emResult = await pool.query(`
           SELECT category, content, created_at, importance,
-                 entity_type, entity_id,
+                 entity_type, entity_id, channel_type,
                  2 AS match_type
           FROM houston_memories
-          WHERE user_id = $1
+          WHERE ${poolFilter}
             AND (expires_at IS NULL OR expires_at > NOW())
-            AND entity_type = ANY($2)
+            AND entity_type = ANY($${paramOffset + 1})
           ORDER BY importance DESC, created_at DESC
           LIMIT 5
-        `, [userId, entityTypes]);
+        `, [...poolParams, entityTypes]);
         entityMemories = emResult.rows;
       }
     }
@@ -1506,35 +1532,35 @@ async function getRelevantMemories(userId, messageBody) {
     // Strategy 3: High-importance memories (preferences, key facts — always relevant)
     const hiResult = await pool.query(`
       SELECT category, content, created_at, importance,
-             entity_type, entity_id,
+             entity_type, entity_id, channel_type,
              3 AS match_type
       FROM houston_memories
-      WHERE user_id = $1
+      WHERE ${poolFilter}
         AND (expires_at IS NULL OR expires_at > NOW())
         AND importance >= 0.8
         AND category IN ('preference', 'relationship', 'key_fact')
       ORDER BY importance DESC, created_at DESC
       LIMIT 5
-    `, [userId]);
+    `, [...poolParams]);
 
     // Strategy 4: Recent memories (last 7 days, for conversational continuity)
     const recentResult = await pool.query(`
       SELECT category, content, created_at, importance,
-             entity_type, entity_id,
+             entity_type, entity_id, channel_type,
              4 AS match_type
       FROM houston_memories
-      WHERE user_id = $1
+      WHERE ${poolFilter}
         AND (expires_at IS NULL OR expires_at > NOW())
         AND created_at > NOW() - INTERVAL '7 days'
       ORDER BY created_at DESC
       LIMIT 3
-    `, [userId]);
+    `, [...poolParams]);
 
     // Merge and deduplicate (keyword > entity > importance > recent)
     const seen = new Set();
     const merged = [];
     for (const mem of [...keywordMemories, ...entityMemories, ...hiResult.rows, ...recentResult.rows]) {
-      const key = mem.content.slice(0, 100); // Deduplicate by content prefix
+      const key = mem.content.slice(0, 100);
       if (!seen.has(key)) {
         seen.add(key);
         merged.push(mem);
@@ -1554,14 +1580,20 @@ async function getRelevantMemories(userId, messageBody) {
  * Uses Claude to extract what's worth remembering — preferences, facts, relationships.
  * Skips trivial exchanges (greetings, yes/no, etc.)
  */
-async function storeMemory(triggerMessage, houstonResponse) {
+async function storeMemory(triggerMessage, houstonResponse, channelType = 'personal') {
   if (!pool || !triggerMessage.sender_id) return;
 
   const userMsg = (triggerMessage.body || '').trim();
   const houstonMsg = (houstonResponse || '').trim();
+  const isTeam = channelType === 'team';
 
   // Skip trivially short exchanges (greetings, acknowledgments)
   if (userMsg.length < 15 && houstonMsg.length < 30) return;
+
+  // Run memory decay/pruning on each store call (lightweight, uses indexed queries)
+  pruneOldMemories(triggerMessage.sender_id).catch(err =>
+    console.error('[chat/houston] Memory pruning error:', err.message)
+  );
 
   try {
     if (isClaudeAvailable()) {
@@ -1573,6 +1605,7 @@ Return a JSON array of memories worth storing. Each memory object has:
 - "category": one of "preference", "key_fact", "relationship", "context", "action_taken"
 - "importance": 0.0-1.0 (preferences=0.9, key facts=0.8, relationships=0.85, context=0.5, actions=0.6)
 - "entity_type": null or one of "property", "deal", "contact", "company" (if the memory references a specific CRM entity)
+- "entity_name": the specific entity name/address if referenced (e.g. "1234 Main St" or "John Smith" or "Acme Corp")
 - "entity_keywords": array of 2-5 searchable keywords from the memory
 
 Rules:
@@ -1591,55 +1624,181 @@ Rules:
       // Parse the JSON response
       let memories = [];
       try {
-        // Handle potential markdown wrapping
         const jsonStr = responseText.replace(/```json\n?|\n?```/g, '').trim();
         memories = JSON.parse(jsonStr);
         if (!Array.isArray(memories)) memories = [];
       } catch {
-        // If parsing fails, skip storing
         console.warn('[chat/houston] Memory extraction parse failed:', responseText.slice(0, 100));
         return;
       }
 
       // Store each extracted memory
-      for (const mem of memories.slice(0, 3)) { // Max 3 memories per exchange
-        // Check for near-duplicates before inserting
+      for (const mem of memories.slice(0, 3)) {
+        // Duplicate check — scope to the right pool
+        const dupParams = isTeam
+          ? [mem.content.slice(0, 60)]
+          : [triggerMessage.sender_id, mem.content.slice(0, 60)];
         const dupCheck = await pool.query(`
           SELECT memory_id FROM houston_memories
-          WHERE user_id = $1
-            AND content ILIKE '%' || $2 || '%'
+          WHERE ${isTeam ? 'channel_type = \'team\'' : 'user_id = $1'}
+            AND content ILIKE '%' || $${isTeam ? 1 : 2} || '%'
             AND created_at > NOW() - INTERVAL '30 days'
           LIMIT 1
-        `, [triggerMessage.sender_id, mem.content.slice(0, 60)]);
+        `, dupParams);
 
-        if (dupCheck.rows.length > 0) continue; // Skip duplicate
+        if (dupCheck.rows.length > 0) continue;
+
+        // Resolve entity_id from entity_name if provided
+        let entityId = null;
+        if (mem.entity_type && mem.entity_name) {
+          entityId = await resolveEntityId(mem.entity_type, mem.entity_name);
+        }
 
         await pool.query(`
-          INSERT INTO houston_memories (user_id, category, content, source, importance, entity_type)
-          VALUES ($1, $2, $3, 'team_chat', $4, $5)
+          INSERT INTO houston_memories (user_id, category, content, source, importance, entity_type, entity_id, channel_type)
+          VALUES ($1, $2, $3, 'team_chat', $4, $5, $6, $7)
         `, [
-          triggerMessage.sender_id,
+          isTeam ? null : triggerMessage.sender_id,
           mem.category || 'context',
           mem.content.slice(0, 500),
           Math.min(Math.max(parseFloat(mem.importance) || 0.5, 0.1), 1.0),
           mem.entity_type || null,
+          entityId,
+          channelType,
         ]);
       }
 
       if (memories.length > 0) {
-        console.log(`[chat/houston] Stored ${Math.min(memories.length, 3)} memories for user ${triggerMessage.sender_id}`);
+        console.log(`[chat/houston] Stored ${Math.min(memories.length, 3)} ${channelType} memories for ${isTeam ? 'team pool' : 'user ' + triggerMessage.sender_id}`);
       }
     } else {
       // Fallback: basic storage without extraction
       const content = `User asked: "${userMsg.slice(0, 200)}" — Houston answered about: ${houstonMsg.slice(0, 200)}`;
       await pool.query(`
-        INSERT INTO houston_memories (user_id, category, content, source, importance)
-        VALUES ($1, 'chat_exchange', $2, 'team_chat', 0.5)
-      `, [triggerMessage.sender_id, content]);
+        INSERT INTO houston_memories (user_id, category, content, source, importance, channel_type)
+        VALUES ($1, 'chat_exchange', $2, 'team_chat', 0.5, $3)
+      `, [isTeam ? null : triggerMessage.sender_id, content, channelType]);
+    }
+  } catch (err) {
+    console.error('[chat/houston] Memory storage error:', err.message);
+  }
+}
+
+/**
+ * Resolve an entity name to its CRM ID by searching the database.
+ * Returns the entity_id string or null if not found.
+ */
+async function resolveEntityId(entityType, entityName) {
+  if (!pool || !entityName) return null;
+  try {
+    const name = entityName.trim();
+    let result;
+    switch (entityType) {
+      case 'property':
+        // Search by address (normalized or raw)
+        result = await pool.query(
+          `SELECT id::text FROM properties
+           WHERE address ILIKE $1 OR normalized_address ILIKE $1
+           LIMIT 1`,
+          [`%${name}%`]
+        );
+        break;
+      case 'contact':
+        // Search by full name
+        result = await pool.query(
+          `SELECT id::text FROM contacts
+           WHERE (first_name || ' ' || last_name) ILIKE $1
+              OR last_name ILIKE $2
+           LIMIT 1`,
+          [`%${name}%`, `%${name}%`]
+        );
+        break;
+      case 'company':
+        result = await pool.query(
+          `SELECT id::text FROM companies WHERE name ILIKE $1 LIMIT 1`,
+          [`%${name}%`]
+        );
+        break;
+      case 'deal':
+        result = await pool.query(
+          `SELECT id::text FROM deals WHERE name ILIKE $1 LIMIT 1`,
+          [`%${name}%`]
+        );
+        break;
+      default:
+        return null;
+    }
+    return result?.rows[0]?.id || null;
+  } catch (err) {
+    // Non-critical — just skip entity linking
+    return null;
+  }
+}
+
+/**
+ * Memory decay/pruning — clean up old low-importance memories.
+ * Called on each storeMemory to keep the memory pool lean.
+ */
+async function pruneOldMemories(userId) {
+  if (!pool) return;
+  try {
+    // Delete memories older than 90 days with low importance
+    await pool.query(`
+      DELETE FROM houston_memories
+      WHERE created_at < NOW() - INTERVAL '90 days'
+        AND importance < 0.5
+    `);
+
+    // Delete memories older than 180 days with medium importance
+    await pool.query(`
+      DELETE FROM houston_memories
+      WHERE created_at < NOW() - INTERVAL '180 days'
+        AND importance < 0.8
+    `);
+
+    // Cap total memories per user at 500 (delete oldest low-importance first)
+    if (userId) {
+      const countResult = await pool.query(
+        `SELECT COUNT(*) AS cnt FROM houston_memories WHERE user_id = $1`,
+        [userId]
+      );
+      const count = parseInt(countResult.rows[0]?.cnt || '0', 10);
+      if (count > 500) {
+        const excess = count - 500;
+        await pool.query(`
+          DELETE FROM houston_memories
+          WHERE memory_id IN (
+            SELECT memory_id FROM houston_memories
+            WHERE user_id = $1
+            ORDER BY importance ASC, created_at ASC
+            LIMIT $2
+          )
+        `, [userId, excess]);
+        console.log(`[chat/houston] Pruned ${excess} memories for user ${userId} (was ${count})`);
+      }
+    }
+
+    // Also cap team memories at 500
+    const teamCountResult = await pool.query(
+      `SELECT COUNT(*) AS cnt FROM houston_memories WHERE channel_type = 'team'`
+    );
+    const teamCount = parseInt(teamCountResult.rows[0]?.cnt || '0', 10);
+    if (teamCount > 500) {
+      const excess = teamCount - 500;
+      await pool.query(`
+        DELETE FROM houston_memories
+        WHERE memory_id IN (
+          SELECT memory_id FROM houston_memories
+          WHERE channel_type = 'team'
+          ORDER BY importance ASC, created_at ASC
+          LIMIT $1
+        )
+      `, [excess]);
+      console.log(`[chat/houston] Pruned ${excess} team memories (was ${teamCount})`);
     }
   } catch (err) {
     // Non-critical
-    console.error('[chat/houston] Memory storage error:', err.message);
+    console.error('[chat/houston] Memory pruning error:', err.message);
   }
 }
 
