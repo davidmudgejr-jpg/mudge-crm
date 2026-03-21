@@ -527,9 +527,14 @@ export default function TeamChat({ isOpen, onClose }) {
           });
           data = await res1.json();
 
-          // If no exact match, try fuzzy: search by key words (skip numbers, short words)
+          // If no exact match, try fuzzy: search by key words (KEEP numbers for street addresses!)
           if (!data.rows?.length) {
-            const words = search.replace(/[,\.]/g, '').split(/\s+/).filter(w => w.length > 2 && !/^\d+$/.test(w));
+            const words = search.replace(/[,\.]/g, '').split(/\s+/).filter(w => {
+              // Keep numbers (street numbers like "23447" are critical)
+              if (/^\d+$/.test(w)) return w.length >= 2;
+              // Strip only short non-numeric words
+              return w.length > 2;
+            });
             if (words.length > 0) {
               const fuzzyWhere = words.map((_, i) => col + ' ILIKE $' + (i + 1)).join(' AND ');
               const fuzzyParams = words.map(w => '%' + w + '%');
@@ -540,6 +545,21 @@ export default function TeamChat({ isOpen, onClose }) {
               });
               data = await res2.json();
               console.log('[TeamChat] NAV fuzzy search:', words, '→', data.rows?.length, 'matches');
+            }
+          }
+
+          // Normalized fallback: strip street suffixes and retry
+          if (!data.rows?.length) {
+            const suffixPattern = /\b(st|ave|blvd|dr|rd|way|ln|ct|cir|pl|street|avenue|boulevard|drive|road|lane|court|circle|place)\b/gi;
+            const normalized = search.replace(suffixPattern, '').replace(/\s+/g, ' ').trim();
+            if (normalized.length > 3 && normalized !== search) {
+              const res3 = await fetch(API_BASE + '/api/db/query', {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql: 'SELECT ' + id + ' FROM ' + table + ' WHERE ' + col + ' ILIKE $1 LIMIT 1', params: ['%' + normalized + '%'] }),
+              });
+              data = await res3.json();
+              console.log('[TeamChat] NAV normalized search:', normalized, '→', data.rows?.length, 'matches');
             }
           }
 

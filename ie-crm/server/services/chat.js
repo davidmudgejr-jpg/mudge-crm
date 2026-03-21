@@ -606,18 +606,16 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
         : "Good question \u2014 I need my OAuth token configured to answer that. Check with David.";
     }
 
-    // Execute any CRM write actions Houston included in the response
+    // Parse CRM write actions from Houston's response — store as PENDING for confirmation
+    let pendingActions = [];
     if (houstonBody) {
-      const actionResults = await executeHoustonWriteActions(houstonBody, triggerMessage.sender_id);
+      const actionPattern = /<!--ACTION:(\{.*?\})-->/g;
+      let actionMatch;
+      while ((actionMatch = actionPattern.exec(houstonBody)) !== null) {
+        try { pendingActions.push(JSON.parse(actionMatch[1])); } catch {}
+      }
       // Strip ACTION blocks from the visible message
       houstonBody = houstonBody.replace(/<!--ACTION:\{.*?\}-->/g, '').trim();
-      // Append confirmation if actions were executed
-      if (actionResults.length > 0) {
-        const confirmations = actionResults.filter(r => r.success).map(r => r.message);
-        if (confirmations.length > 0) {
-          houstonBody += '\n\n' + confirmations.join('\n');
-        }
-      }
     }
 
     // Parse NAV commands from Houston's response
@@ -668,6 +666,7 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
         memories_used: memories?.length || 0,
         ...(imageAnalysisData ? { image_analyzed: imageAnalysisData.filename } : {}),
         ...(navCommands.length > 0 ? { nav_commands: navCommands } : {}),
+        ...(pendingActions.length > 0 ? { pending_actions: pendingActions, pending_actions_at: new Date().toISOString() } : {}),
       }
     });
 
@@ -721,6 +720,7 @@ PERSONALITY:
 KNOWLEDGE:
 - You have access to the IE CRM database (Inland Empire commercial real estate)
 - The CRM has: Properties (10,000+), Contacts, Companies, Deals, Comps (lease & sale), TPE scores
+- You now have access to LINKED RECORDS (contacts linked to properties, deals linked to properties), INTERACTION HISTORY (recent activity logs), TPE SCORES (Transaction Probability Engine), and SALE COMPS
 - Focus areas: Industrial, Retail, Office in the Inland Empire (Ontario, Fontana, Rancho Cucamonga, Riverside, San Bernardino, etc.)
 - You know about deal stages, TPE (Transaction Probability Engine) scoring, and market dynamics
 ${crmSection}
@@ -766,7 +766,14 @@ SMART BEHAVIORS (CRITICAL — follow these exactly):
 4. VERIFY BEFORE ACTING — for write actions:
    - Before logging an interaction, confirm: "Logging a Door Knock at 23447 Cajalco Rd with [owner name]. Sound right?"
    - Before creating tasks, confirm the details: "Creating a follow-up task for Aug 1 — call Mike Thompson re: listing. Correct?"
-   - Only include the ACTION block AFTER confirming in your response text
+   - Include the ACTION block in your response — it will NOT execute immediately. The user must confirm with "yes", "do it", thumbs up, etc. before it runs.
+   - Actions expire after 5 minutes if not confirmed.
+
+4b. OWNERSHIP & LINKED RECORDS:
+   - When user asks "who owns X?" check the LINKED CONTACTS for that property in your data
+   - When sharing property details, ALWAYS include the TPE score if available (e.g., "TPE: 78/100")
+   - When asked about a contact, mention their recent interactions if available (e.g., "Last activity: Door Knock on 3/15")
+   - When discussing deals, reference linked properties and contacts
 
 5. CONTEXT AWARENESS:
    - Remember what was discussed in the last few messages
@@ -779,6 +786,7 @@ SMART BEHAVIORS (CRITICAL — follow these exactly):
    - If a property has no owner linked: "This property doesn't have an owner contact yet. Want me to look one up?"
 
 IMPORTANT: Only include ACTION/NAV blocks when the user ASKS you to do something. Never auto-execute unprompted.
+ACTION blocks require user confirmation before executing — the user must reply "yes", "do it", "go ahead", or react with a thumbs up. Always end your action offer with a clear confirmation question.
 
 CRM NAVIGATION:
 You can navigate the CRM UI for the user. Include a NAV BLOCK at the END of your response.
@@ -841,7 +849,13 @@ async function buildCrmContext(messageBody) {
     'get', 'give', 'tell', 'is', 'are', 'was', 'were', 'can', 'you', 'houston', 'please', 'hey',
     'hi', 'hello', 'thanks', 'thank', 'a', 'an', 'in', 'on', 'at', 'to', 'of', 'and', 'or', 'the',
     'do', 'we', 'have', 'our', 'my', 'this', 'that', 'with', 'from']);
-  const searchTerms = body.split(/\s+/).filter(w => w.length > 2 && !skipWords.has(w));
+  const searchTerms = body.split(/\s+/).filter(w => {
+    if (skipWords.has(w)) return false;
+    // Keep numbers (street numbers like "23447" are critical for address matching)
+    if (/^\d+$/.test(w)) return w.length >= 2;
+    // Keep words > 2 chars that aren't stop words
+    return w.length > 2;
+  });
   const searchPhrase = searchTerms.join(' ');
 
   // Direct property search by address
@@ -853,17 +867,55 @@ async function buildCrmContext(messageBody) {
          ORDER BY rba DESC NULLS LAST LIMIT 5`,
         ['%' + searchPhrase + '%']
       );
-      // Fuzzy fallback: search each word separately
+      // Fuzzy fallback: search each word separately (keep numbers for street addresses!)
       let propResults = propSearch.rows;
       if (propResults.length === 0 && searchTerms.length > 0) {
-        const fuzzyTerms = searchTerms.filter(t => t.length > 3 && !/^\d+$/.test(t));
+        // Keep digits, only strip short non-numeric words (<=2 chars)
+        const fuzzyTerms = searchTerms.filter(t => /^\d+$/.test(t) ? t.length >= 2 : t.length > 2);
         if (fuzzyTerms.length > 0) {
-          const fuzzyWhere = fuzzyTerms.map((_, i) => 'property_address ILIKE $' + (i + 1)).join(' AND ');
+          const fuzzyWhere = fuzzyTerms.map((_, i) => '(property_address ILIKE $' + (i + 1) + ' OR normalized_address ILIKE $' + (i + 1) + ')').join(' AND ');
           const fuzzySearch = await pool.query(
             'SELECT property_id, property_address, city, property_type, rba, year_built, entity_name FROM properties WHERE ' + fuzzyWhere + ' ORDER BY rba DESC NULLS LAST LIMIT 5',
             fuzzyTerms.map(t => '%' + t + '%')
           );
           propResults = fuzzySearch.rows;
+        }
+      }
+
+      // Normalized address fallback: strip common street suffixes and retry
+      if (propResults.length === 0 && searchTerms.length > 0) {
+        const suffixPattern = /\b(st|ave|blvd|dr|rd|way|ln|ct|cir|pl|street|avenue|boulevard|drive|road|lane|court|circle|place)\b/gi;
+        const normalized = searchPhrase.replace(suffixPattern, '').replace(/\s+/g, ' ').trim();
+        if (normalized.length > 3 && normalized !== searchPhrase) {
+          try {
+            const normSearch = await pool.query(
+              `SELECT property_id, property_address, city, property_type, rba, year_built, entity_name
+               FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1
+               ORDER BY rba DESC NULLS LAST LIMIT 5`,
+              ['%' + normalized + '%']
+            );
+            propResults = normSearch.rows;
+          } catch (normErr) {
+            console.error('[chat/houston] Normalized address search error:', normErr.message);
+          }
+        }
+      }
+
+      // pg_trgm similarity fallback (trigram fuzzy matching for typos)
+      if (propResults.length === 0 && searchPhrase.length > 4) {
+        try {
+          const trigramSearch = await pool.query(
+            `SELECT property_id, property_address, city, property_type, rba, year_built, entity_name,
+                    similarity(LOWER(property_address), $1) AS sim
+             FROM properties
+             WHERE similarity(LOWER(property_address), $1) > 0.3
+             ORDER BY sim DESC LIMIT 5`,
+            [searchPhrase]
+          );
+          propResults = trigramSearch.rows;
+        } catch (triErr) {
+          // pg_trgm extension may not be enabled — non-fatal
+          console.warn('[chat/houston] pg_trgm search unavailable:', triErr.message);
         }
       }
       if (propResults.length > 0) {
@@ -885,10 +937,10 @@ async function buildCrmContext(messageBody) {
          ORDER BY created_at DESC LIMIT 5`,
         ['%' + searchPhrase + '%']
       );
-      // Fuzzy: try individual name parts
+      // Fuzzy: try individual name parts (keep numbers for contact searches too)
       let contactResults = contactSearch.rows;
       if (contactResults.length === 0 && searchTerms.length > 0) {
-        const nameTerms = searchTerms.filter(t => t.length > 2 && !/^\d+$/.test(t));
+        const nameTerms = searchTerms.filter(t => /^\d+$/.test(t) ? t.length >= 2 : t.length > 2);
         if (nameTerms.length > 0) {
           const fuzzyWhere = nameTerms.map((_, i) => 'full_name ILIKE $' + (i + 1)).join(' AND ');
           const fuzzySearch = await pool.query(
@@ -1046,6 +1098,311 @@ async function buildCrmContext(messageBody) {
       }
     } catch (err) {
       console.error('[chat/houston] Comps query error:', err.message);
+    }
+  }
+
+  // ── LINKED RECORDS ENRICHMENT ──
+  // When properties are found, pull linked contacts, deals, interactions, and TPE scores
+  // Collect all found property IDs and contact IDs from smart search results
+  const foundPropertyIds = [];
+  const foundContactIds = [];
+  const foundDealIds = [];
+
+  // Re-scan sections to extract entity IDs (they were found during smart search above)
+  // We need to re-query to get IDs since sections only store text
+  if (searchPhrase.length > 3) {
+    try {
+      // Gather property IDs found
+      const pidResult = await pool.query(
+        `SELECT property_id FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 5`,
+        ['%' + searchPhrase + '%']
+      );
+      for (const r of pidResult.rows) foundPropertyIds.push(r.property_id);
+
+      // If no exact match, try fuzzy for IDs
+      if (foundPropertyIds.length === 0 && searchTerms.length > 0) {
+        const fuzzyTerms = searchTerms.filter(t => /^\d+$/.test(t) ? t.length >= 2 : t.length > 2);
+        if (fuzzyTerms.length > 0) {
+          const fWhere = fuzzyTerms.map((_, i) => '(property_address ILIKE $' + (i + 1) + ' OR normalized_address ILIKE $' + (i + 1) + ')').join(' AND ');
+          const fResult = await pool.query(
+            'SELECT property_id FROM properties WHERE ' + fWhere + ' LIMIT 5',
+            fuzzyTerms.map(t => '%' + t + '%')
+          );
+          for (const r of fResult.rows) foundPropertyIds.push(r.property_id);
+        }
+      }
+
+      // Gather contact IDs found
+      const cidResult = await pool.query(
+        `SELECT contact_id FROM contacts WHERE full_name ILIKE $1 LIMIT 5`,
+        ['%' + searchPhrase + '%']
+      );
+      for (const r of cidResult.rows) foundContactIds.push(r.contact_id);
+
+      // Gather deal IDs found
+      const didResult = await pool.query(
+        `SELECT deal_id FROM deals WHERE deal_name ILIKE $1 LIMIT 5`,
+        ['%' + searchPhrase + '%']
+      );
+      for (const r of didResult.rows) foundDealIds.push(r.deal_id);
+    } catch (err) {
+      console.error('[chat/houston] Entity ID collection error:', err.message);
+    }
+  }
+
+  // Linked contacts for found properties (via junction table)
+  if (foundPropertyIds.length > 0) {
+    try {
+      const linkedContacts = await pool.query(
+        `SELECT c.full_name, c.title, c.email, c.phone_1, c.type, p.property_address
+         FROM contacts c
+         JOIN property_contacts pc ON c.contact_id = pc.contact_id
+         JOIN properties p ON p.property_id = pc.property_id
+         WHERE pc.property_id = ANY($1)
+         LIMIT 15`,
+        [foundPropertyIds]
+      );
+      if (linkedContacts.rows.length > 0) {
+        // Group by property, cap at 3 per property
+        const byProp = {};
+        for (const r of linkedContacts.rows) {
+          if (!byProp[r.property_address]) byProp[r.property_address] = [];
+          if (byProp[r.property_address].length < 3) byProp[r.property_address].push(r);
+        }
+        const lines = [];
+        for (const [addr, contacts] of Object.entries(byProp)) {
+          lines.push('  ' + addr + ':');
+          for (const c of contacts) {
+            lines.push('    - ' + (c.full_name || '?') + ' | ' + (c.type || '') + ' | ' + (c.title || '') + ' | ' + (c.email || 'no email') + ' | ' + (c.phone_1 || 'no phone'));
+          }
+        }
+        sections.push('LINKED CONTACTS FOR PROPERTIES:\n' + lines.join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Linked contacts query error:', err.message);
+    }
+
+    // Linked deals for found properties
+    try {
+      const linkedDeals = await pool.query(
+        `SELECT d.deal_name, d.status, d.deal_type, d.sf, d.asking_rate, p.property_address
+         FROM deals d
+         JOIN deal_properties dp ON d.deal_id = dp.deal_id
+         JOIN properties p ON p.property_id = dp.property_id
+         WHERE dp.property_id = ANY($1)
+         LIMIT 15`,
+        [foundPropertyIds]
+      );
+      if (linkedDeals.rows.length > 0) {
+        const byProp = {};
+        for (const r of linkedDeals.rows) {
+          if (!byProp[r.property_address]) byProp[r.property_address] = [];
+          if (byProp[r.property_address].length < 3) byProp[r.property_address].push(r);
+        }
+        const lines = [];
+        for (const [addr, deals] of Object.entries(byProp)) {
+          lines.push('  ' + addr + ':');
+          for (const d of deals) {
+            lines.push('    - "' + (d.deal_name || '?') + '" | ' + (d.status || '') + ' | ' + (d.deal_type || '') + (d.sf ? ' | ' + Number(d.sf).toLocaleString() + ' sqft' : '') + (d.asking_rate ? ' | $' + d.asking_rate + '/sqft' : ''));
+          }
+        }
+        sections.push('LINKED DEALS FOR PROPERTIES:\n' + lines.join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Linked deals query error:', err.message);
+    }
+
+    // Interaction history for found properties
+    try {
+      const propInteractions = await pool.query(
+        `SELECT i.interaction_type, i.interaction_date, i.notes, i.logged_by, p.property_address
+         FROM interactions i
+         JOIN interaction_properties ip ON i.interaction_id = ip.interaction_id
+         JOIN properties p ON p.property_id = ip.property_id
+         WHERE ip.property_id = ANY($1)
+         ORDER BY i.interaction_date DESC NULLS LAST
+         LIMIT 10`,
+        [foundPropertyIds]
+      );
+      if (propInteractions.rows.length > 0) {
+        const lines = propInteractions.rows.slice(0, 5).map(r =>
+          '  - [' + (r.interaction_type || 'Note') + '] ' +
+          (r.interaction_date ? new Date(r.interaction_date).toLocaleDateString() : 'no date') +
+          ' at ' + (r.property_address || '?') +
+          (r.notes ? ' — ' + r.notes.slice(0, 100) : '')
+        );
+        sections.push('RECENT INTERACTIONS (PROPERTIES):\n' + lines.join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Property interactions query error:', err.message);
+    }
+
+    // TPE scores for found properties
+    try {
+      const tpeScores = await pool.query(
+        `SELECT ts.total_score, ts.motivation_score, ts.financial_score, ts.timing_score, ts.property_score,
+                p.property_address
+         FROM tpe_scores ts
+         JOIN properties p ON p.property_id = ts.property_id
+         WHERE ts.property_id = ANY($1)
+         ORDER BY ts.scored_at DESC NULLS LAST`,
+        [foundPropertyIds]
+      );
+      if (tpeScores.rows.length > 0) {
+        // Deduplicate: keep latest per property
+        const seen = new Set();
+        const unique = [];
+        for (const r of tpeScores.rows) {
+          if (!seen.has(r.property_address)) {
+            seen.add(r.property_address);
+            unique.push(r);
+          }
+        }
+        const lines = unique.map(r =>
+          '  - ' + r.property_address + ': TPE ' + (r.total_score || '?') + '/100 (Motivation: ' + (r.motivation_score || '?') + ', Financial: ' + (r.financial_score || '?') + ', Timing: ' + (r.timing_score || '?') + ', Property: ' + (r.property_score || '?') + ')'
+        );
+        sections.push('TPE SCORES:\n' + lines.join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] TPE scores query error:', err.message);
+    }
+  }
+
+  // Linked properties for found contacts
+  if (foundContactIds.length > 0) {
+    try {
+      const linkedProps = await pool.query(
+        `SELECT p.property_address, p.city, p.property_type, p.rba, c.full_name
+         FROM properties p
+         JOIN property_contacts pc ON p.property_id = pc.property_id
+         JOIN contacts c ON c.contact_id = pc.contact_id
+         WHERE pc.contact_id = ANY($1)
+         LIMIT 15`,
+        [foundContactIds]
+      );
+      if (linkedProps.rows.length > 0) {
+        const byContact = {};
+        for (const r of linkedProps.rows) {
+          if (!byContact[r.full_name]) byContact[r.full_name] = [];
+          if (byContact[r.full_name].length < 3) byContact[r.full_name].push(r);
+        }
+        const lines = [];
+        for (const [name, props] of Object.entries(byContact)) {
+          lines.push('  ' + name + ':');
+          for (const p of props) {
+            lines.push('    - ' + p.property_address + ', ' + (p.city || '?') + ' | ' + (p.property_type || '?') + (p.rba ? ' | ' + Number(p.rba).toLocaleString() + ' sqft' : ''));
+          }
+        }
+        sections.push('LINKED PROPERTIES FOR CONTACTS:\n' + lines.join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Linked properties for contacts error:', err.message);
+    }
+
+    // Interaction history for found contacts
+    try {
+      const contactInteractions = await pool.query(
+        `SELECT i.interaction_type, i.interaction_date, i.notes, i.logged_by, c.full_name
+         FROM interactions i
+         JOIN interaction_contacts ic ON i.interaction_id = ic.interaction_id
+         JOIN contacts c ON c.contact_id = ic.contact_id
+         WHERE ic.contact_id = ANY($1)
+         ORDER BY i.interaction_date DESC NULLS LAST
+         LIMIT 10`,
+        [foundContactIds]
+      );
+      if (contactInteractions.rows.length > 0) {
+        const lines = contactInteractions.rows.slice(0, 5).map(r =>
+          '  - [' + (r.interaction_type || 'Note') + '] ' +
+          (r.interaction_date ? new Date(r.interaction_date).toLocaleDateString() : 'no date') +
+          ' with ' + (r.full_name || '?') +
+          (r.notes ? ' — ' + r.notes.slice(0, 100) : '')
+        );
+        sections.push('RECENT INTERACTIONS (CONTACTS):\n' + lines.join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Contact interactions query error:', err.message);
+    }
+  }
+
+  // Linked properties AND contacts for found deals
+  if (foundDealIds.length > 0) {
+    try {
+      const dealProps = await pool.query(
+        `SELECT p.property_address, p.city, d.deal_name
+         FROM properties p
+         JOIN deal_properties dp ON p.property_id = dp.property_id
+         JOIN deals d ON d.deal_id = dp.deal_id
+         WHERE dp.deal_id = ANY($1)
+         LIMIT 15`,
+        [foundDealIds]
+      );
+      const dealContacts = await pool.query(
+        `SELECT c.full_name, c.type, c.email, d.deal_name
+         FROM contacts c
+         JOIN deal_contacts dc ON c.contact_id = dc.contact_id
+         JOIN deals d ON d.deal_id = dc.deal_id
+         WHERE dc.deal_id = ANY($1)
+         LIMIT 15`,
+        [foundDealIds]
+      );
+      const lines = [];
+      if (dealProps.rows.length > 0) {
+        const byDeal = {};
+        for (const r of dealProps.rows) {
+          if (!byDeal[r.deal_name]) byDeal[r.deal_name] = [];
+          if (byDeal[r.deal_name].length < 3) byDeal[r.deal_name].push(r.property_address + ', ' + (r.city || '?'));
+        }
+        for (const [name, props] of Object.entries(byDeal)) {
+          lines.push('  "' + name + '" properties: ' + props.join('; '));
+        }
+      }
+      if (dealContacts.rows.length > 0) {
+        const byDeal = {};
+        for (const r of dealContacts.rows) {
+          if (!byDeal[r.deal_name]) byDeal[r.deal_name] = [];
+          if (byDeal[r.deal_name].length < 3) byDeal[r.deal_name].push((r.full_name || '?') + ' (' + (r.type || '') + ')');
+        }
+        for (const [name, contacts] of Object.entries(byDeal)) {
+          lines.push('  "' + name + '" contacts: ' + contacts.join('; '));
+        }
+      }
+      if (lines.length > 0) {
+        sections.push('LINKED RECORDS FOR DEALS:\n' + lines.join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Deal linked records query error:', err.message);
+    }
+  }
+
+  // ── SALE COMPS ──
+  // Include sale comps when keywords suggest sale/purchase context
+  if (body.includes('sale') || body.includes('sold') || body.includes('purchase') ||
+      body.includes('sale price') || body.includes('sale comp') || body.includes('bought')) {
+    try {
+      const saleComps = await pool.query(
+        `SELECT property_address, city, sale_price, price_per_sf, sale_date, sf, buyer, seller
+         FROM sale_comps
+         ${mentionedCity ? "WHERE LOWER(city) = $1" : ''}
+         ORDER BY sale_date DESC NULLS LAST
+         LIMIT 5`,
+        mentionedCity ? [mentionedCity] : []
+      );
+      if (saleComps.rows.length > 0) {
+        results.entitiesFound += saleComps.rows.length;
+        sections.push('RECENT SALE COMPS:\n' +
+          saleComps.rows.map(c =>
+            '  - ' + (c.property_address || '?') + ', ' + (c.city || '?') + ' | ' +
+            (c.sale_price ? '$' + Number(c.sale_price).toLocaleString() : 'No price') +
+            (c.price_per_sf ? ' ($' + Number(c.price_per_sf).toFixed(2) + '/sqft)' : '') +
+            (c.sf ? ' | ' + Number(c.sf).toLocaleString() + ' sqft' : '') +
+            (c.sale_date ? ' | Sold: ' + new Date(c.sale_date).toLocaleDateString() : '') +
+            (c.buyer ? ' | Buyer: ' + c.buyer : '') +
+            (c.seller ? ' | Seller: ' + c.seller : '')
+          ).join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Sale comps query error:', err.message);
     }
   }
 
@@ -1467,10 +1824,19 @@ async function handleActionConfirmation(messageId, userId) {
   const meta = typeof houstonMsg.houston_meta === 'string'
     ? JSON.parse(houstonMsg.houston_meta) : (houstonMsg.houston_meta || {});
 
-  // Only act on image analysis messages that offered actions
-  if (meta.trigger !== 'image_analysis') return;
   if (meta.action_executed) return; // Already executed
 
+  // Check for pending_actions (new confirmation gate) — handles ALL action types
+  if (meta.pending_actions && meta.pending_actions.length > 0) {
+    // Check 5-minute timeout
+    const pendingAge = meta.pending_actions_at ? Date.now() - new Date(meta.pending_actions_at).getTime() : Infinity;
+    if (pendingAge > 5 * 60 * 1000) return; // Expired
+    await executePendingActions(houstonMsg, userId);
+    return;
+  }
+
+  // Legacy: image analysis action extraction
+  if (meta.trigger !== 'image_analysis') return;
   await executeHoustonAction(houstonMsg, userId);
 }
 
@@ -1492,18 +1858,78 @@ async function handleTextConfirmation(message) {
   const meta = typeof houstonMsg.houston_meta === 'string'
     ? JSON.parse(houstonMsg.houston_meta) : (houstonMsg.houston_meta || {});
 
-  if (meta.trigger !== 'image_analysis') return;
   if (meta.action_executed) return;
 
   // Check that this Houston message is recent (within 5 minutes)
   const age = Date.now() - new Date(houstonMsg.created_at).getTime();
   if (age > 5 * 60 * 1000) return;
 
+  // New confirmation gate: execute pending_actions if present
+  if (meta.pending_actions && meta.pending_actions.length > 0) {
+    await executePendingActions(houstonMsg, message.sender_id);
+    return;
+  }
+
+  // Legacy: image analysis action extraction
+  if (meta.trigger !== 'image_analysis') return;
   await executeHoustonAction(houstonMsg, message.sender_id);
 }
 
 /**
+ * Execute pending actions stored in houston_meta (confirmation gate)
+ * Called when user confirms with "yes", thumbs up, etc.
+ */
+async function executePendingActions(houstonMsg, userId) {
+  const meta = typeof houstonMsg.houston_meta === 'string'
+    ? JSON.parse(houstonMsg.houston_meta) : (houstonMsg.houston_meta || {});
+
+  if (!meta.pending_actions || meta.pending_actions.length === 0) return;
+  if (meta.action_executed) return;
+
+  try {
+    const results = [];
+    for (const action of meta.pending_actions) {
+      try {
+        const result = await executeSingleAction(action, userId);
+        results.push(result);
+      } catch (err) {
+        console.error('[chat/houston] Pending action failed:', err.message);
+        results.push({ success: false, message: 'Failed: ' + err.message });
+      }
+    }
+
+    // Mark as executed
+    await pool.query(
+      `UPDATE chat_messages SET houston_meta = houston_meta || '{"action_executed": true}'::jsonb WHERE id = $1`,
+      [houstonMsg.id]
+    );
+
+    // Send confirmation message
+    const confirmations = results.filter(r => r.success).map(r => r.message);
+    const failures = results.filter(r => !r.success).map(r => r.message);
+    let confirmBody = '';
+    if (confirmations.length > 0) confirmBody += confirmations.join('\n');
+    if (failures.length > 0) confirmBody += (confirmBody ? '\n' : '') + failures.join('\n');
+
+    if (confirmBody) {
+      const confirmMessage = await insertMessage({
+        channelId: houstonMsg.channel_id,
+        senderId: null,
+        senderType: 'houston',
+        body: confirmBody,
+        messageType: 'houston_insight',
+        houstonMeta: { trigger: 'action_confirmation', parent_message_id: houstonMsg.id }
+      });
+      io.to(`channel:${houstonMsg.channel_id}`).emit('chat:message:new', confirmMessage);
+    }
+  } catch (err) {
+    console.error('[chat/houston] executePendingActions error:', err.message);
+  }
+}
+
+/**
  * Execute the CRM action Houston offered (log activity, cross-reference, etc.)
+ * Legacy handler for image analysis actions
  */
 async function executeHoustonAction(houstonMsg, userId) {
   const meta = typeof houstonMsg.houston_meta === 'string'
