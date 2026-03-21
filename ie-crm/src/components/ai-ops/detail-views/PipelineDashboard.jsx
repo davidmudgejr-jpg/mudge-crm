@@ -16,7 +16,10 @@ export default function PipelineDashboard({ agents, pending, recentLogs }) {
   useEffect(() => {
     async function fetchPipeline() {
       try {
-        const res = await fetch(`${API_BASE}/api/ai/dashboard/pipeline`);
+        const token = localStorage.getItem('crm-auth-token');
+        const res = await fetch(`${API_BASE}/api/ai/dashboard/pipeline`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setPipeline(data);

@@ -11,7 +11,10 @@ export default function useAgentHeartbeats() {
 
   const fetch_ = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/ai/dashboard/summary`);
+      const token = localStorage.getItem('crm-auth-token');
+      const res = await fetch(`${API_BASE}/api/ai/dashboard/summary`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);

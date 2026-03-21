@@ -37,7 +37,10 @@ export default function TerritoryIntel() {
     async function fetchSignals() {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/ai/sandbox/signals`);
+        const token = localStorage.getItem('crm-auth-token');
+        const res = await fetch(`${API_BASE}/api/ai/sandbox/signals`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setSignals(Array.isArray(data) ? data : data.items || []);

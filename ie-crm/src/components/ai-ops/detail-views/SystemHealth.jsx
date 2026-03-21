@@ -45,7 +45,10 @@ export default function SystemHealth({ agents }) {
     async function checkDb() {
       setDbLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/db/status`);
+        const token = localStorage.getItem('crm-auth-token');
+        const res = await fetch(`${API_BASE}/api/db/status`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         setDbStatus({ ok: true, ...data });
@@ -63,7 +66,9 @@ export default function SystemHealth({ agents }) {
         KEY_ENDPOINTS.map(async ep => {
           const start = Date.now();
           try {
-            const res = await fetch(`${API_BASE}${ep.url}`);
+            const res = await fetch(`${API_BASE}${ep.url}`, {
+              headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            });
             results[ep.url] = { ok: res.ok, status: res.status, latency: Date.now() - start };
           } catch (err) {
             results[ep.url] = { ok: false, error: err.message, latency: Date.now() - start };

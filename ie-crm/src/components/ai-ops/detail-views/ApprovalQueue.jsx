@@ -35,7 +35,10 @@ export default function ApprovalQueue({ agents, pending }) {
   const fetchItems = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/ai/sandbox/${activeTab}`);
+      const token = localStorage.getItem('crm-auth-token');
+      const res = await fetch(`${API_BASE}/api/ai/sandbox/${activeTab}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setItems(Array.isArray(data) ? data : data.items || []);
@@ -53,9 +56,10 @@ export default function ApprovalQueue({ agents, pending }) {
   const handleAction = async (id, action) => {
     setActionPending(prev => ({ ...prev, [id]: action }));
     try {
+      const token2 = localStorage.getItem('crm-auth-token');
       const res = await fetch(`${API_BASE}/api/ai/sandbox/${activeTab}/review`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(token2 ? { 'Authorization': `Bearer ${token2}` } : {}) },
         body: JSON.stringify({ id, action }),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);

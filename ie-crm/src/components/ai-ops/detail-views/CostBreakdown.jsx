@@ -39,7 +39,10 @@ export default function CostBreakdown() {
     async function fetchCosts() {
       setLoading(true);
       try {
-        const res = await fetch(`${API_BASE}/api/ai/dashboard/costs?period=${period}`);
+        const token = localStorage.getItem('crm-auth-token');
+        const res = await fetch(`${API_BASE}/api/ai/dashboard/costs?period=${period}`, {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         setData(Array.isArray(json) ? json : json.rows || []);

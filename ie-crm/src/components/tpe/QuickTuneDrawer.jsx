@@ -3,9 +3,13 @@ import SlideOver, { SlideOverHeader } from '../shared/SlideOver';
 import { useToast } from '../shared/Toast';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+function authHeaders(extra = {}) {
+  const token = localStorage.getItem('crm-auth-token');
+  return { ...(token ? { 'Authorization': `Bearer ${token}` } : {}), ...extra };
+}
 
 async function fetchConfig() {
-  const res = await fetch(`${API_BASE}/api/ai/tpe-config`);
+  const res = await fetch(`${API_BASE}/api/ai/tpe-config`, { headers: authHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -13,7 +17,7 @@ async function fetchConfig() {
 async function patchConfig(key, value) {
   const res = await fetch(`${API_BASE}/api/ai/tpe-config`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ config_key: key, config_value: value }),
   });
   if (!res.ok) throw new Error(await res.text());
@@ -21,7 +25,7 @@ async function patchConfig(key, value) {
 }
 
 async function resetConfig() {
-  const res = await fetch(`${API_BASE}/api/ai/tpe-config/reset`, { method: 'POST' });
+  const res = await fetch(`${API_BASE}/api/ai/tpe-config/reset`, { method: 'POST', headers: authHeaders() });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }
@@ -133,7 +137,7 @@ export default function QuickTuneDrawer({ onClose, onConfigChanged }) {
       // Send both weights atomically in a single batch PATCH
       const res = await fetch(`${API_BASE}/api/ai/tpe-config`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders({ 'Content-Type': 'application/json' }),
         body: JSON.stringify([
           { config_key: 'tpe_weight', config_value: tpe },
           { config_key: 'ecv_weight', config_value: ecv },

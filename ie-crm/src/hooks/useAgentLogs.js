@@ -14,7 +14,10 @@ export default function useAgentLogs(agentName = null, logType = null, limit = 5
       if (agentName) params.set('agent', agentName);
       if (logType) params.set('type', logType);
       params.set('limit', limit);
-      const res = await fetch(`${API_BASE}/api/ai/logs?${params}`);
+      const token = localStorage.getItem('crm-auth-token');
+      const res = await fetch(`${API_BASE}/api/ai/logs?${params}`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setLogs(json);
