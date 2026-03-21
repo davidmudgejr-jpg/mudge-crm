@@ -622,11 +622,15 @@ app.post('/api/ai/chat/sync', aiLimiter, async (req, res) => {
   }
 });
 
-// GET /api/ai/status — health check (validates OAuth token)
+// GET /api/ai/status — health check (checks OAuth token exists)
 app.get('/api/ai/status', async (_req, res) => {
   const token = getOAuthToken();
-  if (!token) return res.json({ status: 'not_configured', message: 'ANTHROPIC_OAUTH_TOKEN not set' });
+  if (!token) return res.json({ status: 'not_configured', configured: false, message: 'ANTHROPIC_OAUTH_TOKEN not set' });
 
+  // Token exists — report as configured (don't waste a real API call on status check)
+  return res.json({ status: 'connected', configured: true, model: AI_MODEL, auth: 'oauth' });
+
+  /* Legacy validation code — kept for reference but disabled to avoid unnecessary API calls
   try {
     const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
@@ -643,7 +647,7 @@ app.get('/api/ai/status', async (_req, res) => {
     });
 
     if (response.ok) {
-      res.json({ status: 'connected', model: AI_MODEL });
+      res.json({ status: 'connected', configured: true, model: AI_MODEL });
     } else {
       const data = await response.json().catch(() => ({}));
       const err = handleAnthropicError(response.status, data);
@@ -652,6 +656,7 @@ app.get('/api/ai/status', async (_req, res) => {
   } catch (err) {
     res.json({ status: 'error', message: err.message });
   }
+  */
 });
 
 // ============================================================
