@@ -422,10 +422,24 @@ function parseAttachments(att) {
 }
 
 /**
- * Read an uploaded image file and return as base64
+ * Read an uploaded image and return as base64
+ * Handles both Vercel Blob URLs (https://) and local /uploads/ paths
  */
-function readImageAsBase64(urlPath) {
-  // urlPath is like "/uploads/1234567890-abc123.png"
+async function readImageAsBase64(urlPath) {
+  // Vercel Blob URL — fetch from remote
+  if (urlPath.startsWith('https://')) {
+    try {
+      const response = await fetch(urlPath);
+      if (!response.ok) return null;
+      const buffer = Buffer.from(await response.arrayBuffer());
+      return buffer.toString('base64');
+    } catch (err) {
+      console.error('[chat/houston] Failed to fetch Blob image:', err.message);
+      return null;
+    }
+  }
+
+  // Local filesystem fallback
   const filename = urlPath.replace(/^\/uploads\//, '');
   const filePath = path.join(__dirname, '..', 'uploads', filename);
   if (!fs.existsSync(filePath)) return null;
@@ -498,7 +512,7 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
 
       // Add images as base64
       for (const img of imageAtts) {
-        const base64 = readImageAsBase64(img.url);
+        const base64 = await readImageAsBase64(img.url);
         if (base64) {
           const mediaType = img.mime_type || 'image/png';
           contentBlocks.push({

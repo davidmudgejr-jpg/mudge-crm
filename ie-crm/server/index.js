@@ -2197,16 +2197,44 @@ app.post('/v1/chat/completions', houstonCompletions);
 // ============================================================
 registerChatRoutes(app);
 
-// POST /api/chat/upload — with multer middleware
+// POST /api/chat/upload — Vercel Blob (persistent) with local fallback
 app.post('/api/chat/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const file = req.file;
+
+    // Try Vercel Blob first (persistent storage)
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+    if (blobToken) {
+      try {
+        const { put } = require('@vercel/blob');
+        const filePath = path.join(uploadsDir, file.filename);
+        const fileBuffer = fs.readFileSync(filePath);
+        const blob = await put(`chat/${file.filename}`, fileBuffer, {
+          access: 'public',
+          contentType: file.mimetype,
+          token: blobToken,
+        });
+        // Clean up local file after uploading to Blob
+        fs.unlinkSync(filePath);
+        return res.json({
+          url: blob.url,
+          filename: file.originalname,
+          mime_type: file.mimetype,
+          size_bytes: file.size,
+        });
+      } catch (blobErr) {
+        console.error('[chat] Blob upload failed, falling back to local:', blobErr.message);
+        // Fall through to local storage
+      }
+    }
+
+    // Fallback: local filesystem (dev only — ephemeral on Railway)
     res.json({
       url: `/uploads/${file.filename}`,
       filename: file.originalname,
       mime_type: file.mimetype,
-      size_bytes: file.size
+      size_bytes: file.size,
     });
   } catch (err) {
     console.error('[chat] Upload error:', err.message);
@@ -2214,7 +2242,7 @@ app.post('/api/chat/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// Serve uploaded files
+// Serve locally uploaded files (fallback for dev)
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // ============================================================
