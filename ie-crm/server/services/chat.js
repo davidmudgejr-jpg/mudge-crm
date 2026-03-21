@@ -4,50 +4,47 @@
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+const Anthropic = require('@anthropic-ai/sdk');
 
 // ============================================================
-// CLAUDE OAUTH HELPER — uses Claude Max subscription
+// CLAUDE SDK CLIENT — uses OAuth token or API key
 // ============================================================
-const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const HOUSTON_MODEL = 'claude-sonnet-4-6';
+let claudeClient = null;
+
+function getClaudeClient() {
+  if (claudeClient) return claudeClient;
+  const token = process.env.ANTHROPIC_OAUTH_TOKEN;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (token) {
+    claudeClient = new Anthropic({ apiKey: token });
+  } else if (apiKey) {
+    claudeClient = new Anthropic({ apiKey });
+  }
+  return claudeClient;
+}
 
 function getOAuthToken() {
-  return process.env.ANTHROPIC_OAUTH_TOKEN || null;
+  return process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY || null;
 }
 
 /**
- * Call Claude API via OAuth token (Claude Max subscription)
+ * Call Claude API via SDK (handles OAuth + API key auth)
  * @param {object} opts - { system, messages, max_tokens }
  * @returns {string} response text
  */
 async function callClaude({ system, messages, max_tokens = 500 }) {
-  const token = getOAuthToken();
-  if (!token) return null;
+  const client = getClaudeClient();
+  if (!client) return null;
 
-  const payload = {
+  const response = await client.messages.create({
     model: HOUSTON_MODEL,
     max_tokens,
     messages,
     ...(system ? { system } : {}),
-  };
-
-  const response = await fetch(ANTHROPIC_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify(payload),
   });
 
-  if (!response.ok) {
-    const errData = await response.json().catch(() => ({}));
-    throw new Error(`Claude API ${response.status}: ${errData?.error?.message || 'unknown error'}`);
-  }
-
-  const data = await response.json();
-  return data.content?.[0]?.text || null;
+  return response.content?.[0]?.text || null;
 }
 
 // ============================================================
