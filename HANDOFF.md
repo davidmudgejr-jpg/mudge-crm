@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-21 (Phase 5E: New View modal + light mode + frosted glass + security + testing + docs consolidation)
-> Previous sessions: (1) AI fleet architecture — 3-machine OpenClaw fleet, MVA scoring, Reonomy pipeline. (2) Team Chat — Socket.io + Houston AI brain + RAG memory. (3) Git cleanup + Chat UX overhaul + Houston image analysis + OAuth migration. (4) New View modal across all 6 pages, light mode pass, frosted glass chat, auth header sweep (10 files), TPE fix, credential rotation, Claude status fix, testing protocol update (7 new phases), roadmap consolidation (11 stale docs archived), deep feature review report (368 lines of ideas).
-> Next tasks: **PWA setup** (manifest + service worker for iOS home screen — tomorrow), **Production smoke test** (run full testing protocol on Vercel), **Houston two-brain architecture brainstorm** (how in-app Sonnet + OpenClaw Opus work together), **Fireflies.ai integration** (auto-log calls as interactions).
+> Updated: 2026-03-21 (Phase 5F: PWA mobile chat app + Houston CRM write actions)
+> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat app (iMessage-style, Team/Houston toggle, separate DM channels), Vercel Blob for uploads, React Error Boundary, JWT 401 handling, Houston CRM write actions (log interactions, create tasks, update contacts/properties from chat).
+> Next tasks: **Production smoke test** (run full testing protocol on Vercel), **Houston two-brain architecture brainstorm** (Sonnet + OpenClaw Opus), **Fireflies.ai integration**, **Location-aware Houston** (GPS + camera for field prospecting).
 
 ---
 
@@ -231,6 +231,27 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **368-line ideas report** at docs/FEATURE-REVIEW-2026-03-21.md
 - [x] **6 sections**: UX quick wins, Houston AI enhancements, data analytics, competitive moat features, technical debt, production readiness gaps
 - [x] **Key P0 items** (before Monday): empty state guidance, inline edit feedback, password reset flow
+
+### PWA Mobile Chat App ✅ (2026-03-21)
+- [x] **Full-screen MobileChat page** — iMessage-style UI at `#/chat` route, portrait-optimized
+- [x] **Team/Houston toggle** — two separate channels (group chat vs personal 1-on-1)
+- [x] **Houston DM channels** — auto-created per user, Houston ALWAYS responds (no decision tree)
+- [x] **Web App Manifest** — "Houston" app name, standalone display, icon-192/512
+- [x] **Service worker** — minimal for PWA installability, network-first API, cache static
+- [x] **Apple meta tags** — apple-mobile-web-app-capable, status bar style, viewport-fit
+- [x] **iMessage-style input** — pill-shaped, send button hidden when empty, + circle for files
+- [x] **Vercel Blob uploads** — persistent file storage (replaces ephemeral Railway filesystem)
+- [x] **React Error Boundary** — prevents white screen on render errors
+- [x] **JWT 401 auto-logout** — periodic revalidation + global fetch interceptor
+
+### Houston CRM Write Actions ✅ (2026-03-21)
+- [x] **Log interactions** from chat — "Log a door knock at 1234 Main St with Mike Thompson"
+- [x] **Create tasks** from chat — "Create a follow-up task for August 1"
+- [x] **Update contacts** from chat — "Mark Mike Thompson as A-level client"
+- [x] **Update properties** from chat — "Set priority high on 1234 Main St"
+- [x] **ACTION block architecture** — Houston includes `<!--ACTION:{...}-->` in response, server parses and executes
+- [x] **Confirmation messages** — checkmark + summary appended to Houston's response
+- [x] **Safety** — only executes when user explicitly asks, never auto-triggered
 
 ### AI Ops 3D War Room ✅ (2026-03-18)
 - [x] **Full Three.js rebuild** — Replaced flat SVG isometric room with real 3D scene using `three`, `@react-three/fiber`, `@react-three/drei`, `gsap`
