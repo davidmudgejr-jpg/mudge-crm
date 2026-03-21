@@ -112,12 +112,29 @@ export default function MobileChat() {
   const activeChannelId = mode === 'houston' ? houstonChannelId : teamChannelId;
   const [imagePreview, setImagePreview] = useState(null);
   const [text, setText] = useState('');
+  const [viewportHeight, setViewportHeight] = useState('100dvh');
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingRef = useRef(false);
   const typingTimer = useRef(null);
+
+  // Track visual viewport to handle keyboard resize (iOS)
+  useEffect(() => {
+    if (!window.visualViewport) return;
+    const onResize = () => {
+      setViewportHeight(window.visualViewport.height + 'px');
+      // Scroll input into view when keyboard opens
+      setTimeout(() => inputRef.current?.scrollIntoView?.({ block: 'nearest' }), 100);
+    };
+    window.visualViewport.addEventListener('resize', onResize);
+    window.visualViewport.addEventListener('scroll', onResize);
+    return () => {
+      window.visualViewport.removeEventListener('resize', onResize);
+      window.visualViewport.removeEventListener('scroll', onResize);
+    };
+  }, []);
 
   const {
     messages, typingUsers, connected, loading,
@@ -219,7 +236,7 @@ export default function MobileChat() {
   const displayMessages = messages;
 
   return (
-    <div className="flex flex-col h-[100dvh] bg-crm-bg text-crm-text">
+    <div className="flex flex-col bg-crm-bg text-crm-text" style={{ height: viewportHeight }}>
       {/* ── Header ── */}
       <div className="flex-shrink-0 bg-crm-bg/90 backdrop-blur-xl border-b border-crm-border/20" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="flex items-center justify-between px-4 py-2">
