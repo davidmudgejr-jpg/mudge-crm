@@ -1,8 +1,7 @@
-// MobileChat — Full-screen chat for PWA / mobile
-// Houston AI team chat, optimized for phone screens
-// No CRM tables — just chat. Houston answers everything.
+// MobileChat — iMessage-style full-screen chat for PWA
+// Two modes: Team Chat + Houston Direct (1-on-1)
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useChat, fetchChannels, seedChannels, uploadFile } from '../hooks/useChat';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -20,98 +19,96 @@ function formatTime(dateStr) {
   const diff = now - d;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m`;
+  if (mins < 60) return `${mins}m ago`;
   const hours = Math.floor(mins / 60);
   if (hours < 24) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
   return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
 }
 
-// ── Chat Bubble ──
-function ChatBubble({ message, isOwn, showAvatar, onImageClick }) {
+// ── iMessage-style Bubble ──
+function Bubble({ message, isOwn, showAvatar, showName, onImageClick }) {
   const isHouston = message.sender_type === 'houston';
-  const bubbleColor = isOwn
-    ? 'bg-blue-600 text-white'
-    : isHouston
-      ? 'bg-emerald-600/15 text-crm-text border border-emerald-500/30'
-      : 'bg-crm-card text-crm-text';
 
   const attachments = Array.isArray(message.attachments)
     ? message.attachments
     : (typeof message.attachments === 'string' ? JSON.parse(message.attachments || '[]') : []);
 
   return (
-    <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-1.5 group`}>
+    <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} ${showAvatar ? 'mt-3' : 'mt-0.5'}`}>
+      {/* Avatar — only for others, only on first message in group */}
       {!isOwn && showAvatar && (
         <div
-          className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0 mr-2.5 mt-auto"
+          className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0 mr-2 mt-auto"
           style={{ backgroundColor: isHouston ? HOUSTON_COLOR : (message.sender_color || DEFAULT_COLORS[0]) }}
         >
           {isHouston ? '\u26A1' : getInitials(message.sender_name)}
         </div>
       )}
-      {!isOwn && !showAvatar && <div className="w-9 mr-2.5 flex-shrink-0" />}
+      {!isOwn && !showAvatar && <div className="w-8 mr-2 flex-shrink-0" />}
 
-      <div className={`max-w-[80%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
-        {!isOwn && showAvatar && (
-          <span className={`text-xs mb-0.5 ml-1 ${isHouston ? 'text-emerald-400 font-medium' : 'text-crm-muted'}`}>
+      <div className={`max-w-[78%] flex flex-col ${isOwn ? 'items-end' : 'items-start'}`}>
+        {/* Sender name */}
+        {!isOwn && showName && (
+          <span className={`text-[11px] mb-1 ml-1 font-medium ${isHouston ? 'text-emerald-500' : 'text-crm-muted'}`}>
             {isHouston ? '\u26A1 Houston' : message.sender_name}
           </span>
         )}
 
-        {attachments.length > 0 && attachments.map((att, i) => (
+        {/* Image attachments */}
+        {attachments.map((att, i) => (
           att.mime_type?.startsWith('image/') ? (
             <img
               key={i}
               src={att.url}
               alt={att.filename}
-              className="max-w-full rounded-2xl mb-1 cursor-pointer"
+              className="max-w-full rounded-[18px] mb-0.5"
               onClick={() => onImageClick?.(att)}
             />
           ) : (
-            <div key={i} className="flex items-center gap-2 bg-crm-card/50 rounded-lg px-3 py-2.5 mb-1 text-sm">
-              <svg className="w-5 h-5 text-crm-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-              </svg>
-              <span className="text-crm-text truncate">{att.filename}</span>
+            <div key={i} className="flex items-center gap-2 bg-crm-hover rounded-[18px] px-4 py-2.5 mb-0.5 text-sm">
+              <span className="text-crm-muted">&#128206;</span>
+              <span className="text-crm-text truncate text-[15px]">{att.filename}</span>
             </div>
           )
         ))}
 
+        {/* Message body */}
         {message.body && (
-          <div className={`px-4 py-2.5 rounded-2xl ${bubbleColor} ${isOwn ? 'rounded-br-md' : 'rounded-bl-md'} text-[15px] leading-relaxed whitespace-pre-wrap break-words`}>
+          <div className={`px-4 py-2 rounded-[20px] text-[16px] leading-[22px] whitespace-pre-wrap break-words ${
+            isOwn
+              ? 'bg-[#007AFF] text-white rounded-br-[6px]'
+              : isHouston
+                ? 'bg-emerald-500/15 text-crm-text rounded-bl-[6px]'
+                : 'bg-crm-hover text-crm-text rounded-bl-[6px]'
+          }`}>
             {message.body}
           </div>
         )}
-
-        <span className="text-[10px] text-crm-muted/40 opacity-0 group-hover:opacity-100 active:opacity-100 transition-opacity mt-0.5 mx-1">
-          {formatTime(message.created_at)}
-        </span>
       </div>
     </div>
   );
 }
 
-// ── Typing Indicator ──
-function TypingIndicator({ users }) {
+// ── Typing dots ──
+function TypingDots({ users }) {
   if (!users.length) return null;
-  const names = users.map(u => u.displayName).join(', ');
   return (
-    <div className="flex items-center gap-2 px-4 py-2 text-xs text-crm-muted">
-      <div className="flex gap-0.5">
-        <span className="w-1.5 h-1.5 bg-crm-muted rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-        <span className="w-1.5 h-1.5 bg-crm-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-        <span className="w-1.5 h-1.5 bg-crm-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+    <div className="flex items-center gap-2 mt-2 ml-10">
+      <div className="bg-crm-hover rounded-[20px] px-4 py-2.5 flex items-center gap-1">
+        <span className="w-2 h-2 bg-crm-muted/60 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-2 h-2 bg-crm-muted/60 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+        <span className="w-2 h-2 bg-crm-muted/60 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
       </div>
-      <span>{names} typing...</span>
     </div>
   );
 }
 
-// ── Main MobileChat Page ──
+// ── Main Page ──
 export default function MobileChat() {
   const { user } = useAuth();
   const [channels, setChannels] = useState([]);
   const [activeChannelId, setActiveChannelId] = useState(null);
+  const [mode, setMode] = useState('team'); // 'team' | 'houston'
   const [imagePreview, setImagePreview] = useState(null);
   const [text, setText] = useState('');
   const messagesEndRef = useRef(null);
@@ -142,20 +139,18 @@ export default function MobileChat() {
     })();
   }, [user?.user_id]);
 
-  // Auto-scroll to bottom
+  // Auto-scroll
   const prevMsgCount = useRef(0);
   const [scrollReady, setScrollReady] = useState(false);
   useEffect(() => {
     const container = chatContainerRef.current;
     if (!container || messages.length === 0) return;
-
     if (prevMsgCount.current === 0) {
       container.scrollTop = container.scrollHeight;
       setScrollReady(true);
       prevMsgCount.current = messages.length;
       return;
     }
-
     if (messages.length > prevMsgCount.current) {
       const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
       if (isNearBottom) container.scrollTop = container.scrollHeight;
@@ -175,15 +170,17 @@ export default function MobileChat() {
   }, [hasOlder, loadingOlder, loadOlderMessages]);
 
   // Mark as read
-  useEffect(() => {
-    if (activeChannelId) markRead();
-  }, [activeChannelId, messages.length]);
+  useEffect(() => { if (activeChannelId) markRead(); }, [activeChannelId, messages.length]);
 
-  // Send message
+  // Send
   const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    sendMessage(trimmed);
+    // In Houston Direct mode, prefix with @houston if not already
+    const body = mode === 'houston' && !trimmed.toLowerCase().includes('@houston')
+      ? `@houston ${trimmed}`
+      : trimmed;
+    sendMessage(body);
     setText('');
     typingRef.current = false;
     stopTyping();
@@ -193,23 +190,16 @@ export default function MobileChat() {
 
   const handleChange = (e) => {
     setText(e.target.value);
-    if (!typingRef.current) {
-      typingRef.current = true;
-      sendTyping(user?.display_name);
-    }
+    if (!typingRef.current) { typingRef.current = true; sendTyping(user?.display_name); }
     clearTimeout(typingTimer.current);
     typingTimer.current = setTimeout(() => { typingRef.current = false; stopTyping(); }, 2000);
   };
 
-  // File upload
   const handleFileSelect = async (file) => {
     try {
-      const attachment = await uploadFile(file);
+      const att = await uploadFile(file);
       const isImage = file.type.startsWith('image/');
-      sendMessage(isImage ? '' : `\uD83D\uDCCE ${file.name}`, {
-        messageType: isImage ? 'image' : 'file',
-        attachments: [attachment]
-      });
+      sendMessage(isImage ? '' : file.name, { messageType: isImage ? 'image' : 'file', attachments: [att] });
     } catch (err) {
       console.error('[MobileChat] Upload failed:', err);
     }
@@ -224,40 +214,65 @@ export default function MobileChat() {
     return (new Date(msg.created_at) - new Date(prev.created_at)) > 5 * 60 * 1000;
   }
 
+  // Filter messages for Houston Direct mode
+  const displayMessages = mode === 'houston'
+    ? messages.filter(m => m.sender_id === user?.user_id || m.sender_type === 'houston')
+    : messages;
+
   return (
-    <div className="flex flex-col h-[100dvh] bg-crm-bg text-crm-text" style={{ paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)' }}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-crm-border/30 bg-crm-bg/90 backdrop-blur-xl flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <a href="#/" className="p-1 -ml-1 text-crm-muted hover:text-crm-text">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+    <div className="flex flex-col h-[100dvh] bg-crm-bg text-crm-text">
+      {/* ── Header ── */}
+      <div className="flex-shrink-0 bg-crm-bg/90 backdrop-blur-xl border-b border-crm-border/20" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+        <div className="flex items-center justify-between px-4 py-2">
+          <a href="#/" className="text-crm-accent text-sm font-medium flex items-center gap-1">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" />
             </svg>
+            CRM
           </a>
-          <div className="flex -space-x-2">
-            <div className="w-8 h-8 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-crm-bg">
-              {'\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67'}
-            </div>
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-crm-bg" style={{ backgroundColor: HOUSTON_COLOR }}>
-              {'\u26A1'}
-            </div>
-          </div>
-          <div>
-            <h1 className="text-base font-semibold">Team Chat</h1>
-            <div className="flex items-center gap-1.5">
+          <div className="text-center">
+            <h1 className="text-[15px] font-semibold">
+              {mode === 'houston' ? '\u26A1 Houston' : 'Team Chat'}
+            </h1>
+            <div className="flex items-center justify-center gap-1">
               <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
-              <span className="text-[11px] text-crm-muted">
-                {connected ? 'Houston listening' : 'Reconnecting...'}
+              <span className="text-[10px] text-crm-muted">
+                {connected ? (mode === 'houston' ? 'Online' : 'Houston listening') : 'Reconnecting...'}
               </span>
             </div>
           </div>
+          <div className="w-12" /> {/* Spacer for centering */}
+        </div>
+
+        {/* Mode toggle */}
+        <div className="flex px-4 pb-2 gap-1">
+          <button
+            onClick={() => setMode('team')}
+            className={`flex-1 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
+              mode === 'team'
+                ? 'bg-crm-accent text-white'
+                : 'bg-crm-hover text-crm-muted'
+            }`}
+          >
+            Team
+          </button>
+          <button
+            onClick={() => setMode('houston')}
+            className={`flex-1 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
+              mode === 'houston'
+                ? 'bg-emerald-500 text-white'
+                : 'bg-crm-hover text-crm-muted'
+            }`}
+          >
+            {'\u26A1'} Houston
+          </button>
         </div>
       </div>
 
-      {/* Messages */}
+      {/* ── Messages ── */}
       <div
         ref={chatContainerRef}
-        className={`flex-1 overflow-y-auto px-4 py-4 space-y-0.5 ${scrollReady || loading || messages.length === 0 ? '' : 'invisible'}`}
+        className={`flex-1 overflow-y-auto px-3 py-2 ${scrollReady || loading || displayMessages.length === 0 ? '' : 'invisible'}`}
       >
         {loadingOlder && (
           <div className="flex justify-center py-3">
@@ -267,82 +282,96 @@ export default function MobileChat() {
             </svg>
           </div>
         )}
-        {!hasOlder && messages.length > 0 && (
+        {!hasOlder && displayMessages.length > 0 && (
           <div className="text-center py-4">
-            <span className="text-xs text-crm-muted/40">Beginning of conversation</span>
+            <span className="text-[11px] text-crm-muted/40">Beginning of conversation</span>
           </div>
         )}
         {loading ? (
           <div className="flex items-center justify-center h-full">
-            <div className="text-crm-muted">Loading...</div>
+            <div className="text-crm-muted text-sm">Loading...</div>
           </div>
-        ) : messages.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center px-8">
-            <div className="text-5xl mb-4">{'\u26A1'}</div>
-            <h2 className="text-lg font-semibold mb-2">Houston is ready</h2>
-            <p className="text-sm text-crm-muted">
-              Ask Houston anything about your CRM — deals, properties, contacts, comps. Drop screenshots and he'll read them.
+        ) : displayMessages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-full text-center px-10">
+            <div className="text-5xl mb-4">{mode === 'houston' ? '\u26A1' : '\uD83D\uDCAC'}</div>
+            <h2 className="text-lg font-semibold mb-2">
+              {mode === 'houston' ? 'Ask Houston anything' : 'Team Chat'}
+            </h2>
+            <p className="text-sm text-crm-muted leading-relaxed">
+              {mode === 'houston'
+                ? 'Deals, properties, contacts, comps — Houston has your entire CRM in his brain. Drop screenshots and he\'ll read them too.'
+                : 'Chat with your team. Houston is listening and will jump in when he has something useful.'}
             </p>
           </div>
         ) : (
-          messages.map((msg, idx) => (
-            <ChatBubble
+          displayMessages.map((msg, idx) => (
+            <Bubble
               key={msg.id}
               message={msg}
               isOwn={msg.sender_id === user?.user_id}
               showAvatar={shouldShowAvatar(msg, idx)}
+              showName={shouldShowAvatar(msg, idx)}
               onImageClick={setImagePreview}
             />
           ))
         )}
-        <TypingIndicator users={typingUsers} />
+        <TypingDots users={typingUsers} />
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input bar */}
-      <div className="flex items-end gap-2 px-3 py-2 border-t border-crm-border/30 bg-crm-bg/90 backdrop-blur-xl flex-shrink-0" style={{ paddingBottom: 'max(8px, env(safe-area-inset-bottom))' }}>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="p-2.5 text-crm-muted hover:text-crm-text rounded-full"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-          onChange={(e) => { if (e.target.files?.[0]) handleFileSelect(e.target.files[0]); e.target.value = ''; }}
-        />
-
-        <div className="flex-1 bg-crm-card/60 rounded-2xl border border-crm-border/30 focus-within:border-crm-accent/40 transition-colors overflow-hidden">
-          <textarea
-            ref={inputRef}
-            value={text}
-            onChange={handleChange}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder="Message Houston..."
-            rows={1}
-            className="w-full bg-transparent text-[15px] text-crm-text placeholder-crm-muted/50 px-4 py-2.5 resize-none outline-none max-h-32 rounded-2xl"
-            style={{ minHeight: '42px', WebkitAppearance: 'none' }}
+      {/* ── Input bar — iMessage style ── */}
+      <div className="flex-shrink-0 bg-crm-bg border-t border-crm-border/15" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="flex items-end gap-1.5 px-2 py-1.5">
+          {/* + button */}
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-9 h-9 flex items-center justify-center text-crm-accent rounded-full flex-shrink-0 mb-0.5"
+          >
+            <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" />
+              <path stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" d="M12 8v8M8 12h8" />
+            </svg>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+            onChange={(e) => { if (e.target.files?.[0]) handleFileSelect(e.target.files[0]); e.target.value = ''; }}
           />
-        </div>
 
-        <button
-          onClick={handleSend}
-          disabled={!text.trim()}
-          className={`p-2.5 rounded-full transition-all ${
-            text.trim()
-              ? 'bg-blue-600 text-white hover:bg-blue-500'
-              : 'bg-crm-card/40 text-crm-muted/30'
-          }`}
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19V5m0 0l-7 7m7-7l7 7" />
-          </svg>
-        </button>
+          {/* Text input — pill shaped */}
+          <div className="flex-1 min-h-[36px] bg-crm-hover/60 rounded-full border border-crm-border/30 flex items-end overflow-hidden">
+            <textarea
+              ref={inputRef}
+              value={text}
+              onChange={handleChange}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+              placeholder={mode === 'houston' ? 'Ask Houston...' : 'Message...'}
+              rows={1}
+              className="flex-1 bg-transparent text-[16px] text-crm-text placeholder-crm-muted/50 px-4 py-2 resize-none outline-none max-h-24 leading-[20px]"
+              style={{ minHeight: '36px', WebkitAppearance: 'none' }}
+            />
+          </div>
+
+          {/* Send button — only shows when text exists (iMessage style) */}
+          {text.trim() ? (
+            <button
+              onClick={handleSend}
+              className="w-9 h-9 flex items-center justify-center bg-crm-accent text-white rounded-full flex-shrink-0 mb-0.5 active:scale-90 transition-transform"
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25H13.5a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
+              </svg>
+            </button>
+          ) : (
+            <button className="w-9 h-9 flex items-center justify-center text-crm-muted/40 rounded-full flex-shrink-0 mb-0.5">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Image preview */}
