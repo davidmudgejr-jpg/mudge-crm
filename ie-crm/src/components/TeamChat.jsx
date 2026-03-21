@@ -518,12 +518,31 @@ export default function TeamChat({ isOpen, onClose }) {
         if (!table) break;
 
         try {
-          const res = await fetch(API_BASE + '/api/db/query', {
+          // Try exact search first, then fuzzy (each word separately)
+          let data;
+          const res1 = await fetch(API_BASE + '/api/db/query', {
             method: 'POST',
             headers: { ...headers, 'Content-Type': 'application/json' },
             body: JSON.stringify({ sql: 'SELECT ' + id + ' FROM ' + table + ' WHERE ' + col + ' ILIKE $1 LIMIT 1', params: ['%' + search + '%'] }),
           });
-          const data = await res.json();
+          data = await res1.json();
+
+          // If no exact match, try fuzzy: search by key words (skip numbers, short words)
+          if (!data.rows?.length) {
+            const words = search.replace(/[,\.]/g, '').split(/\s+/).filter(w => w.length > 2 && !/^\d+$/.test(w));
+            if (words.length > 0) {
+              const fuzzyWhere = words.map((_, i) => col + ' ILIKE $' + (i + 1)).join(' AND ');
+              const fuzzyParams = words.map(w => '%' + w + '%');
+              const res2 = await fetch(API_BASE + '/api/db/query', {
+                method: 'POST',
+                headers: { ...headers, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sql: 'SELECT ' + id + ' FROM ' + table + ' WHERE ' + fuzzyWhere + ' LIMIT 1', params: fuzzyParams }),
+              });
+              data = await res2.json();
+              console.log('[TeamChat] NAV fuzzy search:', words, '→', data.rows?.length, 'matches');
+            }
+          }
+
           console.log('[TeamChat] NAV search result:', data.rows?.length, 'matches for', search);
           if (data.rows?.[0]) {
             const entityId = data.rows[0][id];
