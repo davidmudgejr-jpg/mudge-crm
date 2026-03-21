@@ -11,6 +11,9 @@ const SOCKET_URL = import.meta.env.VITE_API_URL || undefined;
 
 let socket = null;
 
+// Cache messages per channel so switching modes doesn't lose history
+const messageCache = {};
+
 function getSocket() {
   if (!socket) {
     const token = localStorage.getItem('crm-auth-token');
@@ -32,9 +35,26 @@ export function useChat(userId, channelId) {
   const [hasOlder, setHasOlder] = useState(true); // assume there are older messages until proven otherwise
   const typingTimeouts = useRef({});
 
+  // Track previous channel and current messages for caching
+  const prevChannelRef = useRef(null);
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
   // Connect and join channel
   useEffect(() => {
     if (!userId || !channelId) return;
+
+    // Save current messages to cache before switching
+    if (prevChannelRef.current && prevChannelRef.current !== channelId) {
+      messageCache[prevChannelRef.current] = messagesRef.current;
+    }
+    prevChannelRef.current = channelId;
+
+    // Load cached messages immediately (prevents blank flash)
+    if (messageCache[channelId]) {
+      setMessages(messageCache[channelId]);
+      setLoading(false);
+    }
 
     const sock = getSocket();
 
@@ -53,7 +73,9 @@ export function useChat(userId, channelId) {
       setMessages(prev => {
         // Deduplicate (in case of reconnect replay)
         if (prev.some(m => m.id === msg.id)) return prev;
-        return [...prev, msg];
+        const updated = [...prev, msg];
+        messageCache[channelId] = updated; // update cache
+        return updated;
       });
     };
 
@@ -115,12 +137,12 @@ export function useChat(userId, channelId) {
       onConnect();
     }
 
-    // Fetch initial messages via REST
+    // Fetch initial messages via REST (always fetch fresh, merge with cache)
     setHasOlder(true);
     fetchMessages(channelId, userId).then(msgs => {
       setMessages(msgs);
+      messageCache[channelId] = msgs; // update cache with fresh data
       setLoading(false);
-      // If we got fewer than 50, there are no older messages
       if (msgs.length < 50) setHasOlder(false);
     }).catch(err => {
       console.error('[useChat] Failed to fetch messages:', err);
@@ -128,6 +150,8 @@ export function useChat(userId, channelId) {
     });
 
     return () => {
+      // Save messages to cache before cleanup
+      messageCache[channelId] = messagesRef.current;
       sock.off('connect', onConnect);
       sock.off('disconnect', onDisconnect);
       sock.off('chat:message:new', onNewMessage);
