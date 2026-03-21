@@ -1215,19 +1215,19 @@ async function buildCrmContext(messageBody) {
     // Interaction history for found properties
     try {
       const propInteractions = await pool.query(
-        `SELECT i.interaction_type, i.interaction_date, i.notes, i.logged_by, p.property_address
+        `SELECT i.type, i.date, i.notes, p.property_address
          FROM interactions i
          JOIN interaction_properties ip ON i.interaction_id = ip.interaction_id
          JOIN properties p ON p.property_id = ip.property_id
          WHERE ip.property_id = ANY($1)
-         ORDER BY i.interaction_date DESC NULLS LAST
+         ORDER BY i.date DESC NULLS LAST
          LIMIT 10`,
         [foundPropertyIds]
       );
       if (propInteractions.rows.length > 0) {
         const lines = propInteractions.rows.slice(0, 5).map(r =>
-          '  - [' + (r.interaction_type || 'Note') + '] ' +
-          (r.interaction_date ? new Date(r.interaction_date).toLocaleDateString() : 'no date') +
+          '  - [' + (r.type || 'Note') + '] ' +
+          (r.date ? new Date(r.date).toLocaleDateString() : 'no date') +
           ' at ' + (r.property_address || '?') +
           (r.notes ? ' — ' + r.notes.slice(0, 100) : '')
         );
@@ -1240,26 +1240,21 @@ async function buildCrmContext(messageBody) {
     // TPE scores for found properties
     try {
       const tpeScores = await pool.query(
-        `SELECT ts.total_score, ts.motivation_score, ts.financial_score, ts.timing_score, ts.property_score,
-                p.property_address
-         FROM tpe_scores ts
-         JOIN properties p ON p.property_id = ts.property_id
-         WHERE ts.property_id = ANY($1)
-         ORDER BY ts.scored_at DESC NULLS LAST`,
+        `SELECT ts.tpe_score, ts.lease_score, ts.ownership_score, ts.age_score, ts.growth_score, ts.stress_score,
+                ts.tpe_tier, ts.blended_priority, ts.address AS property_address
+         FROM property_tpe_scores ts
+         WHERE ts.property_id = ANY($1)`,
         [foundPropertyIds]
       );
       if (tpeScores.rows.length > 0) {
-        // Deduplicate: keep latest per property
-        const seen = new Set();
-        const unique = [];
-        for (const r of tpeScores.rows) {
-          if (!seen.has(r.property_address)) {
-            seen.add(r.property_address);
-            unique.push(r);
-          }
-        }
-        const lines = unique.map(r =>
-          '  - ' + r.property_address + ': TPE ' + (r.total_score || '?') + '/100 (Motivation: ' + (r.motivation_score || '?') + ', Financial: ' + (r.financial_score || '?') + ', Timing: ' + (r.timing_score || '?') + ', Property: ' + (r.property_score || '?') + ')'
+        const lines = tpeScores.rows.map(r =>
+          '  - ' + r.property_address + ': TPE ' + (r.tpe_score != null ? Number(r.tpe_score).toFixed(0) : '?') + '/100' +
+          (r.tpe_tier ? ' (Tier ' + r.tpe_tier + ')' : '') +
+          ' | Lease: ' + (r.lease_score != null ? Number(r.lease_score).toFixed(0) : '?') +
+          ', Ownership: ' + (r.ownership_score != null ? Number(r.ownership_score).toFixed(0) : '?') +
+          ', Age: ' + (r.age_score != null ? Number(r.age_score).toFixed(0) : '?') +
+          ', Growth: ' + (r.growth_score != null ? Number(r.growth_score).toFixed(0) : '?') +
+          ', Stress: ' + (r.stress_score != null ? Number(r.stress_score).toFixed(0) : '?')
         );
         sections.push('TPE SCORES:\n' + lines.join('\n'));
       }
@@ -1302,19 +1297,19 @@ async function buildCrmContext(messageBody) {
     // Interaction history for found contacts
     try {
       const contactInteractions = await pool.query(
-        `SELECT i.interaction_type, i.interaction_date, i.notes, i.logged_by, c.full_name
+        `SELECT i.type, i.date, i.notes, c.full_name
          FROM interactions i
          JOIN interaction_contacts ic ON i.interaction_id = ic.interaction_id
          JOIN contacts c ON c.contact_id = ic.contact_id
          WHERE ic.contact_id = ANY($1)
-         ORDER BY i.interaction_date DESC NULLS LAST
+         ORDER BY i.date DESC NULLS LAST
          LIMIT 10`,
         [foundContactIds]
       );
       if (contactInteractions.rows.length > 0) {
         const lines = contactInteractions.rows.slice(0, 5).map(r =>
-          '  - [' + (r.interaction_type || 'Note') + '] ' +
-          (r.interaction_date ? new Date(r.interaction_date).toLocaleDateString() : 'no date') +
+          '  - [' + (r.type || 'Note') + '] ' +
+          (r.date ? new Date(r.date).toLocaleDateString() : 'no date') +
           ' with ' + (r.full_name || '?') +
           (r.notes ? ' — ' + r.notes.slice(0, 100) : '')
         );
@@ -1381,10 +1376,11 @@ async function buildCrmContext(messageBody) {
       body.includes('sale price') || body.includes('sale comp') || body.includes('bought')) {
     try {
       const saleComps = await pool.query(
-        `SELECT property_address, city, sale_price, price_per_sf, sale_date, sf, buyer, seller
-         FROM sale_comps
-         ${mentionedCity ? "WHERE LOWER(city) = $1" : ''}
-         ORDER BY sale_date DESC NULLS LAST
+        `SELECT p.property_address, p.city, sc.sale_price, sc.price_psf, sc.sale_date, sc.sf, sc.buyer_name, sc.seller_name
+         FROM sale_comps sc
+         LEFT JOIN properties p ON sc.property_id = p.property_id
+         ${mentionedCity ? "WHERE LOWER(p.city) = $1" : ''}
+         ORDER BY sc.sale_date DESC NULLS LAST
          LIMIT 5`,
         mentionedCity ? [mentionedCity] : []
       );
@@ -1394,11 +1390,11 @@ async function buildCrmContext(messageBody) {
           saleComps.rows.map(c =>
             '  - ' + (c.property_address || '?') + ', ' + (c.city || '?') + ' | ' +
             (c.sale_price ? '$' + Number(c.sale_price).toLocaleString() : 'No price') +
-            (c.price_per_sf ? ' ($' + Number(c.price_per_sf).toFixed(2) + '/sqft)' : '') +
+            (c.price_psf ? ' ($' + Number(c.price_psf).toFixed(2) + '/sqft)' : '') +
             (c.sf ? ' | ' + Number(c.sf).toLocaleString() + ' sqft' : '') +
             (c.sale_date ? ' | Sold: ' + new Date(c.sale_date).toLocaleDateString() : '') +
-            (c.buyer ? ' | Buyer: ' + c.buyer : '') +
-            (c.seller ? ' | Seller: ' + c.seller : '')
+            (c.buyer_name ? ' | Buyer: ' + c.buyer_name : '') +
+            (c.seller_name ? ' | Seller: ' + c.seller_name : '')
           ).join('\n'));
       }
     } catch (err) {
@@ -1707,7 +1703,7 @@ async function executeSingleAction(action, userId) {
         }
 
         const interResult = await pool.query(
-          `INSERT INTO interactions (type, date, notes, created_by)
+          `INSERT INTO interactions (type, date, notes, team_member)
            VALUES ($1, NOW(), $2, $3) RETURNING interaction_id`,
           [p.interaction_type || 'Note', p.notes || '', userId]
         );
@@ -1978,7 +1974,7 @@ If no actionable offer was made, return:
         const contact = contactResult.rows[0];
         // Create interaction
         const interResult = await pool.query(
-          `INSERT INTO interactions (type, date, notes, created_by)
+          `INSERT INTO interactions (type, date, notes, team_member)
            VALUES ($1, NOW(), $2, $3) RETURNING interaction_id`,
           [action.interaction_type || 'Note', action.summary || body, userId]
         );
@@ -1997,12 +1993,12 @@ If no actionable offer was made, return:
     } else if (action.action === 'cross_reference' && action.address) {
       // Search for property
       const propResult = await pool.query(
-        `SELECT id, address, city, property_type FROM properties
+        `SELECT property_id, property_address, city, property_type FROM properties
          WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 3`,
         [`%${action.address}%`]
       );
       if (propResult.rows.length > 0) {
-        const matches = propResult.rows.map(p => `${p.address}, ${p.city} (${p.property_type})`).join('; ');
+        const matches = propResult.rows.map(p => `${p.property_address}, ${p.city} (${p.property_type})`).join('; ');
         confirmMsg = `Found in CRM: ${matches}`;
       } else {
         confirmMsg = `No matching property found for "${action.address}". Want me to add it?`;
