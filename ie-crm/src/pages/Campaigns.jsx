@@ -9,6 +9,7 @@ import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import ViewBar from '../components/shared/ViewBar';
 import FilterBar from '../components/shared/FilterBar';
 import FilterBuilder from '../components/shared/FilterBuilder';
+import NewViewModal from '../components/shared/NewViewModal';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import { useToast } from '../components/shared/Toast';
@@ -253,6 +254,7 @@ export default function Campaigns({ onCountChange }) {
   const [filterStatus, setFilterStatus] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
+  const [newViewModalOpen, setNewViewModalOpen] = useState(false);
   const view = useViewEngine('campaigns', ALL_COLUMNS, { defaultSort: { column: 'modified', direction: 'DESC' } });
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
@@ -481,7 +483,7 @@ export default function Campaigns({ onCountChange }) {
         deleteView={view.deleteView}
         duplicateView={view.duplicateView}
         setDefault={view.setDefault}
-        onNewView={() => setFilterBuilderOpen(true)}
+        onNewView={() => setNewViewModalOpen(true)}
       />
       <FilterBar
         filters={view.filters}
@@ -500,6 +502,17 @@ export default function Campaigns({ onCountChange }) {
         initialFilters={view.filters}
         initialLogic={view.filterLogic}
         onApply={(filters, logic) => view.updateFilters(filters, logic)}
+      />
+      <NewViewModal
+        isOpen={newViewModalOpen}
+        onClose={() => setNewViewModalOpen(false)}
+        onSave={(name) => view.saveView(name)}
+        filters={view.filters}
+        filterLogic={view.filterLogic}
+        sort={view.sort}
+        columnDefs={ALL_COLUMNS}
+        visibleColumnKeys={view.visibleColumnKeys}
+        onOpenFilterBuilder={() => setFilterBuilderOpen(true)}
       />
 
       {/* Table */}
