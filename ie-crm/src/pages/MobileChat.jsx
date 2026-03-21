@@ -147,16 +147,18 @@ export default function MobileChat() {
     if (!user?.user_id) return;
     (async () => {
       try {
-        // Team channel
         await seedChannels();
         const chs = await fetchChannels(user.user_id);
-        if (chs.length > 0) setTeamChannelId(chs[0].id);
-
-        // Houston DM channel (auto-created per user)
+        const teamCh = chs.find(c => c.channel_type === 'group');
+        if (teamCh) setTeamChannelId(teamCh.id);
+      } catch (err) {
+        console.error('[MobileChat] Failed to load team channels:', err);
+      }
+      try {
         const { channelId: houstonId } = await fetchHoustonDmChannel(user.user_id);
         setHoustonChannelId(houstonId);
       } catch (err) {
-        console.error('[MobileChat] Failed to load channels:', err);
+        console.error('[MobileChat] Failed to load Houston DM:', err);
       }
     })();
   }, [user?.user_id]);

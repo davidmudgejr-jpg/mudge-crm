@@ -385,7 +385,9 @@ export default function TeamChat({ isOpen, onClose }) {
     try {
       await seedChannels();
       const chs = await fetchChannels(user.user_id);
-      if (chs.length > 0) setTeamChannelId(chs[0].id);
+      // Find the group channel (not houston_dm)
+      const teamCh = chs.find(c => c.channel_type === 'group');
+      if (teamCh) setTeamChannelId(teamCh.id);
     } catch (err) {
       console.error('[TeamChat] Failed to load team channels:', err);
     }
@@ -479,6 +481,7 @@ export default function TeamChat({ isOpen, onClose }) {
 
     if (!meta.nav_commands || meta.nav_commands.length === 0) return;
     lastNavRef.current = lastMsg.id;
+    console.log('[TeamChat] Executing NAV commands:', meta.nav_commands);
 
     // Execute NAV commands with a short delay so user sees Houston's message first
     setTimeout(() => {
@@ -521,9 +524,13 @@ export default function TeamChat({ isOpen, onClose }) {
             body: JSON.stringify({ sql: 'SELECT ' + id + ' FROM ' + table + ' WHERE ' + col + ' ILIKE $1 LIMIT 1', params: ['%' + search + '%'] }),
           });
           const data = await res.json();
+          console.log('[TeamChat] NAV search result:', data.rows?.length, 'matches for', search);
           if (data.rows?.[0]) {
             const entityId = data.rows[0][id];
+            console.log('[TeamChat] Opening detail:', et, entityId);
             openSlideOver(et, entityId);
+          } else {
+            console.warn('[TeamChat] NAV: No matching record found for', search);
           }
         } catch (err) {
           console.error('[TeamChat] NAV open_detail failed:', err);
