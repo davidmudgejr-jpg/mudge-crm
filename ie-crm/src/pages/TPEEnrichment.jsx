@@ -59,10 +59,12 @@ export default function TPEEnrichment() {
       const url = filter
         ? `${API_BASE}/api/ai/tpe-gaps?gap_type=${filter}&limit=500`
         : `${API_BASE}/api/ai/tpe-gaps?limit=500`;
+      const token = localStorage.getItem('crm-auth-token');
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
       const check = (r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); };
       const [gapsRes, statsRes] = await Promise.all([
-        fetch(url).then(check),
-        fetch(`${API_BASE}/api/ai/tpe-gaps/stats`).then(check),
+        fetch(url, { headers }).then(check),
+        fetch(`${API_BASE}/api/ai/tpe-gaps/stats`, { headers }).then(check),
       ]);
       setGaps(gapsRes);
       setStats(statsRes);

@@ -99,7 +99,10 @@ export default function TPE({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/ai/tpe?limit=2000`);
+      const token = localStorage.getItem('crm-auth-token');
+      const res = await fetch(`${API_BASE}/api/ai/tpe?limit=2000`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+      });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setRows(data || []);
