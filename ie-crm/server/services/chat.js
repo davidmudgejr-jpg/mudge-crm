@@ -748,7 +748,37 @@ Available actions:
 4. Update a property:
    <!--ACTION:{"type":"update_property","params":{"address":"1234 Main St","updates":{"priority":"High","contacted":["Contacted Owner"]}}}-->
 
-IMPORTANT: Only include ACTION/NAV blocks when the user ASKS you to do something. Never auto-execute unprompted. Your conversational response should confirm what you're doing BEFORE any ACTION or NAV block.
+SMART BEHAVIORS (CRITICAL — follow these exactly):
+
+1. NEVER say "on it" or "pulling it up" unless you VERIFIED the record exists in your CRM DATA context.
+   - If the data shows MATCHING PROPERTIES/CONTACTS, reference the specific record: "Opening 23447 Cajalco Rd — 17,760 SF Industrial in Perris"
+   - If NO matches found, say: "Couldn't find that in the CRM. Did you mean [suggest closest match if any]?" or "That address isn't in our database. Want me to add it?"
+
+2. MULTIPLE MATCHES — always clarify:
+   - "I found 3 properties on Cajalco Rd: 23447, 23332, and 23129. Which one?"
+   - "There are 2 Mike's in the system — Mike Thompson (Owner) and Mike Chen (Tenant). Which one?"
+
+3. TYPOS AND FUZZY INPUT — be forgiving:
+   - If someone types "cajalko" and you see "Cajalco Rd" in your data, match it
+   - If someone says "that building on main" in a city context, search for Main St properties
+   - If someone says "thompson" search contacts for Thompson
+
+4. VERIFY BEFORE ACTING — for write actions:
+   - Before logging an interaction, confirm: "Logging a Door Knock at 23447 Cajalco Rd with [owner name]. Sound right?"
+   - Before creating tasks, confirm the details: "Creating a follow-up task for Aug 1 — call Mike Thompson re: listing. Correct?"
+   - Only include the ACTION block AFTER confirming in your response text
+
+5. CONTEXT AWARENESS:
+   - Remember what was discussed in the last few messages
+   - If someone says "that property" or "him" or "the deal", reference the most recently discussed entity
+   - If someone asks "what about Ontario?" after discussing properties, search Ontario properties
+
+6. HELPFUL SUGGESTIONS:
+   - After showing property details: "Want me to log a drive-by or check the owner's contact info?"
+   - After logging an interaction: "Should I create a follow-up task?"
+   - If a property has no owner linked: "This property doesn't have an owner contact yet. Want me to look one up?"
+
+IMPORTANT: Only include ACTION/NAV blocks when the user ASKS you to do something. Never auto-execute unprompted.
 
 CRM NAVIGATION:
 You can navigate the CRM UI for the user. Include a NAV BLOCK at the END of your response.
@@ -785,6 +815,7 @@ RULES:
 
 /**
  * Pull relevant CRM data based on message content
+ * Smart search: direct entity lookup + keyword matching + fuzzy fallback
  */
 async function buildCrmContext(messageBody) {
   if (!pool || !messageBody) return null;
@@ -796,8 +827,126 @@ async function buildCrmContext(messageBody) {
   // Detect city/submarket mentions
   const cities = ['ontario', 'fontana', 'rancho cucamonga', 'riverside', 'san bernardino',
                   'redlands', 'colton', 'rialto', 'upland', 'pomona', 'chino', 'eastvale',
-                  'highland', 'corona', 'moreno valley', 'perris', 'jurupa valley', 'montclair'];
+                  'highland', 'corona', 'moreno valley', 'perris', 'jurupa valley', 'montclair',
+                  'bloomington', 'loma linda', 'yucaipa', 'beaumont', 'banning', 'hemet',
+                  'menifee', 'temecula', 'murrieta', 'lake elsinore', 'wildomar', 'norco',
+                  'mira loma', 'glen avon', 'rubidoux', 'grand terrace', 'muscoy'];
   const mentionedCity = cities.find(c => body.includes(c));
+
+  // ── SMART SEARCH: Try to find specific entities by name/address ──
+  // Extract potential names/addresses (words that aren't common CRM terms)
+  const skipWords = new Set(['show', 'me', 'the', 'details', 'for', 'pull', 'up', 'open', 'find',
+    'what', 'who', 'how', 'many', 'log', 'create', 'update', 'set', 'mark', 'property', 'contact',
+    'deal', 'company', 'building', 'owner', 'tenant', 'broker', 'about', 'info', 'information',
+    'get', 'give', 'tell', 'is', 'are', 'was', 'were', 'can', 'you', 'houston', 'please', 'hey',
+    'hi', 'hello', 'thanks', 'thank', 'a', 'an', 'in', 'on', 'at', 'to', 'of', 'and', 'or', 'the',
+    'do', 'we', 'have', 'our', 'my', 'this', 'that', 'with', 'from']);
+  const searchTerms = body.split(/\s+/).filter(w => w.length > 2 && !skipWords.has(w));
+  const searchPhrase = searchTerms.join(' ');
+
+  // Direct property search by address
+  if (searchPhrase.length > 3) {
+    try {
+      const propSearch = await pool.query(
+        `SELECT property_id, property_address, city, property_type, rba, year_built, entity_name
+         FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1
+         ORDER BY rba DESC NULLS LAST LIMIT 5`,
+        ['%' + searchPhrase + '%']
+      );
+      // Fuzzy fallback: search each word separately
+      let propResults = propSearch.rows;
+      if (propResults.length === 0 && searchTerms.length > 0) {
+        const fuzzyTerms = searchTerms.filter(t => t.length > 3 && !/^\d+$/.test(t));
+        if (fuzzyTerms.length > 0) {
+          const fuzzyWhere = fuzzyTerms.map((_, i) => 'property_address ILIKE $' + (i + 1)).join(' AND ');
+          const fuzzySearch = await pool.query(
+            'SELECT property_id, property_address, city, property_type, rba, year_built, entity_name FROM properties WHERE ' + fuzzyWhere + ' ORDER BY rba DESC NULLS LAST LIMIT 5',
+            fuzzyTerms.map(t => '%' + t + '%')
+          );
+          propResults = fuzzySearch.rows;
+        }
+      }
+      if (propResults.length > 0) {
+        results.entitiesFound += propResults.length;
+        sections.push('MATCHING PROPERTIES (' + propResults.length + ' found):\n' +
+          propResults.map(p =>
+            '  - ' + p.property_address + ', ' + p.city + ' | ' + (p.property_type || '?') + ' | ' + (p.rba ? Number(p.rba).toLocaleString() + ' sqft' : 'size unknown') + ' | Owner: ' + (p.entity_name || 'unknown')
+          ).join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Direct property search error:', err.message);
+    }
+
+    // Direct contact search by name
+    try {
+      const contactSearch = await pool.query(
+        `SELECT contact_id, full_name, title, email, phone_1, type, client_level
+         FROM contacts WHERE full_name ILIKE $1
+         ORDER BY created_at DESC LIMIT 5`,
+        ['%' + searchPhrase + '%']
+      );
+      // Fuzzy: try individual name parts
+      let contactResults = contactSearch.rows;
+      if (contactResults.length === 0 && searchTerms.length > 0) {
+        const nameTerms = searchTerms.filter(t => t.length > 2 && !/^\d+$/.test(t));
+        if (nameTerms.length > 0) {
+          const fuzzyWhere = nameTerms.map((_, i) => 'full_name ILIKE $' + (i + 1)).join(' AND ');
+          const fuzzySearch = await pool.query(
+            'SELECT contact_id, full_name, title, email, phone_1, type, client_level FROM contacts WHERE ' + fuzzyWhere + ' ORDER BY created_at DESC LIMIT 5',
+            nameTerms.map(t => '%' + t + '%')
+          );
+          contactResults = fuzzySearch.rows;
+        }
+      }
+      if (contactResults.length > 0) {
+        results.entitiesFound += contactResults.length;
+        sections.push('MATCHING CONTACTS (' + contactResults.length + ' found):\n' +
+          contactResults.map(c =>
+            '  - ' + (c.full_name || '?') + ' | ' + (c.type || '') + ' | ' + (c.title || '') + ' | ' + (c.email || 'no email') + ' | ' + (c.phone_1 || 'no phone') + ' | Level: ' + (c.client_level || '?')
+          ).join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Direct contact search error:', err.message);
+    }
+
+    // Direct company search
+    try {
+      const companySearch = await pool.query(
+        `SELECT company_id, company_name, industry, city, lease_exp
+         FROM companies WHERE company_name ILIKE $1
+         ORDER BY created_at DESC LIMIT 5`,
+        ['%' + searchPhrase + '%']
+      );
+      if (companySearch.rows.length > 0) {
+        results.entitiesFound += companySearch.rows.length;
+        sections.push('MATCHING COMPANIES (' + companySearch.rows.length + ' found):\n' +
+          companySearch.rows.map(c =>
+            '  - ' + (c.company_name || '?') + ' | ' + (c.industry || '') + ' | ' + (c.city || '') + (c.lease_exp ? ' | Lease exp: ' + new Date(c.lease_exp).toLocaleDateString() : '')
+          ).join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Direct company search error:', err.message);
+    }
+
+    // Direct deal search
+    try {
+      const dealSearch = await pool.query(
+        `SELECT deal_id, deal_name, status, deal_type, sf, close_date
+         FROM deals WHERE deal_name ILIKE $1
+         ORDER BY created_at DESC LIMIT 5`,
+        ['%' + searchPhrase + '%']
+      );
+      if (dealSearch.rows.length > 0) {
+        results.entitiesFound += dealSearch.rows.length;
+        sections.push('MATCHING DEALS (' + dealSearch.rows.length + ' found):\n' +
+          dealSearch.rows.map(d =>
+            '  - "' + (d.deal_name || '?') + '" | ' + (d.status || '') + ' | ' + (d.deal_type || '') + (d.sf ? ' | ' + Number(d.sf).toLocaleString() + ' sqft' : '')
+          ).join('\n'));
+      }
+    } catch (err) {
+      console.error('[chat/houston] Direct deal search error:', err.message);
+    }
+  }
 
   // Each section is independently try/caught so one failure doesn't kill the rest
 
