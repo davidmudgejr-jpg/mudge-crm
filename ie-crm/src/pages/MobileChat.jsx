@@ -314,8 +314,8 @@ export default function MobileChat() {
       </div>
 
       {/* ── Input bar — iMessage style ── */}
-      <div className="flex-shrink-0 bg-crm-bg border-t border-crm-border/15" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-        <div className="flex items-end gap-1.5 px-2 py-1.5">
+      <div className="flex-shrink-0" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
+        <div className="flex items-end gap-1.5 px-2 py-1">
           {/* + button */}
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -335,7 +335,7 @@ export default function MobileChat() {
           />
 
           {/* Text input — pill shaped */}
-          <div className="flex-1 min-h-[36px] bg-crm-hover/60 rounded-full border border-crm-border/30 flex items-end overflow-hidden">
+          <div className="flex-1 min-h-[36px] rounded-full border border-crm-border/40 flex items-end overflow-hidden">
             <textarea
               ref={inputRef}
               value={text}
