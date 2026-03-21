@@ -275,6 +275,52 @@ function useDrag(initialPos) {
 }
 
 // ============================================================
+// useResize — corner-drag resize hook
+// ============================================================
+const MIN_W = 320;
+const MIN_H = 300;
+const DEFAULT_W = 400;
+const DEFAULT_H = 600;
+
+function useResize(initialSize) {
+  const [size, setSize] = useState(initialSize);
+  const resizeState = useRef({ resizing: false });
+
+  const onResizeMouseDown = useCallback((e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeState.current = {
+      resizing: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      startW: size.w,
+      startH: size.h,
+    };
+
+    const onMouseMove = (e) => {
+      if (!resizeState.current.resizing) return;
+      const dx = e.clientX - resizeState.current.startX;
+      const dy = e.clientY - resizeState.current.startY;
+      setSize({
+        w: Math.max(MIN_W, resizeState.current.startW + dx),
+        h: Math.max(MIN_H, resizeState.current.startH + dy),
+      });
+    };
+
+    const onMouseUp = () => {
+      resizeState.current.resizing = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [size]);
+
+  return { size, setSize, onResizeMouseDown };
+}
+
+// ============================================================
 // MAIN CHAT WIDGET — non-blocking, draggable
 // ============================================================
 export default function TeamChat({ isOpen, onClose }) {
@@ -284,14 +330,37 @@ export default function TeamChat({ isOpen, onClose }) {
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [imagePreview, setImagePreview] = useState(null);
   const [minimized, setMinimized] = useState(false);
+  const [expanded, setExpanded] = useState(false);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
 
   // Draggable position — starts bottom-right
-  const { position, onMouseDown } = useDrag({
+  const { position, setPosition, onMouseDown } = useDrag({
     x: typeof window !== 'undefined' ? window.innerWidth - 420 : 800,
     y: typeof window !== 'undefined' ? window.innerHeight - 620 : 200,
   });
+
+  // Resizable
+  const { size, setSize, onResizeMouseDown } = useResize({ w: DEFAULT_W, h: DEFAULT_H });
+
+  // Toggle expanded (near full-screen) mode
+  const toggleExpanded = useCallback(() => {
+    if (!expanded) {
+      setPosition({ x: 80, y: 40 });
+      setSize({
+        w: (typeof window !== 'undefined' ? window.innerWidth : 1200) - 100,
+        h: (typeof window !== 'undefined' ? window.innerHeight : 800) - 80,
+      });
+      setExpanded(true);
+    } else {
+      setPosition({
+        x: (typeof window !== 'undefined' ? window.innerWidth : 1200) - 420,
+        y: (typeof window !== 'undefined' ? window.innerHeight : 800) - 620,
+      });
+      setSize({ w: DEFAULT_W, h: DEFAULT_H });
+      setExpanded(false);
+    }
+  }, [expanded, setPosition, setSize]);
 
   const {
     messages, typingUsers, connected, loading,
@@ -409,12 +478,15 @@ export default function TeamChat({ isOpen, onClose }) {
 
   return (
     <>
-      {/* Chat panel — draggable, no backdrop, non-blocking */}
+      {/* Chat panel — draggable, resizable, no backdrop, non-blocking */}
       <div
-        className={`fixed z-[61] ${minimized ? 'w-[300px]' : 'w-[400px]'} ${minimized ? 'h-[48px]' : 'h-[600px] max-h-[85vh]'} bg-crm-bg border border-crm-border/40 rounded-2xl shadow-2xl shadow-black/30 flex flex-col overflow-hidden transition-[height,width] duration-200`}
+        className={`fixed z-[61] bg-crm-bg border border-crm-border/40 rounded-2xl shadow-2xl shadow-black/30 flex flex-col overflow-hidden ${minimized ? 'transition-[height,width] duration-200' : ''}`}
         style={{
           left: `${position.x}px`,
           top: `${position.y}px`,
+          width: minimized ? '300px' : `${size.w}px`,
+          height: minimized ? '48px' : `${size.h}px`,
+          maxHeight: '95vh',
         }}
       >
         {/* Header — draggable handle */}
@@ -447,13 +519,23 @@ export default function TeamChat({ isOpen, onClose }) {
             <button
               onClick={() => setMinimized(m => !m)}
               className="p-1.5 rounded-full hover:bg-crm-hover/50 text-crm-muted hover:text-crm-text transition-colors"
-              title={minimized ? 'Expand' : 'Minimize'}
+              title={minimized ? 'Restore' : 'Minimize'}
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                {minimized ? (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+              </svg>
+            </button>
+            {/* Expand / restore button */}
+            <button
+              onClick={toggleExpanded}
+              className="p-1.5 rounded-full hover:bg-crm-hover/50 text-crm-muted hover:text-crm-text transition-colors"
+              title={expanded ? 'Restore size' : 'Expand'}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {expanded ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9V4.5M9 9H4.5M9 9L3.5 3.5M15 9h4.5M15 9V4.5M15 9l5.5-5.5M9 15v4.5M9 15H4.5M9 15l-5.5 5.5M15 15h4.5M15 15v4.5m0-4.5l5.5 5.5" />
                 ) : (
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
                 )}
               </svg>
             </button>
@@ -526,6 +608,17 @@ export default function TeamChat({ isOpen, onClose }) {
               onFileSelect={handleFileSelect}
               displayName={user?.display_name}
             />
+
+            {/* Resize handle — bottom-right corner */}
+            <div
+              onMouseDown={onResizeMouseDown}
+              className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize group"
+              title="Drag to resize"
+            >
+              <svg className="w-3 h-3 text-crm-muted/30 group-hover:text-crm-muted/60 transition-colors absolute bottom-0.5 right-0.5" viewBox="0 0 10 10">
+                <path d="M9 1L1 9M9 4L4 9M9 7L7 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </div>
           </>
         )}
       </div>

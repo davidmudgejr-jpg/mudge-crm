@@ -1,4 +1,4 @@
-import React, { useState, lazy, Suspense } from 'react';
+import React, { useState, useEffect, lazy, Suspense } from 'react';
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 
 // Opt into React Router v7 future flags to silence warnings
@@ -30,6 +30,7 @@ import Login from './pages/Login';
 import SlideOver, { SlideOverHeader } from './components/shared/SlideOver';
 import CommandPalette from './components/shared/CommandPalette';
 import TeamChat, { ChatToggleButton } from './components/TeamChat';
+import { fetchUnreadCount } from './hooks/useChat';
 import PropertyDetail from './pages/PropertyDetail';
 import ContactDetail from './pages/ContactDetail';
 import CompanyDetail from './pages/CompanyDetail';
@@ -72,9 +73,25 @@ function AppShell() {
   const [rowCount, setRowCount] = useState(0);
   const { devMode } = useDevMode();
   const { hasAnyPanel } = useSlideOver();
+  const { user } = useAuth();
 
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
+
+  // Poll unread chat count when chat is closed
+  useEffect(() => {
+    if (!user?.user_id || chatOpen) { setChatUnread(0); return; }
+    const poll = async () => {
+      try {
+        const { unread } = await fetchUnreadCount(user.user_id);
+        setChatUnread(unread);
+      } catch {}
+    };
+    poll();
+    const interval = setInterval(poll, 15000);
+    return () => clearInterval(interval);
+  }, [user?.user_id, chatOpen]);
 
   useKeyboardShortcuts({
     onNewRecord: () => { /* wired in Task 7 */ },
@@ -128,7 +145,7 @@ function AppShell() {
 
       {/* Team Chat */}
       <TeamChat isOpen={chatOpen} onClose={() => setChatOpen(false)} />
-      {!chatOpen && <ChatToggleButton onClick={() => setChatOpen(true)} />}
+      {!chatOpen && <ChatToggleButton onClick={() => setChatOpen(true)} unreadCount={chatUnread} />}
 
       {/* Toggle button when panel is closed — rendered AFTER SlideOver so it sits on top */}
       {!claudeOpen && (
