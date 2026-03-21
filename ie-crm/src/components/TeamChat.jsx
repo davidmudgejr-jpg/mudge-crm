@@ -331,6 +331,7 @@ export default function TeamChat({ isOpen, onClose }) {
   const [imagePreview, setImagePreview] = useState(null);
   const [minimized, setMinimized] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [scrollReady, setScrollReady] = useState(false);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
 
@@ -398,18 +399,19 @@ export default function TeamChat({ isOpen, onClose }) {
     if (!isOpen) {
       initialScrollDone.current = false;
       prevMsgCountRef.current = 0;
+      setScrollReady(false);
       return;
     }
 
     const container = chatContainerRef.current;
     if (!container || messages.length === 0) return;
 
-    // Initial load — scroll to bottom after a short delay so DOM renders
+    // Initial load — set scroll position before making visible
     if (!initialScrollDone.current) {
       initialScrollDone.current = true;
-      requestAnimationFrame(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-      });
+      // Set scrollTop directly (no animation, no flash)
+      container.scrollTop = container.scrollHeight;
+      setScrollReady(true);
       prevMsgCountRef.current = messages.length;
       return;
     }
@@ -421,8 +423,8 @@ export default function TeamChat({ isOpen, onClose }) {
 
       if (!wasLoadingOlder) {
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
-        if (isNearBottom && messagesEndRef.current) {
-          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        if (isNearBottom) {
+          container.scrollTop = container.scrollHeight;
         }
       }
     }
@@ -570,7 +572,7 @@ export default function TeamChat({ isOpen, onClose }) {
         {/* Messages area — hidden when minimized */}
         {!minimized && (
           <>
-            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5 scroll-smooth">
+            <div ref={chatContainerRef} className={`flex-1 overflow-y-auto px-3 py-3 space-y-0.5 ${scrollReady || loading || messages.length === 0 ? '' : 'invisible'}`}>
               {/* Load older messages indicator */}
               {loadingOlder && (
                 <div className="flex items-center justify-center py-3">
