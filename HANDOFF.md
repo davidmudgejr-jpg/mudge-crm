@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-21 (Phase 5D: Git cleanup + Chat UX overhaul + Houston image analysis + OAuth migration)
-> Previous sessions: (1) AI fleet architecture — 3-machine OpenClaw fleet, MVA scoring as TPE Model 6, Reonomy-anchored data pipeline, 14 agents, continuous 24/7 processing. (2) Team Chat — Socket.io + Houston AI brain with Claude Sonnet, RAG memory system (preferences, key facts, relationships), infinite scroll message history, CRM context queries with per-section error isolation. Migration 020_team_chat.sql applied. (3) Git cleanup — merged all feature branches into main (34 commits, 164 files). Chat UX overhaul — draggable, resizable, non-blocking chat. Houston image analysis via Claude Vision API. All Claude calls switched to OAuth (Claude Max subscription).
-> Next tasks: **"+ New View" save flow** (plan exists in .claude/plans/), **Email strategies session**, **Auth/RBAC (Phase 4)**, **Test Houston image analysis end-to-end**.
+> Updated: 2026-03-21 (Phase 5E: New View modal + light mode + frosted glass + security + testing + docs consolidation)
+> Previous sessions: (1) AI fleet architecture — 3-machine OpenClaw fleet, MVA scoring, Reonomy pipeline. (2) Team Chat — Socket.io + Houston AI brain + RAG memory. (3) Git cleanup + Chat UX overhaul + Houston image analysis + OAuth migration. (4) New View modal across all 6 pages, light mode pass, frosted glass chat, auth header sweep (10 files), TPE fix, credential rotation, Claude status fix, testing protocol update (7 new phases), roadmap consolidation (11 stale docs archived), deep feature review report (368 lines of ideas).
+> Next tasks: **PWA setup** (manifest + service worker for iOS home screen — tomorrow), **Production smoke test** (run full testing protocol on Vercel), **Houston two-brain architecture brainstorm** (how in-app Sonnet + OpenClaw Opus work together), **Fireflies.ai integration** (auto-log calls as interactions).
 
 ---
 
@@ -197,6 +197,40 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **Analysis stored** — `houston_analysis` field in attachment JSONB for future reference
 - [x] **Action deduplication** — `houston_meta.action_executed` flag prevents double-execution
 - [x] **5-minute timeout** — text confirmations only work within 5 minutes of Houston's offer
+
+### New View Modal ✅ (2026-03-21)
+- [x] **NewViewModal component** — clean modal with name input, filters summary, sort display, column count, Create View button
+- [x] **Wired into all 6 entity pages** — Properties, Contacts, Companies, Deals, Campaigns, Interactions
+- [x] **Replaces old flow** — was: open FilterBuilder → apply → find "Save as View" in FilterBar. Now: click "+ New View" → name it → save
+
+### Light Mode Pass ✅ (2026-03-21)
+- [x] **CSS variable overrides** — stronger muted text (#6e6e73), darker borders, opaque sidebar, deeper surfaces
+- [x] **Tailwind color remapping** — text-emerald-400→600, text-red-400→600, etc. for light bg readability
+- [x] **Houston chat bubble** — uses `text-crm-text` instead of hardcoded `text-emerald-100`
+- [x] **darkMode: 'media'** added to Tailwind config explicitly
+
+### Frosted Glass Chat ✅ (2026-03-21)
+- [x] **Apple vibrancy effect** — `bg-crm-bg/80 backdrop-blur-xl backdrop-saturate-150` on chat panel
+- [x] **Works in both themes** — CRM content shows blurred through the translucent chat background
+
+### Auth Headers Sweep ✅ (2026-03-21)
+- [x] **10 files fixed** — TPE.jsx, TPEEnrichment.jsx, QuickTuneDrawer.jsx, ApprovalQueue.jsx, CostBreakdown.jsx, TerritoryIntel.jsx, SystemHealth.jsx, PipelineDashboard.jsx, useAgentHeartbeats.js, useAgentLogs.js
+- [x] **All API fetch calls** now include JWT Authorization header
+
+### Claude Status Fix ✅ (2026-03-21)
+- [x] **/api/ai/status** no longer makes a real API call — just checks if OAuth token exists
+- [x] **Settings page** now correctly shows "Connected" for Claude AI
+
+### Docs Consolidation ✅ (2026-03-21)
+- [x] **Single master roadmap** — ie-crm/ROADMAP.md (CRM + AI system combined)
+- [x] **11 stale docs archived** to docs/archive/ (evolution roadmaps, macOS plans, old brainstorms)
+- [x] **Source of truth** assignments documented in roadmap
+- [x] **Testing protocol updated** — 7 new phases (19-25) for Team Chat, image analysis, OAuth, views, auth, chat UX, security
+
+### Deep Feature Review ✅ (2026-03-21)
+- [x] **368-line ideas report** at docs/FEATURE-REVIEW-2026-03-21.md
+- [x] **6 sections**: UX quick wins, Houston AI enhancements, data analytics, competitive moat features, technical debt, production readiness gaps
+- [x] **Key P0 items** (before Monday): empty state guidance, inline edit feedback, password reset flow
 
 ### AI Ops 3D War Room ✅ (2026-03-18)
 - [x] **Full Three.js rebuild** — Replaced flat SVG isometric room with real 3D scene using `three`, `@react-three/fiber`, `@react-three/drei`, `gsap`
