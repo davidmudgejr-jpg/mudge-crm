@@ -57,6 +57,45 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  // Periodic token revalidation — catch expired JWTs during active sessions
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(async () => {
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (!token) { setUser(null); return; }
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          console.warn('[auth] Token expired during session — logging out');
+          localStorage.removeItem(TOKEN_KEY);
+          setUser(null);
+        }
+      } catch {}
+    }, 5 * 60 * 1000); // Check every 5 minutes
+    return () => clearInterval(interval);
+  }, [user]);
+
+  // Global 401 listener — catch expired tokens from any fetch call
+  useEffect(() => {
+    if (!user) return;
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const res = await originalFetch(...args);
+      if (res.status === 401 && localStorage.getItem(TOKEN_KEY)) {
+        const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
+        if (url.includes('/api/') && !url.includes('/api/auth/login')) {
+          console.warn('[auth] 401 detected — session expired');
+          localStorage.removeItem(TOKEN_KEY);
+          setUser(null);
+        }
+      }
+      return res;
+    };
+    return () => { window.fetch = originalFetch; };
+  }, [user]);
+
   return (
     <AuthContext.Provider value={{ user, loading, login, logout }}>
       {children}

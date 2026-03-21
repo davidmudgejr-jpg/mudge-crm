@@ -187,12 +187,53 @@ function AuthGate() {
   );
 }
 
+// ============================================================
+// ERROR BOUNDARY — prevents white screen on render errors
+// ============================================================
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, info) {
+    console.error('[ErrorBoundary] Caught:', error, info.componentStack);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-crm-bg flex items-center justify-center p-8">
+          <div className="max-w-md text-center">
+            <div className="text-5xl mb-4">&#x26A0;&#xFE0F;</div>
+            <h1 className="text-xl font-semibold text-crm-text mb-2">Something went wrong</h1>
+            <p className="text-sm text-crm-muted mb-6">
+              Houston hit a snag. Try refreshing — if it keeps happening, let David know.
+            </p>
+            <button
+              onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
+              className="px-6 py-2.5 bg-crm-accent text-white rounded-lg text-sm font-medium hover:bg-crm-accent-hover transition-colors"
+            >
+              Refresh App
+            </button>
+            <p className="text-[10px] text-crm-muted/40 mt-4 font-mono">{this.state.error?.message}</p>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
-    <Router future={routerFutureFlags}>
-      <AuthProvider>
-        <AuthGate />
-      </AuthProvider>
-    </Router>
+    <ErrorBoundary>
+      <Router future={routerFutureFlags}>
+        <AuthProvider>
+          <AuthGate />
+        </AuthProvider>
+      </Router>
+    </ErrorBoundary>
   );
 }
