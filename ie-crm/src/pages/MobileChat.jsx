@@ -317,7 +317,7 @@ export default function MobileChat() {
           onChange={(e) => { if (e.target.files?.[0]) handleFileSelect(e.target.files[0]); e.target.value = ''; }}
         />
 
-        <div className="flex-1 bg-crm-card/60 rounded-2xl border border-crm-border/30 focus-within:border-blue-500/50">
+        <div className="flex-1 bg-crm-card/60 rounded-2xl border border-crm-border/30 focus-within:border-crm-accent/40 transition-colors overflow-hidden">
           <textarea
             ref={inputRef}
             value={text}
@@ -325,8 +325,8 @@ export default function MobileChat() {
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             placeholder="Message Houston..."
             rows={1}
-            className="w-full bg-transparent text-[15px] text-crm-text placeholder-crm-muted/50 px-4 py-2.5 resize-none outline-none max-h-32"
-            style={{ minHeight: '42px' }}
+            className="w-full bg-transparent text-[15px] text-crm-text placeholder-crm-muted/50 px-4 py-2.5 resize-none outline-none max-h-32 rounded-2xl"
+            style={{ minHeight: '42px', WebkitAppearance: 'none' }}
           />
         </div>
 
