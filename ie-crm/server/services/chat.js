@@ -612,6 +612,20 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
         : "Good question \u2014 I need my OAuth token configured to answer that. Check with David.";
     }
 
+    // Execute any CRM write actions Houston included in the response
+    if (houstonBody) {
+      const actionResults = await executeHoustonWriteActions(houstonBody, triggerMessage.sender_id);
+      // Strip ACTION blocks from the visible message
+      houstonBody = houstonBody.replace(/<!--ACTION:\{.*?\}-->/g, '').trim();
+      // Append confirmation if actions were executed
+      if (actionResults.length > 0) {
+        const confirmations = actionResults.filter(r => r.success).map(r => r.message);
+        if (confirmations.length > 0) {
+          houstonBody += '\n\n' + confirmations.join('\n');
+        }
+      }
+    }
+
     // Store analysis back on the original message's attachment
     if (imageAnalysisData && triggerMessage.id) {
       try {
@@ -709,6 +723,26 @@ ${memorySection}
 TRIGGER: ${triggerType}
 ${triggerType === 'at_mention' ? 'Someone mentioned you directly — always respond helpfully.' : ''}
 ${triggerType === 'data_question' ? 'Someone asked a question you can answer with CRM data.' : ''}
+
+CRM WRITE ACTIONS:
+You can perform these actions when the user asks. Include an ACTION BLOCK at the END of your response (after your conversational reply).
+Format: <!--ACTION:{"type":"...","params":{...}}-->
+
+Available actions:
+1. Log an interaction:
+   <!--ACTION:{"type":"log_interaction","params":{"contact_name":"Mike Thompson","property_address":"1234 Main St","interaction_type":"Door Knock","notes":"Interested in listing, waiting for lease expiry Sept 2026"}}-->
+   Valid types: Phone Call, Cold Call, Voicemail, Outbound Email, Inbound Email, Text, Meeting, Tour, Door Knock, Drive By, Note
+
+2. Create a task:
+   <!--ACTION:{"type":"create_task","params":{"name":"Follow up with Mike Thompson","due_date":"2026-08-01","responsibility":"David Mudge Jr","high_priority":false,"notes":"Re: 1234 Main St listing interest"}}-->
+
+3. Update a contact:
+   <!--ACTION:{"type":"update_contact","params":{"contact_name":"Mike Thompson","updates":{"client_level":"A","type":"Owner"}}}-->
+
+4. Update a property:
+   <!--ACTION:{"type":"update_property","params":{"address":"1234 Main St","updates":{"priority":"High","contacted":["Contacted Owner"]}}}-->
+
+IMPORTANT: Only include ACTION blocks when the user ASKS you to do something (log, create, update, save, add, mark, set). Never auto-execute actions unprompted. Your conversational response should confirm what you're doing BEFORE the ACTION block.
 
 RULES:
 - NEVER prefix your response with "[Houston]:" or your name — the chat UI already shows your name above the message
@@ -1080,6 +1114,161 @@ Rules:
 /**
  * Log Houston's interjection decision (for tuning and auditing)
  */
+// ============================================================
+// ============================================================
+// HOUSTON CRM WRITE ACTIONS — parse and execute from chat
+// ============================================================
+
+/**
+ * Parse and execute ACTION blocks from Houston's response
+ * Format: <!--ACTION:{"type":"...","params":{...}}-->
+ */
+async function executeHoustonWriteActions(responseText, userId) {
+  const actionPattern = /<!--ACTION:(\{.*?\})-->/g;
+  const results = [];
+  let match;
+
+  while ((match = actionPattern.exec(responseText)) !== null) {
+    try {
+      const action = JSON.parse(match[1]);
+      const result = await executeSingleAction(action, userId);
+      results.push(result);
+    } catch (err) {
+      console.error('[chat/houston] Failed to parse/execute action:', err.message);
+      results.push({ success: false, message: 'Failed to execute action' });
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Execute a single CRM write action
+ */
+async function executeSingleAction(action, userId) {
+  if (!pool) return { success: false, message: 'Database not available' };
+
+  try {
+    switch (action.type) {
+      case 'log_interaction': {
+        const p = action.params;
+        let contactId = null;
+        if (p.contact_name) {
+          const contactResult = await pool.query(
+            `SELECT contact_id, full_name FROM contacts WHERE full_name ILIKE $1 LIMIT 1`,
+            ['%' + p.contact_name + '%']
+          );
+          if (contactResult.rows[0]) contactId = contactResult.rows[0].contact_id;
+        }
+
+        let propertyId = null;
+        if (p.property_address) {
+          const propResult = await pool.query(
+            `SELECT id, address FROM properties WHERE address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
+            ['%' + p.property_address + '%']
+          );
+          if (propResult.rows[0]) propertyId = propResult.rows[0].id;
+        }
+
+        const interResult = await pool.query(
+          `INSERT INTO interactions (type, date, notes, created_by)
+           VALUES ($1, NOW(), $2, $3) RETURNING interaction_id`,
+          [p.interaction_type || 'Note', p.notes || '', userId]
+        );
+        const interactionId = interResult.rows[0].interaction_id;
+
+        if (contactId && interactionId) {
+          await pool.query(
+            `INSERT INTO interaction_contacts (interaction_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [interactionId, contactId]
+          );
+        }
+        if (propertyId && interactionId) {
+          await pool.query(
+            `INSERT INTO interaction_properties (interaction_id, property_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [interactionId, propertyId]
+          );
+        }
+
+        const linkedTo = [contactId ? p.contact_name : null, propertyId ? p.property_address : null].filter(Boolean).join(' & ');
+        return { success: true, message: '\u2705 Logged ' + (p.interaction_type || 'Note') + (linkedTo ? ' for ' + linkedTo : '') };
+      }
+
+      case 'create_task': {
+        const p = action.params;
+        await pool.query(
+          `INSERT INTO action_items (name, notes, due_date, responsibility, high_priority, status, source)
+           VALUES ($1, $2, $3, $4, $5, 'Todo', 'houston')`,
+          [
+            p.name || 'Follow up',
+            p.notes || '',
+            p.due_date || null,
+            p.responsibility ? '{' + p.responsibility + '}' : '{David Mudge Jr}',
+            p.high_priority || false,
+          ]
+        );
+        return { success: true, message: '\u2705 Created task: "' + p.name + '"' + (p.due_date ? ' (due ' + p.due_date + ')' : '') };
+      }
+
+      case 'update_contact': {
+        const p = action.params;
+        if (!p.contact_name || !p.updates) return { success: false, message: 'Missing contact name or updates' };
+
+        const contactResult = await pool.query(
+          `SELECT contact_id FROM contacts WHERE full_name ILIKE $1 LIMIT 1`,
+          ['%' + p.contact_name + '%']
+        );
+        if (contactResult.rows.length === 0) return { success: false, message: 'Contact "' + p.contact_name + '" not found' };
+
+        const contactId = contactResult.rows[0].contact_id;
+        const setClauses = [];
+        const values = [contactId];
+        let idx = 2;
+        for (const [key, val] of Object.entries(p.updates)) {
+          setClauses.push(key + ' = $' + idx);
+          values.push(val);
+          idx++;
+        }
+        if (setClauses.length > 0) {
+          await pool.query('UPDATE contacts SET ' + setClauses.join(', ') + ', updated_at = NOW() WHERE contact_id = $1', values);
+        }
+        return { success: true, message: '\u2705 Updated ' + p.contact_name };
+      }
+
+      case 'update_property': {
+        const p = action.params;
+        if (!p.address || !p.updates) return { success: false, message: 'Missing address or updates' };
+
+        const propResult = await pool.query(
+          `SELECT id FROM properties WHERE address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
+          ['%' + p.address + '%']
+        );
+        if (propResult.rows.length === 0) return { success: false, message: 'Property "' + p.address + '" not found' };
+
+        const propId = propResult.rows[0].id;
+        const setClauses2 = [];
+        const values2 = [propId];
+        let idx2 = 2;
+        for (const [key, val] of Object.entries(p.updates)) {
+          setClauses2.push(key + ' = $' + idx2);
+          values2.push(Array.isArray(val) ? '{' + val.join(',') + '}' : val);
+          idx2++;
+        }
+        if (setClauses2.length > 0) {
+          await pool.query('UPDATE properties SET ' + setClauses2.join(', ') + ', updated_at = NOW() WHERE id = $1', values2);
+        }
+        return { success: true, message: '\u2705 Updated ' + p.address };
+      }
+
+      default:
+        return { success: false, message: 'Unknown action type: ' + action.type };
+    }
+  } catch (err) {
+    console.error('[chat/houston] Action ' + action.type + ' failed:', err.message);
+    return { success: false, message: 'Failed: ' + err.message };
+  }
+}
+
 // ============================================================
 // ACTION CONFIRMATION — thumbs up or "yes" to execute CRM actions
 // ============================================================
