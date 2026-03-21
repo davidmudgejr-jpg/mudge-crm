@@ -1109,7 +1109,249 @@ LIMIT 10;
 
 ---
 
-## Phase 19: Final Report
+## Phase 19: Team Chat — Real-Time Messaging & Houston AI
+
+The Team Chat is a Socket.io-powered real-time messaging system with an AI assistant (Houston) that responds to @mentions and questions. The chat window is draggable, resizable, and minimizable.
+
+### Key Files
+| File | Purpose |
+|---|---|
+| `ie-crm/src/components/chat/TeamChat.jsx` | Main chat component — messages, input, file upload |
+| `ie-crm/server/index.js` | Socket.io server — message broadcasting, Houston AI integration |
+| `ie-crm/src/components/chat/TeamChatToggle.jsx` | Toggle button with unread badge |
+
+### 19.1 Socket.io Connection
+
+- [ ] Chat connects to the Socket.io server without errors on page load
+- [ ] Connection indicator shows "Connected" state in chat header
+- [ ] Disconnecting the server shows reconnection attempts
+
+### 19.2 Sending & Receiving Messages
+
+- [ ] Type a message and press Enter — message appears in chat
+- [ ] Message shows correct sender name, avatar, and timestamp
+- [ ] Open a second browser tab — messages sent in one appear in the other in real time
+- [ ] Empty messages are prevented (send button disabled / Enter does nothing)
+
+### 19.3 Houston AI Brain
+
+- [ ] Type `@Houston what is CRE?` — Houston responds with an AI-generated answer
+- [ ] Houston responses are visually distinct from user messages (different color/avatar)
+- [ ] Ask Houston a CRM-related question — response references RAG memory if available
+- [ ] Houston does not respond to messages without @mention or question mark
+
+### 19.4 File & Image Upload
+
+- [ ] Click the attachment icon — file picker opens
+- [ ] Upload an image — preview appears in the chat message
+- [ ] Upload a non-image file — file name/link appears in the message
+- [ ] Large files are rejected or show an error (check size limit)
+
+### 19.5 Typing Indicators
+
+- [ ] Start typing in one tab — "User is typing..." appears in the other tab
+- [ ] Stop typing — indicator disappears after a short delay
+- [ ] Multiple users typing shows all names
+
+### 19.6 Reactions
+
+- [ ] Hover over a message — reaction picker appears
+- [ ] Click an emoji — reaction appears on the message
+- [ ] Same reaction from multiple users shows count
+- [ ] Click own reaction again to remove it
+
+### 19.7 Infinite Scroll Message History
+
+- [ ] Scroll up in chat — older messages load automatically
+- [ ] Loading spinner appears during fetch
+- [ ] Scroll position is preserved when older messages load (no jump to top)
+- [ ] Reaching the oldest message stops further loading
+
+### 19.8 Unread Badge
+
+- [ ] Close/minimize chat — send a message from another tab — unread badge appears on the toggle button
+- [ ] Badge shows correct count of unread messages
+- [ ] Opening chat clears the unread badge
+
+---
+
+## Phase 20: Houston Image Analysis
+
+Houston can analyze images dropped into Team Chat, classify them, and offer CRM actions based on the content.
+
+### 20.1 Image Classification
+
+- [ ] Drop/upload an image into Team Chat — Houston analyzes it automatically
+- [ ] Houston classifies the image into one of: `client_conversation`, `property_listing`, `document`, `crm_data`, `personal`
+- [ ] Classification label appears in Houston's response
+
+### 20.2 CRM Action Suggestions
+
+- [ ] For a `property_listing` image — Houston suggests creating a property record or lease comp
+- [ ] For a `client_conversation` image (e.g., screenshot of text messages) — Houston suggests creating an interaction record
+- [ ] For a `document` image — Houston summarizes key information and suggests relevant CRM actions
+- [ ] For a `personal` image — Houston does not suggest CRM actions (responds conversationally)
+
+### 20.3 Action Confirmation Flow
+
+- [ ] Houston's CRM action suggestion includes a thumbs-up or "yes" confirmation prompt
+- [ ] Clicking thumbs-up / typing "yes" creates the corresponding interaction record in the database
+- [ ] Confirm the new interaction record appears in the Interactions tab with correct details
+- [ ] Canceling or ignoring the prompt does not create any record
+
+---
+
+## Phase 21: OAuth Migration
+
+All Claude AI calls now use `ANTHROPIC_OAUTH_TOKEN` (Claude Max subscription) instead of API key authentication. The model is `claude-sonnet-4-6` everywhere.
+
+### 21.1 Environment Configuration
+
+- [ ] `ANTHROPIC_OAUTH_TOKEN` environment variable is set in `.env`
+- [ ] No references to `ANTHROPIC_API_KEY` remain in active server code (grep the codebase)
+- [ ] Server starts without authentication errors
+
+### 21.2 Model Consistency
+
+- [ ] Grep all files for `claude-` model references — all should be `claude-sonnet-4-6`
+- [ ] No hardcoded `claude-3` or `claude-3.5` model strings remain in active code
+
+### 21.3 AI Feature Verification
+
+- [ ] Houston AI in Team Chat responds correctly (uses OAuth token)
+- [ ] Houston image analysis works (vision API via OAuth)
+- [ ] ClaudePanel (if present) uses OAuth proxy routes, not direct API key SDK
+- [ ] TPE scoring AI endpoints work (if AI-powered)
+- [ ] No 401/403 authentication errors in server logs during AI calls
+
+---
+
+## Phase 22: New View Modal
+
+The "+ New View" button opens a modal that lets users name and create saved views with a summary of current filters, sort, and columns.
+
+### 22.1 Modal Opening
+
+- [ ] Click "+ New View" button on the Properties page — modal opens
+- [ ] Modal contains: name input field, filters summary, sort summary, columns count
+- [ ] Modal has a "Create View" button
+
+### 22.2 View Creation
+
+- [ ] Enter a view name and click "Create View" — view is created and appears in the ViewBar
+- [ ] Empty name is prevented (validation error or disabled button)
+- [ ] The new view captures current filter state correctly
+- [ ] The new view captures current sort state correctly
+- [ ] The new view captures current column visibility state
+
+### 22.3 Cross-Entity Support
+
+- [ ] "+ New View" modal works on Contacts page
+- [ ] "+ New View" modal works on Companies page
+- [ ] "+ New View" modal works on Deals page
+- [ ] "+ New View" modal works on Interactions page
+- [ ] "+ New View" modal works on Campaigns page
+
+### 22.4 Modal UX
+
+- [ ] Modal can be dismissed by clicking outside or pressing Escape
+- [ ] Filters summary in modal accurately reflects active filters
+- [ ] Sort summary shows current sort column and direction
+- [ ] Columns count reflects number of visible columns
+
+---
+
+## Phase 23: Auth Headers Sweep
+
+All API fetch calls across the application now include JWT auth headers for secure access.
+
+### 23.1 Verify Auth Headers in Code
+
+- [ ] Grep all `fetch(` calls in `src/` — each includes `Authorization` header with JWT token
+- [ ] TPE Enrichment page API calls include auth headers
+- [ ] Enrichment page API calls include auth headers
+- [ ] QuickTuneDrawer config save/load calls include auth headers
+- [ ] AI Ops panel API calls include auth headers
+- [ ] Agent hook API calls include auth headers
+
+### 23.2 Authenticated Request Testing
+
+- [ ] Navigate to Properties page — data loads (auth header sent)
+- [ ] Open TPE Enrichment page — scores load (auth header sent)
+- [ ] Open QuickTuneDrawer — config loads (auth header sent)
+- [ ] Remove or invalidate the JWT token — API calls return 401 Unauthorized
+- [ ] Expired token triggers re-authentication flow (login redirect or refresh)
+
+---
+
+## Phase 24: Chat Window UX
+
+The Team Chat window is non-blocking (no backdrop), draggable, resizable, and has expand/minimize controls.
+
+### 24.1 Non-Blocking Behavior
+
+- [ ] Open Team Chat — the rest of the application remains fully interactive (no backdrop/overlay)
+- [ ] Click on sidebar nav items while chat is open — navigation works normally
+- [ ] Click on table rows while chat is open — detail panels open normally
+
+### 24.2 Draggable Window
+
+- [ ] Drag the chat window by its header bar — window moves freely
+- [ ] Window stays within viewport bounds (cannot be dragged off-screen)
+- [ ] Dragging does not interfere with text selection inside the chat
+
+### 24.3 Resizable Window
+
+- [ ] Drag the corner resize handle — window resizes smoothly
+- [ ] Minimum size is enforced (window cannot be made too small)
+- [ ] Content inside adjusts to new dimensions (messages area, input field)
+
+### 24.4 Expand/Restore Button
+
+- [ ] Click the expand button — chat window expands to a larger preset size
+- [ ] Click restore — chat returns to previous size and position
+- [ ] Expand/restore toggles correctly on repeated clicks
+
+### 24.5 Minimize to Header Bar
+
+- [ ] Click the minimize button — chat collapses to just the header bar
+- [ ] Click the collapsed header bar — chat restores to full size
+- [ ] Minimized state does not lose message history
+
+### 24.6 Auto-Scroll Behavior
+
+- [ ] Open chat — view scrolls to the most recent message without a visible flash
+- [ ] Receive a new message while scrolled to bottom — auto-scrolls to show it
+- [ ] Scrolled up reading history — new message does NOT force scroll (shows "new messages" indicator instead)
+
+---
+
+## Phase 25: Security Hardening
+
+Hardcoded credentials removed, dotenv compatibility fixed, and rate limiting patched.
+
+### 25.1 Credential Removal
+
+- [ ] Grep all files in `ie-crm/` for hardcoded Neon connection strings (e.g., `neondb`, `postgresql://`) — none found outside `.env` and `.env.example`
+- [ ] Specifically check the 9 script files that previously had hardcoded credentials — all now use `process.env.DATABASE_URL`
+- [ ] `.env` file is listed in `.gitignore`
+
+### 25.2 Dotenv Compatibility
+
+- [ ] Server starts correctly with Node 25 (dotenv override applied)
+- [ ] `dotenv` is loaded before any `process.env` references in server startup
+- [ ] No "undefined" connection string errors on cold start
+
+### 25.3 Rate Limiting IPv6 Fix
+
+- [ ] `express-rate-limit` is configured and active on the Express server
+- [ ] IPv6 loopback (`::1`) and IPv4 loopback (`127.0.0.1`) are handled correctly (not treated as different clients)
+- [ ] Rate limit applies correctly: exceeding the limit returns 429 Too Many Requests
+- [ ] Auth endpoints have stricter rate limits than general endpoints
+
+---
+
+## Phase 26: Final Report
 
 After all tests complete, produce a report in this format:
 
@@ -1227,6 +1469,53 @@ After all tests complete, produce a report in this format:
 - Data gap endpoints with pool guards: PASS/FAIL
 - Scoring logic: 0-100 range, correct tiers, NULL-safe call reasons: PASS/FAIL
 - Distress types (Auction/NOD/Matured) don't decay: PASS/FAIL
+
+## Team Chat (Phase 19)
+- Socket.io connection established: PASS/FAIL
+- Send/receive messages in real time: PASS/FAIL
+- Houston AI responds to @mentions: PASS/FAIL
+- File/image upload works: PASS/FAIL
+- Typing indicators visible: PASS/FAIL
+- Reactions add/remove: PASS/FAIL
+- Infinite scroll loads history: PASS/FAIL
+- Unread badge appears and clears: PASS/FAIL
+
+## Houston Image Analysis (Phase 20)
+- Image classification (5 categories): PASS/FAIL
+- CRM action suggestions per category: PASS/FAIL
+- Thumbs-up confirmation creates interaction record: PASS/FAIL
+- Cancel/ignore does not create record: PASS/FAIL
+
+## OAuth Migration (Phase 21)
+- ANTHROPIC_OAUTH_TOKEN configured: PASS/FAIL
+- No ANTHROPIC_API_KEY references in active code: PASS/FAIL
+- All model references are claude-sonnet-4-6: PASS/FAIL
+- AI features work without auth errors: PASS/FAIL
+
+## New View Modal (Phase 22)
+- Modal opens with name, filters, sort, columns: PASS/FAIL
+- View created and appears in ViewBar: PASS/FAIL
+- Works on all 6 entity pages: PASS/FAIL
+- Modal dismissible via Escape/click-outside: PASS/FAIL
+
+## Auth Headers Sweep (Phase 23)
+- All fetch calls include JWT auth header: PASS/FAIL
+- Authenticated requests succeed: PASS/FAIL
+- Invalid/expired token returns 401: PASS/FAIL
+
+## Chat Window UX (Phase 24)
+- Non-blocking (no backdrop): PASS/FAIL
+- Draggable via header: PASS/FAIL
+- Resizable via corner handle: PASS/FAIL
+- Expand/restore toggle: PASS/FAIL
+- Minimize to header bar: PASS/FAIL
+- Auto-scroll without flash: PASS/FAIL
+
+## Security Hardening (Phase 25)
+- No hardcoded credentials in codebase: PASS/FAIL
+- Dotenv loads before process.env references: PASS/FAIL
+- Rate limiting active with IPv6 fix: PASS/FAIL
+- .env in .gitignore: PASS/FAIL
 
 ## Fixes Applied
 1. [file:line] — description of what was broken and how it was fixed
