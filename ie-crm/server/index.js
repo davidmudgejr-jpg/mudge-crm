@@ -14,7 +14,7 @@ const multer = require('multer');
 const { initChat, registerChatRoutes } = require('./services/chat');
 
 // Load env
-require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
 
 const app = express();
 const server = http.createServer(app);
@@ -487,7 +487,8 @@ const AI_MAX_TOKENS = 4096;
 const aiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
-  keyGenerator: (req) => req.user?.user_id || req.ip,
+  keyGenerator: (req) => req.user?.user_id || 'anon',
+  validate: { xForwardedForHeader: false, default: true },
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'AI rate limit reached. Try again in a minute.' },

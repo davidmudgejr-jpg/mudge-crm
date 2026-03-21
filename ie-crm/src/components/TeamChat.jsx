@@ -1,5 +1,6 @@
-// TeamChat — iMessage-style floating chat widget
+// TeamChat — Draggable floating chat widget
 // Real-time team messaging with Houston AI as 4th team member
+// Non-blocking: stays open while using the CRM, draggable anywhere
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useChat, fetchChannels, seedChannels, uploadFile, fetchUnreadCount } from '../hooks/useChat';
@@ -51,7 +52,7 @@ function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick }) {
           style={{ backgroundColor: isHouston ? HOUSTON_COLOR : (message.sender_color || DEFAULT_COLORS[0]) }}
           title={message.sender_name}
         >
-          {isHouston ? '⚡' : getInitials(message.sender_name)}
+          {isHouston ? '\u26A1' : getInitials(message.sender_name)}
         </div>
       )}
       {!isOwn && !showAvatar && <div className="w-8 mr-2 flex-shrink-0" />}
@@ -60,7 +61,7 @@ function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick }) {
         {/* Sender name (for others, when avatar shows) */}
         {!isOwn && showAvatar && (
           <span className={`text-[11px] mb-0.5 ml-1 ${isHouston ? 'text-emerald-400 font-medium' : 'text-crm-muted'}`}>
-            {isHouston ? '⚡ Houston' : message.sender_name}
+            {isHouston ? '\u26A1 Houston' : message.sender_name}
           </span>
         )}
 
@@ -110,7 +111,7 @@ function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick }) {
         {/* Timestamp (on hover) */}
         <span className="text-[10px] text-crm-muted/50 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5 mx-1">
           {formatTime(message.created_at)}
-          {message.edited_at && ' · edited'}
+          {message.edited_at && ' \u00B7 edited'}
         </span>
       </div>
     </div>
@@ -130,7 +131,7 @@ function TypingIndicator({ users }) {
         <span className="w-1.5 h-1.5 bg-crm-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
         <span className="w-1.5 h-1.5 bg-crm-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
       </div>
-      <span>{names} {users.length === 1 ? 'is' : 'are'} typing…</span>
+      <span>{names} {users.length === 1 ? 'is' : 'are'} typing\u2026</span>
     </div>
   );
 }
@@ -232,7 +233,49 @@ function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayNam
 }
 
 // ============================================================
-// MAIN CHAT WIDGET
+// useDrag — reusable drag hook for the chat window
+// ============================================================
+function useDrag(initialPos) {
+  const [position, setPosition] = useState(initialPos);
+  const dragState = useRef({ dragging: false, startX: 0, startY: 0, startPosX: 0, startPosY: 0 });
+
+  const onMouseDown = useCallback((e) => {
+    // Only drag from the header bar, ignore buttons
+    if (e.target.closest('button') || e.target.closest('textarea') || e.target.closest('input')) return;
+    e.preventDefault();
+    dragState.current = {
+      dragging: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      startPosX: position.x,
+      startPosY: position.y,
+    };
+
+    const onMouseMove = (e) => {
+      if (!dragState.current.dragging) return;
+      const dx = e.clientX - dragState.current.startX;
+      const dy = e.clientY - dragState.current.startY;
+      setPosition({
+        x: dragState.current.startPosX + dx,
+        y: dragState.current.startPosY + dy,
+      });
+    };
+
+    const onMouseUp = () => {
+      dragState.current.dragging = false;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [position]);
+
+  return { position, setPosition, onMouseDown };
+}
+
+// ============================================================
+// MAIN CHAT WIDGET — non-blocking, draggable
 // ============================================================
 export default function TeamChat({ isOpen, onClose }) {
   const { user } = useAuth();
@@ -240,8 +283,15 @@ export default function TeamChat({ isOpen, onClose }) {
   const [activeChannelId, setActiveChannelId] = useState(null);
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [imagePreview, setImagePreview] = useState(null);
+  const [minimized, setMinimized] = useState(false);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
+
+  // Draggable position — starts bottom-right
+  const { position, onMouseDown } = useDrag({
+    x: typeof window !== 'undefined' ? window.innerWidth - 420 : 800,
+    y: typeof window !== 'undefined' ? window.innerHeight - 620 : 200,
+  });
 
   const {
     messages, typingUsers, connected, loading,
@@ -277,22 +327,18 @@ export default function TeamChat({ isOpen, onClose }) {
     const container = chatContainerRef.current;
     if (!container) return;
 
-    // If messages were prepended (loading older), preserve scroll position
     if (messages.length > prevMsgCountRef.current && prevMsgCountRef.current > 0) {
       const addedCount = messages.length - prevMsgCountRef.current;
       const firstNewMsg = messages[0];
       const wasLoadingOlder = addedCount > 1 && firstNewMsg?.created_at < (messages[addedCount]?.created_at || '');
 
       if (!wasLoadingOlder) {
-        // New message appended at bottom — scroll down if near bottom
         const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
         if (isNearBottom && messagesEndRef.current) {
           messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
       }
-      // If loading older, don't auto-scroll — user is reading history
     } else if (messagesEndRef.current) {
-      // Initial load — scroll to bottom
       messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
     }
     prevMsgCountRef.current = messages.length;
@@ -324,8 +370,10 @@ export default function TeamChat({ isOpen, onClose }) {
   useEffect(() => {
     if (!user?.user_id) return;
     const poll = async () => {
-      const { unread } = await fetchUnreadCount(user.user_id);
-      setUnreadTotal(unread);
+      try {
+        const { unread } = await fetchUnreadCount(user.user_id);
+        setUnreadTotal(unread);
+      } catch {}
     };
     poll();
     const interval = setInterval(poll, 15000);
@@ -337,7 +385,7 @@ export default function TeamChat({ isOpen, onClose }) {
     try {
       const attachment = await uploadFile(file);
       const isImage = file.type.startsWith('image/');
-      sendMessage(isImage ? '' : `📎 ${file.name}`, {
+      sendMessage(isImage ? '' : `\uD83D\uDCCE ${file.name}`, {
         messageType: isImage ? 'image' : 'file',
         attachments: [attachment]
       });
@@ -346,14 +394,13 @@ export default function TeamChat({ isOpen, onClose }) {
     }
   };
 
-  // Determine if we should show avatar (first message or different sender than previous)
+  // Determine if we should show avatar
   function shouldShowAvatar(msg, idx) {
     if (idx === 0) return true;
     const prev = messages[idx - 1];
     if (!prev) return true;
     if (msg.sender_type !== prev.sender_type) return true;
     if (msg.sender_id !== prev.sender_id) return true;
-    // More than 5 minutes gap
     const gap = new Date(msg.created_at) - new Date(prev.created_at);
     return gap > 5 * 60 * 1000;
   }
@@ -362,21 +409,26 @@ export default function TeamChat({ isOpen, onClose }) {
 
   return (
     <>
-      {/* Backdrop */}
-      <div className="fixed inset-0 z-[60] bg-black/20 backdrop-blur-[2px]" onClick={onClose} />
-
-      {/* Chat panel — slides up from bottom-right, iMessage style */}
-      <div className="fixed bottom-4 right-4 z-[61] w-[400px] h-[600px] max-h-[85vh] bg-crm-bg border border-crm-border/40 rounded-2xl shadow-2xl shadow-black/30 flex flex-col overflow-hidden animate-slide-up">
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-crm-border/30 bg-crm-bg/90 backdrop-blur-sm">
+      {/* Chat panel — draggable, no backdrop, non-blocking */}
+      <div
+        className={`fixed z-[61] ${minimized ? 'w-[300px]' : 'w-[400px]'} ${minimized ? 'h-[48px]' : 'h-[600px] max-h-[85vh]'} bg-crm-bg border border-crm-border/40 rounded-2xl shadow-2xl shadow-black/30 flex flex-col overflow-hidden transition-[height,width] duration-200`}
+        style={{
+          left: `${position.x}px`,
+          top: `${position.y}px`,
+        }}
+      >
+        {/* Header — draggable handle */}
+        <div
+          className="flex items-center justify-between px-4 py-3 border-b border-crm-border/30 bg-crm-bg/90 backdrop-blur-sm cursor-grab active:cursor-grabbing select-none flex-shrink-0"
+          onMouseDown={onMouseDown}
+        >
           <div className="flex items-center gap-3">
             <div className="flex -space-x-2">
               <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-crm-bg">
-                👨‍👩‍👧
+                {'\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67'}
               </div>
               <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-crm-bg" style={{ backgroundColor: HOUSTON_COLOR }}>
-                ⚡
+                {'\u26A1'}
               </div>
             </div>
             <div>
@@ -385,76 +437,97 @@ export default function TeamChat({ isOpen, onClose }) {
                 <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
                 <span className="text-[10px] text-crm-muted">
                   {connected ? 'Connected' : 'Reconnecting...'}
-                  {' · '}Houston listening
+                  {connected && ' \u00B7 Houston listening'}
                 </span>
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-full hover:bg-crm-hover/50 text-crm-muted hover:text-crm-text transition-colors"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1">
+            {/* Minimize button */}
+            <button
+              onClick={() => setMinimized(m => !m)}
+              className="p-1.5 rounded-full hover:bg-crm-hover/50 text-crm-muted hover:text-crm-text transition-colors"
+              title={minimized ? 'Expand' : 'Minimize'}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                {minimized ? (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                ) : (
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
+                )}
+              </svg>
+            </button>
+            {/* Close button */}
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-full hover:bg-crm-hover/50 text-crm-muted hover:text-crm-text transition-colors"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
         </div>
 
-        {/* Messages area */}
-        <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5 scroll-smooth">
-          {/* Load older messages indicator */}
-          {loadingOlder && (
-            <div className="flex items-center justify-center py-3">
-              <div className="flex items-center gap-2 text-xs text-crm-muted">
-                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                Loading older messages...
-              </div>
+        {/* Messages area — hidden when minimized */}
+        {!minimized && (
+          <>
+            <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5 scroll-smooth">
+              {/* Load older messages indicator */}
+              {loadingOlder && (
+                <div className="flex items-center justify-center py-3">
+                  <div className="flex items-center gap-2 text-xs text-crm-muted">
+                    <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Loading older messages...
+                  </div>
+                </div>
+              )}
+              {!hasOlder && messages.length > 0 && (
+                <div className="text-center py-3">
+                  <span className="text-[10px] text-crm-muted/40">Beginning of conversation</span>
+                </div>
+              )}
+              {loading ? (
+                <div className="flex items-center justify-center h-full">
+                  <div className="text-crm-muted text-sm">Loading messages...</div>
+                </div>
+              ) : messages.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center px-8">
+                  <div className="text-4xl mb-3">{'\uD83D\uDCAC'}</div>
+                  <h4 className="text-sm font-medium text-crm-text mb-1">Team Chat</h4>
+                  <p className="text-xs text-crm-muted">
+                    Send a message to your team. Houston is listening and will chime in when he has something useful to add.
+                  </p>
+                </div>
+              ) : (
+                messages.map((msg, idx) => (
+                  <ChatBubble
+                    key={msg.id}
+                    message={msg}
+                    isOwn={msg.sender_id === user?.user_id}
+                    showAvatar={shouldShowAvatar(msg, idx)}
+                    onReact={(emoji) => addReaction(msg.id, emoji)}
+                    onImageClick={setImagePreview}
+                  />
+                ))
+              )}
+              <TypingIndicator users={typingUsers} />
+              <div ref={messagesEndRef} />
             </div>
-          )}
-          {!hasOlder && messages.length > 0 && (
-            <div className="text-center py-3">
-              <span className="text-[10px] text-crm-muted/40">Beginning of conversation</span>
-            </div>
-          )}
-          {loading ? (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-crm-muted text-sm">Loading messages...</div>
-            </div>
-          ) : messages.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center px-8">
-              <div className="text-4xl mb-3">💬</div>
-              <h4 className="text-sm font-medium text-crm-text mb-1">Team Chat</h4>
-              <p className="text-xs text-crm-muted">
-                Send a message to your team. Houston is listening and will chime in when he has something useful to add.
-              </p>
-            </div>
-          ) : (
-            messages.map((msg, idx) => (
-              <ChatBubble
-                key={msg.id}
-                message={msg}
-                isOwn={msg.sender_id === user?.user_id}
-                showAvatar={shouldShowAvatar(msg, idx)}
-                onReact={(emoji) => addReaction(msg.id, emoji)}
-                onImageClick={setImagePreview}
-              />
-            ))
-          )}
-          <TypingIndicator users={typingUsers} />
-          <div ref={messagesEndRef} />
-        </div>
 
-        {/* Input */}
-        <MessageInput
-          onSend={(text) => sendMessage(text)}
-          onTyping={sendTyping}
-          onStopTyping={stopTyping}
-          onFileSelect={handleFileSelect}
-          displayName={user?.display_name}
-        />
+            {/* Input */}
+            <MessageInput
+              onSend={(text) => sendMessage(text)}
+              onTyping={sendTyping}
+              onStopTyping={stopTyping}
+              onFileSelect={handleFileSelect}
+              displayName={user?.display_name}
+            />
+          </>
+        )}
       </div>
 
       {/* Image preview overlay */}
@@ -475,7 +548,7 @@ export default function TeamChat({ isOpen, onClose }) {
 }
 
 // ============================================================
-// CHAT TOGGLE BUTTON — shown in bottom-left
+// CHAT TOGGLE BUTTON — shown in sidebar area
 // ============================================================
 export function ChatToggleButton({ onClick, unreadCount }) {
   return (
