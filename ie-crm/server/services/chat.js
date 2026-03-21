@@ -4,7 +4,51 @@
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
-const Anthropic = require('@anthropic-ai/sdk');
+
+// ============================================================
+// CLAUDE OAUTH HELPER — uses Claude Max subscription
+// ============================================================
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+const HOUSTON_MODEL = 'claude-sonnet-4-6';
+
+function getOAuthToken() {
+  return process.env.ANTHROPIC_OAUTH_TOKEN || null;
+}
+
+/**
+ * Call Claude API via OAuth token (Claude Max subscription)
+ * @param {object} opts - { system, messages, max_tokens }
+ * @returns {string} response text
+ */
+async function callClaude({ system, messages, max_tokens = 500 }) {
+  const token = getOAuthToken();
+  if (!token) return null;
+
+  const payload = {
+    model: HOUSTON_MODEL,
+    max_tokens,
+    messages,
+    ...(system ? { system } : {}),
+  };
+
+  const response = await fetch(ANTHROPIC_API_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(`Claude API ${response.status}: ${errData?.error?.message || 'unknown error'}`);
+  }
+
+  const data = await response.json();
+  return data.content?.[0]?.text || null;
+}
 
 // ============================================================
 // SOCKET.IO SETUP
@@ -12,7 +56,6 @@ const Anthropic = require('@anthropic-ai/sdk');
 
 let io = null;
 let pool = null;
-let anthropic = null;
 
 /**
  * Initialize the chat service with Socket.io server and DB pool
@@ -21,13 +64,11 @@ function initChat(socketServer, dbPool) {
   io = socketServer;
   pool = dbPool;
 
-  // Initialize Anthropic client for Houston's brain
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (apiKey) {
-    anthropic = new Anthropic({ apiKey });
-    console.log('[chat/houston] Brain online — Claude API connected');
+  const token = getOAuthToken();
+  if (token) {
+    console.log('[chat/houston] Brain online — OAuth token configured (Claude Max)');
   } else {
-    console.warn('[chat/houston] No ANTHROPIC_API_KEY — Houston will use placeholder responses');
+    console.warn('[chat/houston] No ANTHROPIC_OAUTH_TOKEN — Houston will use placeholder responses');
   }
 
   io.on('connection', (socket) => {
@@ -391,27 +432,26 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
 
     let houstonBody;
 
-    if (anthropic) {
-      // Use Claude API
+    if (getOAuthToken()) {
+      // Use Claude API via OAuth (Claude Max subscription)
       try {
-        const response = await anthropic.messages.create({
-          model: 'claude-sonnet-4-20250514',
-          max_tokens: 500,
+        const responseText = await callClaude({
           system: systemPrompt,
           messages: mergedHistory,
+          max_tokens: 500,
         });
-        houstonBody = response.content[0]?.text || "Sorry, I couldn't form a response right now.";
+        houstonBody = responseText || "Sorry, I couldn't form a response right now.";
         // Strip any self-referencing prefix Claude might add (e.g., "[Houston]: " or "Houston: ")
         houstonBody = houstonBody.replace(/^\[?Houston\]?:\s*/i, '');
       } catch (apiErr) {
         console.error('[chat/houston] Claude API error:', apiErr.message);
-        houstonBody = "Hey — I hit a snag connecting to my brain. Give me a sec and try again. 🤙";
+        houstonBody = "Hey \u2014 I hit a snag connecting to my brain. Give me a sec and try again. \uD83E\uDD19";
       }
     } else {
       // Fallback placeholder
       houstonBody = triggerType === 'at_mention'
-        ? "Hey — I caught that mention but my API key isn't configured yet. Once it's set, I'll be able to pull CRM data and give you real answers here."
-        : "Good question — I need my API key configured to answer that. Check with David.";
+        ? "Hey \u2014 I caught that mention but my OAuth token isn't configured yet. Once it's set, I'll be able to pull CRM data and give you real answers here."
+        : "Good question \u2014 I need my OAuth token configured to answer that. Check with David.";
     }
 
     const houstonMsg = await insertMessage({
@@ -423,7 +463,7 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
       houstonMeta: {
         trigger: triggerType,
         trigger_message_id: triggerMessage.id,
-        model: anthropic ? 'claude-sonnet-4' : 'placeholder',
+        model: getOAuthToken() ? HOUSTON_MODEL : 'placeholder',
         context_messages: recentMessages.length,
         crm_entities_referenced: crmContext?.entitiesFound || 0,
         memories_used: memories?.length || 0,
@@ -434,7 +474,7 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
     io.to(`channel:${triggerMessage.channel_id}`).emit('chat:message:new', houstonMsg);
 
     // Store this interaction as a memory
-    if (anthropic) {
+    if (getOAuthToken()) {
       storeMemory(triggerMessage, houstonBody).catch(err =>
         console.error('[chat/houston] Memory storage error:', err.message)
       );
@@ -777,11 +817,9 @@ async function storeMemory(triggerMessage, houstonResponse) {
   if (userMsg.length < 15 && houstonMsg.length < 30) return;
 
   try {
-    if (anthropic) {
+    if (getOAuthToken()) {
       // Use Claude to extract structured memories from this exchange
-      const extractionResponse = await anthropic.messages.create({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 400,
+      const responseText = await callClaude({
         system: `You extract memories from chat exchanges for a CRM AI assistant named Houston.
 Return a JSON array of memories worth storing. Each memory object has:
 - "content": concise factual statement (max 150 chars)
@@ -799,10 +837,9 @@ Rules:
         messages: [{
           role: 'user',
           content: `User said: "${userMsg.slice(0, 300)}"\nHouston replied: "${houstonMsg.slice(0, 300)}"\n\nExtract memories (JSON array):`
-        }]
-      });
-
-      const responseText = extractionResponse.content[0]?.text || '[]';
+        }],
+        max_tokens: 400,
+      }) || '[]';
 
       // Parse the JSON response
       let memories = [];

@@ -126,17 +126,22 @@ function initDatabase() {
 }
 
 // ============================================================
-// ANTHROPIC CLIENT
+// ANTHROPIC CLIENT (OAuth — Claude Max subscription)
 // ============================================================
 let anthropic;
 function initAnthropic() {
+  // Prefer OAuth token (Claude Max), fall back to API key
+  const oauthToken = process.env.ANTHROPIC_OAUTH_TOKEN;
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey.trim().length === 0) {
-    console.warn('[server] ANTHROPIC_API_KEY not set — Claude features disabled');
-    return;
+  if (oauthToken) {
+    anthropic = new Anthropic({ apiKey: oauthToken });
+    console.log('[server] Anthropic client ready (OAuth — Claude Max)');
+  } else if (apiKey && apiKey.trim().length > 0) {
+    anthropic = new Anthropic({ apiKey });
+    console.log('[server] Anthropic client ready (API key)');
+  } else {
+    console.warn('[server] No ANTHROPIC_OAUTH_TOKEN or ANTHROPIC_API_KEY — Claude features disabled');
   }
-  anthropic = new Anthropic({ apiKey });
-  console.log('[server] Anthropic client ready');
 }
 
 // ============================================================
@@ -2118,7 +2123,7 @@ async function houstonCompletions(req, res) {
     let isFirstChunk = true;
 
     const stream = await anthropic.messages.stream({
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       system: systemPrompt,
       messages: conversationMessages,
       max_tokens: 300,
@@ -2140,7 +2145,7 @@ async function houstonCompletions(req, res) {
           id: chunkId,
           object: 'chat.completion.chunk',
           created,
-          model: 'claude-sonnet-4-20250514',
+          model: 'claude-sonnet-4-6',
           choices: [{ index: 0, delta, finish_reason: null }],
         })}\n\n`);
       }
@@ -2151,7 +2156,7 @@ async function houstonCompletions(req, res) {
       id: chunkId,
       object: 'chat.completion.chunk',
       created,
-      model: 'claude-sonnet-4-20250514',
+      model: 'claude-sonnet-4-6',
       choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
     })}\n\n`);
     res.write('data: [DONE]\n\n');
