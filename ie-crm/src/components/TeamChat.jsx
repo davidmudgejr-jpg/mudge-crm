@@ -140,7 +140,7 @@ function TypingIndicator({ users }) {
 // ============================================================
 // MESSAGE INPUT — text + file upload + send
 // ============================================================
-function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayName }) {
+function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayName, placeholder = 'Message the team...' }) {
   const [text, setText] = useState('');
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -208,7 +208,7 @@ function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayNam
           value={text}
           onChange={handleChange}
           onKeyDown={handleKeyDown}
-          placeholder="Message the team..."
+          placeholder={placeholder}
           rows={1}
           className="w-full bg-transparent text-sm text-crm-text placeholder-crm-muted/50 px-4 py-2.5 resize-none outline-none max-h-32"
           style={{ minHeight: '38px' }}
@@ -720,10 +720,14 @@ export default function TeamChat({ isOpen, onClose }) {
                 </div>
               ) : messages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center px-8">
-                  <div className="text-4xl mb-3">{'\uD83D\uDCAC'}</div>
-                  <h4 className="text-sm font-medium text-crm-text mb-1">Team Chat</h4>
+                  <div className="text-4xl mb-3">{mode === 'houston' ? '\u26A1' : '\uD83D\uDCAC'}</div>
+                  <h4 className="text-sm font-medium text-crm-text mb-1">
+                    {mode === 'houston' ? 'Houston Direct' : 'Team Chat'}
+                  </h4>
                   <p className="text-xs text-crm-muted">
-                    Send a message to your team. Houston is listening and will chime in when he has something useful to add.
+                    {mode === 'houston'
+                      ? 'Ask Houston anything — deals, properties, contacts, comps. He can also navigate the CRM, log activities, and create tasks for you.'
+                      : 'Send a message to your team. Houston is listening and will chime in when he has something useful to add.'}
                   </p>
                 </div>
               ) : (
@@ -749,6 +753,7 @@ export default function TeamChat({ isOpen, onClose }) {
               onStopTyping={stopTyping}
               onFileSelect={handleFileSelect}
               displayName={user?.display_name}
+              placeholder={mode === 'houston' ? 'Ask Houston...' : 'Message the team...'}
             />
 
             {/* Resize handle — bottom-right corner */}
