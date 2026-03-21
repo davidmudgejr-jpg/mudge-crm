@@ -11,8 +11,8 @@ const { parseAirtableContactRow } = require('../server/utils/airtableContactPars
 const { processAirtableContacts } = require('../server/utils/airtableContactEngine');
 
 const CSV_PATH = process.env.CSV_PATH || '/Users/davidmudgejr/Downloads/Contacts-All (DON\'T DELETE) (1).csv';
-const DATABASE_URL = process.env.DATABASE_URL || process.env.NEON_DATABASE_URL
-  || 'postgresql://neondb_owner:npg_LFY9Gyds7VDA@ep-withered-mode-aktp7v63-pooler.c-3.us-west-2.aws.neon.tech/neondb?sslmode=require';
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), override: true });
+const DATABASE_URL = process.env.DATABASE_URL;
 
 async function main() {
   const args = process.argv.slice(2);

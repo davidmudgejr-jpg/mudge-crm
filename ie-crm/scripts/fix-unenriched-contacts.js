@@ -8,7 +8,8 @@ const { Pool } = require('pg');
 const xlsx = require('xlsx');
 const { normalizeContactName, normalizeCompanyName } = require('../server/utils/addressNormalizer');
 
-const DATABASE_URL = process.env.DATABASE_URL || 'postgresql://neondb_owner:npg_LFY9Gyds7VDA@ep-withered-mode-aktp7v63-pooler.c-3.us-west-2.aws.neon.tech/neondb?sslmode=require';
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), override: true });
+const DATABASE_URL = process.env.DATABASE_URL;
 const dryRun = !process.argv.includes('--live');
 
 async function main() {
