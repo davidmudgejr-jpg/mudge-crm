@@ -620,6 +620,17 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
       }
     }
 
+    // Parse NAV commands from Houston's response
+    let navCommands = [];
+    if (houstonBody) {
+      const navPattern = /<!--NAV:(\{.*?\})-->/g;
+      let navMatch;
+      while ((navMatch = navPattern.exec(houstonBody)) !== null) {
+        try { navCommands.push(JSON.parse(navMatch[1])); } catch {}
+      }
+      houstonBody = houstonBody.replace(/<!--NAV:\{.*?\}-->/g, '').trim();
+    }
+
     // Store analysis back on the original message's attachment
     if (imageAnalysisData && triggerMessage.id) {
       try {
@@ -656,6 +667,7 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
         crm_entities_referenced: crmContext?.entitiesFound || 0,
         memories_used: memories?.length || 0,
         ...(imageAnalysisData ? { image_analyzed: imageAnalysisData.filename } : {}),
+        ...(navCommands.length > 0 ? { nav_commands: navCommands } : {}),
       }
     });
 
@@ -736,7 +748,31 @@ Available actions:
 4. Update a property:
    <!--ACTION:{"type":"update_property","params":{"address":"1234 Main St","updates":{"priority":"High","contacted":["Contacted Owner"]}}}-->
 
-IMPORTANT: Only include ACTION blocks when the user ASKS you to do something (log, create, update, save, add, mark, set). Never auto-execute actions unprompted. Your conversational response should confirm what you're doing BEFORE the ACTION block.
+IMPORTANT: Only include ACTION/NAV blocks when the user ASKS you to do something. Never auto-execute unprompted. Your conversational response should confirm what you're doing BEFORE any ACTION or NAV block.
+
+CRM NAVIGATION:
+You can navigate the CRM UI for the user. Include a NAV BLOCK at the END of your response.
+Format: <!--NAV:{"action":"...","params":{...}}-->
+
+Available navigation actions:
+1. Navigate to a page:
+   <!--NAV:{"action":"navigate","params":{"page":"properties"}}-->
+   Valid pages: properties, contacts, companies, deals, interactions, campaigns, action-items, comps, tpe, tpe-enrichment, import, settings, ai-ops
+
+2. Open a record's detail panel:
+   <!--NAV:{"action":"open_detail","params":{"entity_type":"property","search":"1275 E Highland Ave"}}-->
+   Valid entity_types: property, contact, company, deal
+   "search" is a name or address to find the record
+
+3. Create a saved view with filters:
+   <!--NAV:{"action":"create_view","params":{"page":"properties","view_name":"Corona 10-25K SF","filters":[{"column":"city","operator":"equals","value":"Corona"},{"column":"building_sf","operator":"between","value":"10000","value2":"25000"}]}}-->
+
+4. Navigate to a page AND open a detail:
+   <!--NAV:{"action":"navigate_and_open","params":{"page":"contacts","entity_type":"contact","search":"Mike Thompson"}}-->
+
+You can combine NAV with ACTION blocks. For example, logging a door knock AND then opening the property detail:
+<!--ACTION:{"type":"log_interaction","params":{...}}-->
+<!--NAV:{"action":"open_detail","params":{"entity_type":"property","search":"176 Pacific St"}}-->
 
 RULES:
 - NEVER prefix your response with "[Houston]:" or your name — the chat UI already shows your name above the message

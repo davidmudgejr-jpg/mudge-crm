@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useChat, fetchChannels, seedChannels, uploadFile, fetchUnreadCount, fetchHoustonDmChannel } from '../hooks/useChat';
 import { useAuth } from '../contexts/AuthContext';
+import { useSlideOver } from './shared/SlideOverContext';
 
 // ── Avatar colors for team members ──
 const HOUSTON_COLOR = '#10b981';
@@ -325,6 +326,7 @@ function useResize(initialSize) {
 // ============================================================
 export default function TeamChat({ isOpen, onClose }) {
   const { user } = useAuth();
+  const { open: openSlideOver } = useSlideOver();
   const [teamChannelId, setTeamChannelId] = useState(null);
   const [houstonChannelId, setHoustonChannelId] = useState(null);
   const [mode, setMode] = useState('team'); // 'team' | 'houston'
@@ -454,6 +456,117 @@ export default function TeamChat({ isOpen, onClose }) {
       markRead();
     }
   }, [isOpen, activeChannelId, messages.length]);
+
+  // Execute NAV commands from Houston messages
+  const lastNavRef = useRef(null);
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.sender_type !== 'houston') return;
+    if (lastMsg.id === lastNavRef.current) return; // already handled
+
+    const meta = typeof lastMsg.houston_meta === 'string'
+      ? JSON.parse(lastMsg.houston_meta || '{}') : (lastMsg.houston_meta || {});
+
+    if (!meta.nav_commands || meta.nav_commands.length === 0) return;
+    lastNavRef.current = lastMsg.id;
+
+    // Execute NAV commands with a short delay so user sees Houston's message first
+    setTimeout(() => {
+      for (const nav of meta.nav_commands) {
+        executeNavCommand(nav);
+      }
+    }, 1500);
+  }, [messages]);
+
+  async function executeNavCommand(nav) {
+    const API_BASE = import.meta.env.VITE_API_URL || '';
+    const token = localStorage.getItem('crm-auth-token');
+    const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+
+    switch (nav.action) {
+      case 'navigate':
+        if (nav.params?.page) {
+          window.location.hash = '#/' + nav.params.page;
+        }
+        break;
+
+      case 'open_detail': {
+        const et = nav.params?.entity_type;
+        const search = nav.params?.search;
+        if (!et || !search) break;
+
+        // Map entity type to table and search column
+        const tableMap = { property: 'properties', contact: 'contacts', company: 'companies', deal: 'deals' };
+        const searchCol = { property: 'address', contact: 'full_name', company: 'company_name', deal: 'deal_name' };
+        const idCol = { property: 'id', contact: 'contact_id', company: 'company_id', deal: 'deal_id' };
+        const table = tableMap[et];
+        const col = searchCol[et];
+        const id = idCol[et];
+        if (!table) break;
+
+        try {
+          const res = await fetch(API_BASE + '/api/db/query', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sql: 'SELECT ' + id + ' FROM ' + table + ' WHERE ' + col + ' ILIKE $1 LIMIT 1', params: ['%' + search + '%'] }),
+          });
+          const data = await res.json();
+          if (data.rows?.[0]) {
+            const entityId = data.rows[0][id];
+            openSlideOver(et, entityId);
+          }
+        } catch (err) {
+          console.error('[TeamChat] NAV open_detail failed:', err);
+        }
+        break;
+      }
+
+      case 'navigate_and_open': {
+        if (nav.params?.page) {
+          window.location.hash = '#/' + nav.params.page;
+        }
+        // Wait for page to load, then open detail
+        if (nav.params?.entity_type && nav.params?.search) {
+          setTimeout(() => executeNavCommand({ action: 'open_detail', params: nav.params }), 1000);
+        }
+        break;
+      }
+
+      case 'create_view': {
+        if (nav.params?.page) {
+          window.location.hash = '#/' + nav.params.page;
+        }
+        // Create view via API
+        if (nav.params?.view_name && nav.params?.filters) {
+          try {
+            await fetch(API_BASE + '/api/views', {
+              method: 'POST',
+              headers: { ...headers, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                entity_type: nav.params.page || 'properties',
+                view_name: nav.params.view_name,
+                filters: nav.params.filters,
+                filter_logic: 'AND',
+                sort_column: null,
+                sort_direction: 'DESC',
+                visible_columns: null,
+                position: 99,
+              }),
+            });
+            // Reload the page to pick up the new view
+            setTimeout(() => window.location.reload(), 500);
+          } catch (err) {
+            console.error('[TeamChat] NAV create_view failed:', err);
+          }
+        }
+        break;
+      }
+
+      default:
+        console.warn('[TeamChat] Unknown NAV action:', nav.action);
+    }
+  }
 
   // Poll unread count
   useEffect(() => {
