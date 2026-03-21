@@ -498,7 +498,7 @@ export default function TeamChat({ isOpen, onClose }) {
     <>
       {/* Chat panel — draggable, resizable, no backdrop, non-blocking */}
       <div
-        className={`fixed z-[61] bg-crm-bg border border-crm-border/40 rounded-2xl shadow-2xl shadow-black/30 flex flex-col overflow-hidden ${minimized ? 'transition-[height,width] duration-200' : ''}`}
+        className={`fixed z-[61] bg-crm-bg/80 backdrop-blur-xl backdrop-saturate-150 border border-crm-border/40 rounded-2xl shadow-2xl shadow-black/20 flex flex-col overflow-hidden ${minimized ? 'transition-[height,width] duration-200' : ''}`}
         style={{
           left: `${position.x}px`,
           top: `${position.y}px`,
