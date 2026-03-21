@@ -166,6 +166,27 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     return () => { cancelled = true; };
   }, [entityType]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // --- Listen for Houston-created views and re-fetch ---
+  useEffect(() => {
+    const handler = async (e) => {
+      if (e.detail?.entity_type !== entityType) return;
+      try {
+        const serverViews = await listViews(entityType);
+        setViews(serverViews);
+        writeCache(entityType, serverViews);
+        // Auto-select the newest view (last in list)
+        if (serverViews.length > 0) {
+          const newest = serverViews[serverViews.length - 1];
+          applyViewState(newest);
+        }
+      } catch (err) {
+        console.error('[useViewEngine] Failed to reload views after Houston create:', err);
+      }
+    };
+    window.addEventListener('houston-view-created', handler);
+    return () => window.removeEventListener('houston-view-created', handler);
+  }, [entityType, applyViewState]);
+
   // --- Actions ---
   const applyView = useCallback((viewId) => {
     const view = views.find(v => v.view_id === viewId);

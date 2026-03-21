@@ -589,8 +589,12 @@ export default function TeamChat({ isOpen, onClose }) {
                 position: 99,
               }),
             });
-            // Reload the page to pick up the new view
-            setTimeout(() => window.location.reload(), 500);
+            // Signal the view engine to re-fetch views (without full page reload)
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('houston-view-created', {
+                detail: { entity_type: nav.params.page || 'properties' }
+              }));
+            }, 300);
           } catch (err) {
             console.error('[TeamChat] NAV create_view failed:', err);
           }
