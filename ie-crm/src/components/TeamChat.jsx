@@ -381,25 +381,34 @@ export default function TeamChat({ isOpen, onClose }) {
   }, [user?.user_id]);
 
   async function loadChannels() {
+    // Load team and Houston channels separately so one failure doesn't block the other
     try {
-      // Team channel
       await seedChannels();
       const chs = await fetchChannels(user.user_id);
       if (chs.length > 0) setTeamChannelId(chs[0].id);
-
-      // Houston DM channel (auto-created per user)
+    } catch (err) {
+      console.error('[TeamChat] Failed to load team channels:', err);
+    }
+    try {
       const { channelId: houstonId } = await fetchHoustonDmChannel(user.user_id);
       setHoustonChannelId(houstonId);
     } catch (err) {
-      console.error('[TeamChat] Failed to load channels:', err);
+      console.error('[TeamChat] Failed to load Houston DM channel:', err);
     }
   }
+
+  // Reset scroll state when channel changes or chat opens/closes
+  useEffect(() => {
+    initialScrollDone.current = false;
+    prevMsgCountRef.current = 0;
+    setScrollReady(false);
+  }, [activeChannelId]);
 
   // Auto-scroll to bottom on new messages (only if already near bottom)
   const prevMsgCountRef = useRef(0);
   const initialScrollDone = useRef(false);
   useEffect(() => {
-    // Reset scroll tracking when chat opens
+    // Reset scroll tracking when chat closes
     if (!isOpen) {
       initialScrollDone.current = false;
       prevMsgCountRef.current = 0;
@@ -631,7 +640,7 @@ export default function TeamChat({ isOpen, onClose }) {
             {/* Mode toggle */}
             <div className="flex bg-crm-hover/60 rounded-full p-0.5">
               <button
-                onClick={(e) => { e.stopPropagation(); setMode('team'); prevMsgCountRef.current = 0; setScrollReady(false); }}
+                onClick={(e) => { e.stopPropagation(); setMode('team'); }}
                 className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors ${
                   mode === 'team' ? 'bg-crm-accent text-white' : 'text-crm-muted'
                 }`}
@@ -639,7 +648,7 @@ export default function TeamChat({ isOpen, onClose }) {
                 Team
               </button>
               <button
-                onClick={(e) => { e.stopPropagation(); setMode('houston'); prevMsgCountRef.current = 0; setScrollReady(false); }}
+                onClick={(e) => { e.stopPropagation(); setMode('houston'); }}
                 className={`px-3 py-1 rounded-full text-[11px] font-medium transition-colors ${
                   mode === 'houston' ? 'bg-emerald-500 text-white' : 'text-crm-muted'
                 }`}

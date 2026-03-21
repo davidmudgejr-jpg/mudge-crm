@@ -161,6 +161,14 @@ export default function MobileChat() {
     })();
   }, [user?.user_id]);
 
+  // Reset scroll state when channel changes
+  const initialScrollDone = useRef(false);
+  useEffect(() => {
+    initialScrollDone.current = false;
+    prevMsgCount.current = 0;
+    setScrollReady(false);
+  }, [activeChannelId]);
+
   // Auto-scroll
   const prevMsgCount = useRef(0);
   const [scrollReady, setScrollReady] = useState(false);
@@ -258,7 +266,7 @@ export default function MobileChat() {
         {/* Mode toggle */}
         <div className="flex px-4 pb-2 gap-1">
           <button
-            onClick={() => { setMode('team'); prevMsgCount.current = 0; setScrollReady(false); }}
+            onClick={() => { setMode('team'); }}
             className={`flex-1 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
               mode === 'team'
                 ? 'bg-crm-accent text-white'
@@ -268,7 +276,7 @@ export default function MobileChat() {
             Team
           </button>
           <button
-            onClick={() => { setMode('houston'); prevMsgCount.current = 0; setScrollReady(false); }}
+            onClick={() => { setMode('houston'); }}
             className={`flex-1 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
               mode === 'houston'
                 ? 'bg-emerald-500 text-white'

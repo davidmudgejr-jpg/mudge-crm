@@ -1,12 +1,10 @@
 // useChat — Socket.io real-time chat hook
 // Manages connection, messages, typing indicators, and unread counts
+// Fixed: message caching per channel, race condition protection, scroll state
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
-// In dev, Vite proxy handles /api and /socket.io → localhost:3001
-// In prod, same origin (Railway serves both)
-// Socket.io: empty/undefined = connect to current page origin
 const SOCKET_URL = import.meta.env.VITE_API_URL || undefined;
 
 let socket = null;
@@ -32,28 +30,22 @@ export function useChat(userId, channelId) {
   const [connected, setConnected] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [hasOlder, setHasOlder] = useState(true); // assume there are older messages until proven otherwise
+  const [hasOlder, setHasOlder] = useState(true);
   const typingTimeouts = useRef({});
-
-  // Track previous channel and current messages for caching
-  const prevChannelRef = useRef(null);
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
 
   // Connect and join channel
   useEffect(() => {
     if (!userId || !channelId) return;
 
-    // Save current messages to cache before switching
-    if (prevChannelRef.current && prevChannelRef.current !== channelId) {
-      messageCache[prevChannelRef.current] = messagesRef.current;
-    }
-    prevChannelRef.current = channelId;
+    let cancelled = false;
 
     // Load cached messages immediately (prevents blank flash)
     if (messageCache[channelId]) {
       setMessages(messageCache[channelId]);
       setLoading(false);
+    } else {
+      setMessages([]);
+      setLoading(true);
     }
 
     const sock = getSocket();
@@ -70,20 +62,22 @@ export function useChat(userId, channelId) {
     const onDisconnect = () => setConnected(false);
 
     const onNewMessage = (msg) => {
+      if (cancelled) return;
       setMessages(prev => {
-        // Deduplicate (in case of reconnect replay)
         if (prev.some(m => m.id === msg.id)) return prev;
         const updated = [...prev, msg];
-        messageCache[channelId] = updated; // update cache
+        messageCache[channelId] = updated;
         return updated;
       });
     };
 
     const onMessageEdited = (msg) => {
+      if (cancelled) return;
       setMessages(prev => prev.map(m => m.id === msg.id ? { ...m, ...msg } : m));
     };
 
     const onMessageDeleted = ({ messageId }) => {
+      if (cancelled) return;
       setMessages(prev => prev.filter(m => m.id !== messageId));
     };
 
@@ -93,7 +87,6 @@ export function useChat(userId, channelId) {
         if (prev.some(t => t.userId === uid)) return prev;
         return [...prev, { userId: uid, displayName }];
       });
-      // Auto-clear after 3s
       clearTimeout(typingTimeouts.current[uid]);
       typingTimeouts.current[uid] = setTimeout(() => {
         setTypingUsers(prev => prev.filter(t => t.userId !== uid));
@@ -106,6 +99,7 @@ export function useChat(userId, channelId) {
     };
 
     const onReactionNew = ({ messageId, userId: uid, emoji }) => {
+      if (cancelled) return;
       setMessages(prev => prev.map(m => {
         if (m.id !== messageId) return m;
         const reactions = Array.isArray(m.reactions) ? [...m.reactions] : [];
@@ -115,6 +109,7 @@ export function useChat(userId, channelId) {
     };
 
     const onReactionRemoved = ({ messageId, userId: uid, emoji }) => {
+      if (cancelled) return;
       setMessages(prev => prev.map(m => {
         if (m.id !== messageId) return m;
         const reactions = (Array.isArray(m.reactions) ? m.reactions : [])
@@ -137,21 +132,27 @@ export function useChat(userId, channelId) {
       onConnect();
     }
 
-    // Fetch initial messages via REST (always fetch fresh, merge with cache)
+    // Fetch fresh messages from REST (won't overwrite if cancelled)
     setHasOlder(true);
     fetchMessages(channelId, userId).then(msgs => {
-      setMessages(msgs);
-      messageCache[channelId] = msgs; // update cache with fresh data
-      setLoading(false);
-      if (msgs.length < 50) setHasOlder(false);
+      if (!cancelled) {
+        setMessages(msgs);
+        messageCache[channelId] = msgs;
+        setLoading(false);
+        if (msgs.length < 50) setHasOlder(false);
+      }
     }).catch(err => {
-      console.error('[useChat] Failed to fetch messages:', err);
-      setLoading(false);
+      if (!cancelled) {
+        console.error('[useChat] Failed to fetch messages:', err);
+        setLoading(false);
+      }
     });
 
     return () => {
-      // Save messages to cache before cleanup
-      messageCache[channelId] = messagesRef.current;
+      cancelled = true;
+      // Save current messages to cache before cleanup
+      // (use the latest state via functional update trick)
+      setMessages(prev => { messageCache[channelId] = prev; return prev; });
       sock.off('connect', onConnect);
       sock.off('disconnect', onDisconnect);
       sock.off('chat:message:new', onNewMessage);
@@ -181,7 +182,6 @@ export function useChat(userId, channelId) {
       if (olderMsgs.length === 0) {
         setHasOlder(false);
       } else {
-        // Prepend older messages, deduplicate
         setMessages(prev => {
           const existingIds = new Set(prev.map(m => m.id));
           const newOlder = olderMsgs.filter(m => !existingIds.has(m.id));
@@ -210,7 +210,6 @@ export function useChat(userId, channelId) {
     });
   }, [channelId, userId]);
 
-  // Send typing indicator
   const sendTyping = useCallback((displayName) => {
     const sock = getSocket();
     sock.emit('chat:typing', { channelId, userId, displayName });
@@ -221,31 +220,26 @@ export function useChat(userId, channelId) {
     sock.emit('chat:typing:stop', { channelId, userId });
   }, [channelId, userId]);
 
-  // Mark channel as read
   const markRead = useCallback(() => {
     const sock = getSocket();
     sock.emit('chat:read', { channelId, userId });
   }, [channelId, userId]);
 
-  // Add reaction
   const addReaction = useCallback((messageId, emoji) => {
     const sock = getSocket();
     sock.emit('chat:react', { messageId, userId, emoji });
   }, [userId]);
 
-  // Remove reaction
   const removeReaction = useCallback((messageId, emoji) => {
     const sock = getSocket();
     sock.emit('chat:react:remove', { messageId, userId, emoji });
   }, [userId]);
 
-  // Edit message
   const editMessage = useCallback((messageId, newBody) => {
     const sock = getSocket();
     sock.emit('chat:edit', { messageId, userId, newBody });
   }, [userId]);
 
-  // Delete message
   const deleteMessage = useCallback((messageId) => {
     const sock = getSocket();
     sock.emit('chat:delete', { messageId, userId });
