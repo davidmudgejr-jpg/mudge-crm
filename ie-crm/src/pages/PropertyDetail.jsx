@@ -3,6 +3,7 @@ import {
   getProperty, updateProperty, deleteProperty,
   getPropertyContacts, getPropertyCompanies,
   getPropertyDeals, getPropertyInteractions,
+  getPropertyLeaseComps, getPropertySaleComps,
 } from '../api/database';
 import Section from '../components/shared/Section';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
@@ -15,6 +16,7 @@ import DetailSkeleton from '../components/shared/DetailSkeleton';
 import TYPE_ICONS from '../config/typeIcons';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
 import ActivitySection from '../components/shared/ActivitySection';
+import CompHistorySection from '../components/shared/CompHistorySection';
 
 const PRIORITY_OPTIONS = ['Hot', 'Warm', 'Cold', 'Dead'];
 const PROPERTY_TYPES = ['Office', 'Retail', 'Industrial', 'Multifamily', 'Mixed-Use', 'Land', 'Other'];
@@ -32,6 +34,8 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
   const [companies, setCompanies] = useState([]);
   const [deals, setDeals] = useState([]);
   const [interactions, setInteractions] = useState([]);
+  const [leaseComps, setLeaseComps] = useState([]);
+  const [saleComps, setSaleComps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showNewInteraction, setShowNewInteraction] = useState(false);
@@ -53,16 +57,20 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
       }
       setProp(p);
 
-      const [cRes, coRes, dRes, iRes] = await Promise.allSettled([
+      const [cRes, coRes, dRes, iRes, lcRes, scRes] = await Promise.allSettled([
         getPropertyContacts(resolvedId),
         getPropertyCompanies(resolvedId),
         getPropertyDeals(resolvedId),
         getPropertyInteractions(resolvedId),
+        getPropertyLeaseComps(resolvedId),
+        getPropertySaleComps(resolvedId),
       ]);
       setContacts(cRes.status === 'fulfilled' ? cRes.value.rows || [] : []);
       setCompanies(coRes.status === 'fulfilled' ? coRes.value.rows || [] : []);
       setDeals(dRes.status === 'fulfilled' ? dRes.value.rows || [] : []);
       setInteractions(iRes.status === 'fulfilled' ? iRes.value.rows || [] : []);
+      setLeaseComps(lcRes.status === 'fulfilled' ? lcRes.value.rows || [] : []);
+      setSaleComps(scRes.status === 'fulfilled' ? scRes.value.rows || [] : []);
     } catch (err) {
       console.error('Failed to load property:', err);
       setError(err.message || 'Failed to load property');
@@ -201,6 +209,8 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
         <LinkedRecordSection title="Other Companies" entityType="company" records={otherCompanies} defaultOpen={false} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
       )}
       <LinkedRecordSection title="Deals" entityType="deal" records={dealRecords} defaultOpen={deals.length > 0} sourceType="property" sourceId={resolvedId} onRefresh={loadData} />
+
+      <CompHistorySection leaseComps={leaseComps} saleComps={saleComps} />
 
       <ActivitySection interactions={interactions} onNewInteraction={() => setShowNewInteraction(true)} />
 

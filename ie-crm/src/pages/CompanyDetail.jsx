@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getCompany, updateCompany, deleteCompany, getCompanyContacts, getCompanyProperties, getCompanyDeals, getCompanyInteractions } from '../api/database';
+import { getCompany, updateCompany, deleteCompany, getCompanyContacts, getCompanyProperties, getCompanyDeals, getCompanyInteractions, getCompanyLeaseComps } from '../api/database';
 import Section from '../components/shared/Section';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import InlineField from '../components/shared/InlineField';
@@ -11,6 +11,7 @@ import TYPE_ICONS from '../config/typeIcons';
 import { formatDatePacific } from '../utils/timezone';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
 import ActivitySection from '../components/shared/ActivitySection';
+import CompHistorySection from '../components/shared/CompHistorySection';
 
 export default function CompanyDetail({ companyId, id, onClose, onSave, onRefresh, isSlideOver }) {
   const resolvedId = id || companyId;
@@ -24,6 +25,7 @@ export default function CompanyDetail({ companyId, id, onClose, onSave, onRefres
   const [linkedProperties, setLinkedProperties] = useState([]);
   const [linkedDeals, setLinkedDeals] = useState([]);
   const [interactions, setInteractions] = useState([]);
+  const [leaseComps, setLeaseComps] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showNewInteraction, setShowNewInteraction] = useState(false);
@@ -49,16 +51,18 @@ export default function CompanyDetail({ companyId, id, onClose, onSave, onRefres
       setCompany(companyData);
 
       // Fetch linked records independently so one failure doesn't break the panel
-      const [contacts, props, deals, iRes] = await Promise.allSettled([
+      const [contacts, props, deals, iRes, lcRes] = await Promise.allSettled([
         getCompanyContacts(resolvedId),
         getCompanyProperties(resolvedId),
         getCompanyDeals(resolvedId),
         getCompanyInteractions(resolvedId),
+        getCompanyLeaseComps(resolvedId),
       ]);
       setLinkedContacts(contacts.status === 'fulfilled' ? contacts.value.rows || [] : []);
       setLinkedProperties(props.status === 'fulfilled' ? props.value.rows || [] : []);
       setLinkedDeals(deals.status === 'fulfilled' ? deals.value.rows || [] : []);
       setInteractions(iRes.status === 'fulfilled' ? iRes.value.rows || [] : []);
+      setLeaseComps(lcRes.status === 'fulfilled' ? lcRes.value.rows || [] : []);
     } catch (err) {
       console.error('Failed to load company:', err);
       setError(err.message || 'Failed to load company');
@@ -151,6 +155,8 @@ export default function CompanyDetail({ companyId, id, onClose, onSave, onRefres
           <InlineField label="Move-in Date" value={company.move_in_date} field="move_in_date" type="date" onSave={saveField} />
         </div>
       </Section>
+
+      <CompHistorySection leaseComps={leaseComps} title="Lease Comp History" />
 
       <ActivitySection interactions={interactions} onNewInteraction={() => setShowNewInteraction(true)} />
 

@@ -2,17 +2,60 @@
 // Mirrors all Electron IPC handlers as REST endpoints
 
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
+const fs = require('fs');
 const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
+const { Server: SocketServer } = require('socket.io');
+const multer = require('multer');
+const { initChat, registerChatRoutes } = require('./services/chat');
 
 // Load env
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
 const app = express();
+const server = http.createServer(app);
 const PORT = process.env.PORT || 3001;
+
+// ── Socket.io for real-time chat ──
+const ALLOWED_ORIGINS_WS = [
+  'https://ie-crm.vercel.app',
+  'https://ie-crm-davidmudgejr-3693s-projects.vercel.app',
+  'https://ie-crm-git-main-davidmudgejr-3693s-projects.vercel.app',
+];
+if (process.env.NODE_ENV !== 'production') {
+  ALLOWED_ORIGINS_WS.push('http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173');
+}
+const io = new SocketServer(server, {
+  cors: { origin: ALLOWED_ORIGINS_WS, methods: ['GET', 'POST'] },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+});
+
+// ── File upload (multer) for chat images/attachments ──
+const uploadsDir = path.join(__dirname, '..', 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+const upload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, uploadsDir),
+    filename: (_req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, `${Date.now()}-${crypto.randomBytes(6).toString('hex')}${ext}`);
+    }
+  }),
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB max
+  fileFilter: (_req, file, cb) => {
+    const allowed = /\.(jpg|jpeg|png|gif|webp|pdf|doc|docx|xls|xlsx|csv|txt)$/i;
+    if (allowed.test(path.extname(file.originalname))) {
+      cb(null, true);
+    } else {
+      cb(new Error('File type not allowed'), false);
+    }
+  }
+});
 
 // Middleware
 const ALLOWED_ORIGINS = [
@@ -23,7 +66,7 @@ const ALLOWED_ORIGINS = [
 
 // Allow localhost in development
 if (process.env.NODE_ENV !== 'production') {
-  ALLOWED_ORIGINS.push('http://localhost:5173', 'http://localhost:3000', 'http://127.0.0.1:5173');
+  ALLOWED_ORIGINS.push('http://localhost:5173', 'http://localhost:3000', 'http://localhost:3001', 'http://127.0.0.1:5173');
 }
 
 app.use(cors({
@@ -2139,6 +2182,31 @@ app.post('/api/houston/completions', houstonCompletions);
 app.post('/v1/chat/completions', houstonCompletions);
 
 // ============================================================
+// TEAM CHAT — REST endpoints + file upload
+// ============================================================
+registerChatRoutes(app);
+
+// POST /api/chat/upload — with multer middleware
+app.post('/api/chat/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const file = req.file;
+    res.json({
+      url: `/uploads/${file.filename}`,
+      filename: file.originalname,
+      mime_type: file.mimetype,
+      size_bytes: file.size
+    });
+  } catch (err) {
+    console.error('[chat] Upload error:', err.message);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
+// Serve uploaded files
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+
+// ============================================================
 // SERVE STATIC FRONTEND (production)
 // ============================================================
 const distPath = path.join(__dirname, '..', 'dist');
@@ -2153,8 +2221,18 @@ app.get('*', (_req, res) => {
 initDatabase();
 initAnthropic();
 
-app.listen(PORT, () => {
+// Initialize Socket.io chat service (pool is created in initDatabase)
+setTimeout(() => {
+  if (pool) {
+    initChat(io, pool);
+  } else {
+    console.warn('[chat] No database pool — chat service not initialized');
+  }
+}, 1000);
+
+server.listen(PORT, () => {
   console.log(`[server] IE CRM API running on port ${PORT}`);
+  console.log(`[server] Socket.io: ready`);
   console.log(`[server] Database: ${pool ? 'connected' : 'not configured'}`);
   console.log(`[server] Claude: ${anthropic ? 'ready' : 'not configured'}`);
   console.log(`[server] Airtable: ${process.env.AIRTABLE_API_KEY ? 'configured' : 'not configured'}`);

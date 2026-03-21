@@ -188,6 +188,17 @@ export default function CompDetail({ compId, compType = 'lease', id, onClose, on
         </div>
       </Section>
 
+      {(item.bldg_clear_height || item.bldg_power || item.bldg_gl_doors || item.bldg_dock_doors) && (
+        <Section title="Building Details" defaultOpen={false}>
+          <div className="grid grid-cols-2 gap-x-4">
+            <InlineField label="Clear Height" value={item.bldg_clear_height} field="bldg_clear_height" readOnly />
+            <InlineField label="Power" value={item.bldg_power} field="bldg_power" readOnly />
+            <InlineField label="GL Doors" value={item.bldg_gl_doors} field="bldg_gl_doors" readOnly />
+            <InlineField label="Dock Doors" value={item.bldg_dock_doors} field="bldg_dock_doors" readOnly />
+          </div>
+        </Section>
+      )}
+
       <Section title="Other Details" defaultOpen={!!item.notes}>
         <InlineField label="Notes" value={item.notes} field="notes" onSave={saveField} multiline />
         <InlineField label="Source" value={item.source} field="source" type="select" options={SOURCE_OPTIONS} onSave={saveField} />

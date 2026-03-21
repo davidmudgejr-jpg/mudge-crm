@@ -1,7 +1,7 @@
 # IE CRM — Build Roadmap
 **Inland Empire Commercial Real Estate CRM**
 Mudge Team CRE — Built by David Mudge Jr
-Last updated: March 2026
+Last updated: March 19, 2026
 
 ---
 
@@ -33,12 +33,16 @@ Last updated: March 2026
 - **All tab column mappings complete** — Properties (~25 new), Contacts (~18 new), Companies (3 new), Deals (5 new + type changes), Campaigns (2 new), Interactions (2 new + expanded types)
 - Full schema blueprint in HANDOFF.md
 
+### Recently Completed (March 18-19, 2026)
+- AI Ops 3D War Room — Three.js scene with roaming AI agents, 4 live data wall screens, holographic orb, cinematic lighting, Bloom post-processing ✅
+- Houston Voice Activation — ElevenLabs voice synthesis, Web Speech API mic input, CRM database RAG, dynamic variables (name, deal count, tasks, time of day), signed URL auth ✅
+- Smart Filters — column filter popovers (text search, select checkboxes, number range, date presets, boolean toggle), 7 relative date operators, pre-built seed views, FilterBuilder dark theme fix ✅
+- Saved View Tabs — create, name, save filtered views as persistent tabs per entity type ✅
+
 ### Not Yet Started
-- AI Ops Dashboard — agent status, approval queue, log viewer (sandbox tables + endpoints ready)
-- Smart Filter Builder — visual AND/OR multi-column filter panel (saved views infra exists)
 - Report Generation (BOV reports, comp sheets, call lists)
 - Maps & GIS
-- Role-Based Access
+- Role-Based Access / Authentication
 - iOS companion app
 
 ---
@@ -184,49 +188,55 @@ Last updated: March 2026
 - [ ] Verify cross-links, deduplication, and data integrity
 - [ ] Retire Airtable as source of truth
 
-### 1J — AI Operations Module (Sandbox + Agent Dashboard)
+### 1J — AI Operations Module (Sandbox + Agent Dashboard) ✅
 *Infrastructure for the AI Master System — lets local AI agents on Mac Mini write to IE CRM safely*
 *Full architecture and agent specs: `ai-system/ARCHITECTURE.md` and `ai-system/ROADMAP.md`*
 
-**Sandbox Tables (migration 007):**
-- [ ] `sandbox_contacts` — researched contacts pending review
-- [ ] `sandbox_enrichments` — enrichment data for existing contacts
-- [ ] `sandbox_signals` — market intelligence hits
-- [ ] `sandbox_outreach` — draft outreach emails
-- [ ] `agent_heartbeats` — agent status/health reporting
-- [ ] `agent_logs` — structured log entries from all agents
-- [ ] All sandbox tables: agent_name, confidence_score, status (pending/approved/rejected/promoted), reviewed_by, reviewed_at
+**Sandbox Tables (migration 007):** ✅
+- [x] `sandbox_contacts` — researched contacts pending review
+- [x] `sandbox_enrichments` — enrichment data for existing contacts
+- [x] `sandbox_signals` — market intelligence hits
+- [x] `sandbox_outreach` — draft outreach emails
+- [x] `agent_heartbeats` — agent status/health reporting
+- [x] `agent_logs` — structured log entries from all agents
+- [x] All sandbox tables: agent_name, confidence_score, status (pending/approved/rejected/promoted), reviewed_by, reviewed_at
 
-**AI API Endpoints (scoped, key-authenticated):**
-- [ ] Read-only endpoints for local agents: contacts, properties, companies, comps search
-- [ ] Sandbox write endpoints: submit contacts, enrichments, signals, outreach
-- [ ] Operations endpoints: heartbeat, log, approval queue (pending/approve/reject)
-- [ ] API key auth with per-agent scoping and rate limiting
+**AI API Endpoints (scoped, key-authenticated):** ✅
+- [x] Read-only endpoints for local agents: contacts, properties, companies, comps search
+- [x] Sandbox write endpoints: submit contacts, enrichments, signals, outreach
+- [x] Operations endpoints: heartbeat, log, approval queue (pending/approve/reject)
+- [x] API key auth with per-agent scoping and rate limiting
 
-**Agent Dashboard (new IE CRM page — "AI Ops"):**
-- [ ] Agent Status Cards — per-agent health, current task, throughput
-- [ ] Approval Queue — review and approve/reject sandbox items
-- [ ] Log Viewer — filterable agent activity stream
-- [ ] System Health — Mac Mini connection status, error rates
-- [ ] Nav placement: between Campaigns and Import
+**Agent Dashboard — 3D War Room:** ✅
+- [x] Full Three.js 3D scene — Star Wars Clone Wars briefing room aesthetic
+- [x] 5 roaming AI agents with 3-state machine (walk/pause/look) and collision avoidance
+- [x] 4 wall screens with live data (agent status, approval queue, log viewer, system health)
+- [x] Holographic orb with gyroscopic rings (OrbRings.jsx — LOCKED)
+- [x] Polyhaven PBR textures on all surfaces, Bloom post-processing, cinematic fog
+- [x] Houston Voice Activation — click orb triggers ElevenLabs voice + CRM RAG context
+- [x] Dynamic variables: user name, active deal count, pending tasks, time of day greeting
+- [x] Signed URL authentication for ElevenLabs agent sessions
 
-**Sandbox-to-Production Promotion:**
-- [ ] Approved contacts → INSERT into contacts table
-- [ ] Approved enrichments → UPDATE existing contact rows
-- [ ] Approved signals → create interaction/action item records
-- [ ] All promotions logged in undo_log
+**Sandbox-to-Production Promotion:** ✅
+- [x] Approved contacts → INSERT into contacts table (with email dedup + SAVEPOINT)
+- [x] Approved enrichments → UPDATE existing contact rows
+- [x] Approved signals → create interaction/action item records
+- [x] All promotions logged in undo_log
 
 ---
 
-## Phase 2 — Smart Filters
-*Goal: Power-user list building*
+## Phase 2 — Smart Filters ✅
+*Goal: Power-user list building — COMPLETE*
 
-### 2A — Smart Filters & Lists
-- [ ] Filter pills in list view header
-- [ ] Slide-in filter builder panel
-- [ ] Saved filter sets ("Smart Lists") in left sidebar
-- [ ] Auto-updating lists based on filter logic
-- [ ] Works across all tabs including Comps and Action Items
+### 2A — Smart Filters & Lists ✅
+- [x] Column filter popovers — click funnel icon on any column header
+- [x] 5 filter types: text search + checkboxes, select checkboxes, number min/max range, date presets + custom range, boolean Yes/No/All toggle
+- [x] 7 relative date operators: in next/last N days, this week/month/quarter/year, is overdue
+- [x] FilterBuilder panel with AND/OR logic and all date operators
+- [x] Pre-built seed views auto-created on first visit (Active Pipeline, Priority Deals, Closing This Month, Expiring Leases)
+- [x] Saved view tabs — create, name, save filtered views as persistent tabs per entity type
+- [x] Works across Deals, Properties, Contacts, Companies, Campaigns (Interactions uses timeline view)
+- [x] Dark theme fix for all FilterBuilder selects and inputs
 
 ---
 

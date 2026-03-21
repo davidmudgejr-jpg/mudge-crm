@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-20 (AI fleet architecture + MVA scoring + data pipeline)
-> Previous session: "Massive AI system architecture session — designed 3-machine OpenClaw fleet (48GB Mini + 64GB Mini + 128GB Studio), MVA (Market Value Alignment) scoring system as TPE Model 6, complete data source pipeline with Reonomy as primary API (True Owner feature), 14 agents across 3 machines, continuous 24/7 processing (not batch), supervised enrichment workflow with OpenClaw computer-use, cross-reference logic encoded, email parsing pipeline for AIR super sheets. 750+ lines added to ARCHITECTURE.md across 3 commits."
-> Next task: **Email strategies session** — David wants to discuss email campaign integration with Instantly (12 addresses), outreach automation from Matcher agent, and how the full pipeline connects. Also: **Auth/RBAC (Phase 4)** remains next for CRM code work.
+> Updated: 2026-03-20 (Phase 5C: Team Chat + Houston AI brain + RAG memory)
+> Previous sessions: (1) AI fleet architecture — 3-machine OpenClaw fleet, MVA scoring as TPE Model 6, Reonomy-anchored data pipeline, 14 agents, continuous 24/7 processing. (2) Team Chat — Socket.io + Houston AI brain with Claude Sonnet, RAG memory system (preferences, key facts, relationships), infinite scroll message history, CRM context queries with per-section error isolation. Migration 020_team_chat.sql applied.
+> Next tasks: **Image analysis** (Houston reading uploaded screenshots), **"+ New View" save flow** (plan exists in .claude/plans/), **Git cleanup** (merge feature branches), **Email strategies session**, **Auth/RBAC (Phase 4)**.
 
 ---
 

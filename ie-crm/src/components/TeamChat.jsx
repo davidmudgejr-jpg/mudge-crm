@@ -1,0 +1,497 @@
+// TeamChat — iMessage-style floating chat widget
+// Real-time team messaging with Houston AI as 4th team member
+
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useChat, fetchChannels, seedChannels, uploadFile, fetchUnreadCount } from '../hooks/useChat';
+import { useAuth } from '../contexts/AuthContext';
+
+// ── Avatar colors for team members ──
+const HOUSTON_COLOR = '#10b981';
+const DEFAULT_COLORS = ['#6366f1', '#ec4899', '#f59e0b', '#14b8a6', '#8b5cf6'];
+
+function getInitials(name) {
+  if (!name) return '?';
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+}
+
+function formatTime(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const diff = now - d;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+}
+
+// ============================================================
+// CHAT BUBBLE — single message
+// ============================================================
+function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick }) {
+  const isHouston = message.sender_type === 'houston';
+  const bubbleColor = isOwn
+    ? 'bg-blue-600 text-white'
+    : isHouston
+      ? 'bg-emerald-600/20 text-emerald-100 border border-emerald-500/30'
+      : 'bg-crm-card text-crm-text';
+
+  const reactions = Array.isArray(message.reactions) ? message.reactions : [];
+  const attachments = Array.isArray(message.attachments)
+    ? message.attachments
+    : (typeof message.attachments === 'string' ? JSON.parse(message.attachments || '[]') : []);
+
+  return (
+    <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'} mb-1 group`}>
+      {/* Avatar (left side for others) */}
+      {!isOwn && showAvatar && (
+        <div
+          className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0 mr-2 mt-auto"
+          style={{ backgroundColor: isHouston ? HOUSTON_COLOR : (message.sender_color || DEFAULT_COLORS[0]) }}
+          title={message.sender_name}
+        >
+          {isHouston ? '⚡' : getInitials(message.sender_name)}
+        </div>
+      )}
+      {!isOwn && !showAvatar && <div className="w-8 mr-2 flex-shrink-0" />}
+
+      <div className={`max-w-[75%] ${isOwn ? 'items-end' : 'items-start'} flex flex-col`}>
+        {/* Sender name (for others, when avatar shows) */}
+        {!isOwn && showAvatar && (
+          <span className={`text-[11px] mb-0.5 ml-1 ${isHouston ? 'text-emerald-400 font-medium' : 'text-crm-muted'}`}>
+            {isHouston ? '⚡ Houston' : message.sender_name}
+          </span>
+        )}
+
+        {/* Image attachments */}
+        {attachments.length > 0 && attachments.map((att, i) => (
+          att.mime_type?.startsWith('image/') ? (
+            <img
+              key={i}
+              src={att.url}
+              alt={att.filename}
+              className="max-w-[280px] rounded-xl mb-1 cursor-pointer hover:opacity-90 transition-opacity"
+              onClick={() => onImageClick?.(att)}
+            />
+          ) : (
+            <div key={i} className="flex items-center gap-2 bg-crm-card/50 rounded-lg px-3 py-2 mb-1 text-sm">
+              <svg className="w-4 h-4 text-crm-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+              </svg>
+              <span className="text-crm-text truncate">{att.filename}</span>
+            </div>
+          )
+        ))}
+
+        {/* Message body */}
+        {message.body && (
+          <div className={`px-3.5 py-2 rounded-2xl ${bubbleColor} ${isOwn ? 'rounded-br-md' : 'rounded-bl-md'} text-sm leading-relaxed whitespace-pre-wrap break-words`}>
+            {message.body}
+          </div>
+        )}
+
+        {/* Reactions */}
+        {reactions.length > 0 && (
+          <div className="flex gap-1 mt-0.5 ml-1">
+            {Object.entries(
+              reactions.reduce((acc, r) => {
+                acc[r.emoji] = (acc[r.emoji] || 0) + 1;
+                return acc;
+              }, {})
+            ).map(([emoji, count]) => (
+              <span key={emoji} className="text-xs bg-crm-card/60 rounded-full px-1.5 py-0.5 border border-crm-border/30">
+                {emoji} {count > 1 ? count : ''}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Timestamp (on hover) */}
+        <span className="text-[10px] text-crm-muted/50 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5 mx-1">
+          {formatTime(message.created_at)}
+          {message.edited_at && ' · edited'}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// TYPING INDICATOR — animated dots
+// ============================================================
+function TypingIndicator({ users }) {
+  if (!users.length) return null;
+  const names = users.map(u => u.displayName).join(', ');
+  return (
+    <div className="flex items-center gap-2 px-4 py-1 text-xs text-crm-muted">
+      <div className="flex gap-0.5">
+        <span className="w-1.5 h-1.5 bg-crm-muted rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+        <span className="w-1.5 h-1.5 bg-crm-muted rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+        <span className="w-1.5 h-1.5 bg-crm-muted rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+      </div>
+      <span>{names} {users.length === 1 ? 'is' : 'are'} typing…</span>
+    </div>
+  );
+}
+
+// ============================================================
+// MESSAGE INPUT — text + file upload + send
+// ============================================================
+function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayName }) {
+  const [text, setText] = useState('');
+  const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const typingRef = useRef(false);
+  const typingTimer = useRef(null);
+
+  const handleChange = (e) => {
+    setText(e.target.value);
+    if (!typingRef.current) {
+      typingRef.current = true;
+      onTyping(displayName);
+    }
+    clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => {
+      typingRef.current = false;
+      onStopTyping();
+    }, 2000);
+  };
+
+  const handleSend = () => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    onSend(trimmed);
+    setText('');
+    typingRef.current = false;
+    onStopTyping();
+    clearTimeout(typingTimer.current);
+    inputRef.current?.focus();
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
+    }
+  };
+
+  return (
+    <div className="flex items-end gap-2 px-3 py-2 border-t border-crm-border/30 bg-crm-bg/80 backdrop-blur-sm">
+      {/* File upload button */}
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        className="p-2 text-crm-muted hover:text-crm-text transition-colors rounded-full hover:bg-crm-hover/50"
+        title="Upload image or file"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+        </svg>
+      </button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        className="hidden"
+        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+        onChange={(e) => {
+          if (e.target.files?.[0]) onFileSelect(e.target.files[0]);
+          e.target.value = '';
+        }}
+      />
+
+      {/* Text input */}
+      <div className="flex-1 bg-crm-card/60 rounded-2xl border border-crm-border/30 focus-within:border-blue-500/50 transition-colors">
+        <textarea
+          ref={inputRef}
+          value={text}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          placeholder="Message the team..."
+          rows={1}
+          className="w-full bg-transparent text-sm text-crm-text placeholder-crm-muted/50 px-4 py-2.5 resize-none outline-none max-h-32"
+          style={{ minHeight: '38px' }}
+        />
+      </div>
+
+      {/* Send button */}
+      <button
+        onClick={handleSend}
+        disabled={!text.trim()}
+        className={`p-2 rounded-full transition-all ${
+          text.trim()
+            ? 'bg-blue-600 text-white hover:bg-blue-500 scale-100'
+            : 'bg-crm-card/40 text-crm-muted/30 scale-95'
+        }`}
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19V5m0 0l-7 7m7-7l7 7" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+// ============================================================
+// MAIN CHAT WIDGET
+// ============================================================
+export default function TeamChat({ isOpen, onClose }) {
+  const { user } = useAuth();
+  const [channels, setChannels] = useState([]);
+  const [activeChannelId, setActiveChannelId] = useState(null);
+  const [unreadTotal, setUnreadTotal] = useState(0);
+  const [imagePreview, setImagePreview] = useState(null);
+  const messagesEndRef = useRef(null);
+  const chatContainerRef = useRef(null);
+
+  const {
+    messages, typingUsers, connected, loading,
+    loadingOlder, hasOlder, loadOlderMessages,
+    sendMessage, sendTyping, stopTyping, markRead,
+    addReaction, removeReaction
+  } = useChat(user?.user_id, activeChannelId);
+
+  // Load channels on mount
+  useEffect(() => {
+    if (!user?.user_id) return;
+    loadChannels();
+  }, [user?.user_id]);
+
+  async function loadChannels() {
+    try {
+      // Seed default channels first (idempotent)
+      await seedChannels();
+      const chs = await fetchChannels(user.user_id);
+      setChannels(chs);
+      // Auto-select first channel
+      if (chs.length > 0 && !activeChannelId) {
+        setActiveChannelId(chs[0].id);
+      }
+    } catch (err) {
+      console.error('[TeamChat] Failed to load channels:', err);
+    }
+  }
+
+  // Auto-scroll to bottom on new messages (only if already near bottom)
+  const prevMsgCountRef = useRef(0);
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    // If messages were prepended (loading older), preserve scroll position
+    if (messages.length > prevMsgCountRef.current && prevMsgCountRef.current > 0) {
+      const addedCount = messages.length - prevMsgCountRef.current;
+      const firstNewMsg = messages[0];
+      const wasLoadingOlder = addedCount > 1 && firstNewMsg?.created_at < (messages[addedCount]?.created_at || '');
+
+      if (!wasLoadingOlder) {
+        // New message appended at bottom — scroll down if near bottom
+        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
+        if (isNearBottom && messagesEndRef.current) {
+          messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+      }
+      // If loading older, don't auto-scroll — user is reading history
+    } else if (messagesEndRef.current) {
+      // Initial load — scroll to bottom
+      messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
+    }
+    prevMsgCountRef.current = messages.length;
+  }, [messages]);
+
+  // Detect scroll to top for loading older messages
+  useEffect(() => {
+    const container = chatContainerRef.current;
+    if (!container) return;
+
+    const handleScroll = () => {
+      if (container.scrollTop < 60 && hasOlder && !loadingOlder) {
+        loadOlderMessages();
+      }
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, [hasOlder, loadingOlder, loadOlderMessages]);
+
+  // Mark as read when chat is open and active
+  useEffect(() => {
+    if (isOpen && activeChannelId) {
+      markRead();
+    }
+  }, [isOpen, activeChannelId, messages.length]);
+
+  // Poll unread count
+  useEffect(() => {
+    if (!user?.user_id) return;
+    const poll = async () => {
+      const { unread } = await fetchUnreadCount(user.user_id);
+      setUnreadTotal(unread);
+    };
+    poll();
+    const interval = setInterval(poll, 15000);
+    return () => clearInterval(interval);
+  }, [user?.user_id]);
+
+  // Handle file upload
+  const handleFileSelect = async (file) => {
+    try {
+      const attachment = await uploadFile(file);
+      const isImage = file.type.startsWith('image/');
+      sendMessage(isImage ? '' : `📎 ${file.name}`, {
+        messageType: isImage ? 'image' : 'file',
+        attachments: [attachment]
+      });
+    } catch (err) {
+      console.error('[TeamChat] Upload failed:', err);
+    }
+  };
+
+  // Determine if we should show avatar (first message or different sender than previous)
+  function shouldShowAvatar(msg, idx) {
+    if (idx === 0) return true;
+    const prev = messages[idx - 1];
+    if (!prev) return true;
+    if (msg.sender_type !== prev.sender_type) return true;
+    if (msg.sender_id !== prev.sender_id) return true;
+    // More than 5 minutes gap
+    const gap = new Date(msg.created_at) - new Date(prev.created_at);
+    return gap > 5 * 60 * 1000;
+  }
+
+  if (!isOpen) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-[60] bg-black/20 backdrop-blur-[2px]" onClick={onClose} />
+
+      {/* Chat panel — slides up from bottom-right, iMessage style */}
+      <div className="fixed bottom-4 right-4 z-[61] w-[400px] h-[600px] max-h-[85vh] bg-crm-bg border border-crm-border/40 rounded-2xl shadow-2xl shadow-black/30 flex flex-col overflow-hidden animate-slide-up">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-crm-border/30 bg-crm-bg/90 backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <div className="flex -space-x-2">
+              <div className="w-7 h-7 rounded-full bg-indigo-500 flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-crm-bg">
+                👨‍👩‍👧
+              </div>
+              <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-crm-bg" style={{ backgroundColor: HOUSTON_COLOR }}>
+                ⚡
+              </div>
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-crm-text">Team Chat</h3>
+              <div className="flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                <span className="text-[10px] text-crm-muted">
+                  {connected ? 'Connected' : 'Reconnecting...'}
+                  {' · '}Houston listening
+                </span>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-full hover:bg-crm-hover/50 text-crm-muted hover:text-crm-text transition-colors"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Messages area */}
+        <div ref={chatContainerRef} className="flex-1 overflow-y-auto px-3 py-3 space-y-0.5 scroll-smooth">
+          {/* Load older messages indicator */}
+          {loadingOlder && (
+            <div className="flex items-center justify-center py-3">
+              <div className="flex items-center gap-2 text-xs text-crm-muted">
+                <svg className="w-3.5 h-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Loading older messages...
+              </div>
+            </div>
+          )}
+          {!hasOlder && messages.length > 0 && (
+            <div className="text-center py-3">
+              <span className="text-[10px] text-crm-muted/40">Beginning of conversation</span>
+            </div>
+          )}
+          {loading ? (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-crm-muted text-sm">Loading messages...</div>
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-center px-8">
+              <div className="text-4xl mb-3">💬</div>
+              <h4 className="text-sm font-medium text-crm-text mb-1">Team Chat</h4>
+              <p className="text-xs text-crm-muted">
+                Send a message to your team. Houston is listening and will chime in when he has something useful to add.
+              </p>
+            </div>
+          ) : (
+            messages.map((msg, idx) => (
+              <ChatBubble
+                key={msg.id}
+                message={msg}
+                isOwn={msg.sender_id === user?.user_id}
+                showAvatar={shouldShowAvatar(msg, idx)}
+                onReact={(emoji) => addReaction(msg.id, emoji)}
+                onImageClick={setImagePreview}
+              />
+            ))
+          )}
+          <TypingIndicator users={typingUsers} />
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input */}
+        <MessageInput
+          onSend={(text) => sendMessage(text)}
+          onTyping={sendTyping}
+          onStopTyping={stopTyping}
+          onFileSelect={handleFileSelect}
+          displayName={user?.display_name}
+        />
+      </div>
+
+      {/* Image preview overlay */}
+      {imagePreview && (
+        <div
+          className="fixed inset-0 z-[70] bg-black/80 flex items-center justify-center cursor-pointer"
+          onClick={() => setImagePreview(null)}
+        >
+          <img
+            src={imagePreview.url}
+            alt={imagePreview.filename}
+            className="max-w-[90vw] max-h-[90vh] rounded-lg shadow-2xl"
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+// ============================================================
+// CHAT TOGGLE BUTTON — shown in bottom-left
+// ============================================================
+export function ChatToggleButton({ onClick, unreadCount }) {
+  return (
+    <button
+      onClick={onClick}
+      className="fixed bottom-4 left-20 z-[45] bg-crm-card hover:bg-crm-hover border border-crm-border/40 text-crm-text rounded-full w-12 h-12 flex items-center justify-center shadow-lg transition-all duration-200 hover:scale-105 group"
+      title="Team Chat"
+    >
+      <svg className="w-6 h-6 text-crm-muted group-hover:text-crm-text transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-1v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h1v4l4-4" />
+      </svg>
+      {unreadCount > 0 && (
+        <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] flex items-center justify-center px-1">
+          {unreadCount > 99 ? '99+' : unreadCount}
+        </span>
+      )}
+    </button>
+  );
+}

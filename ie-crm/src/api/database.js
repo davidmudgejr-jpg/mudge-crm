@@ -1001,6 +1001,10 @@ export async function getPropertySaleComps(propertyId) {
   return query('SELECT * FROM sale_comps WHERE property_id = $1 ORDER BY sale_date DESC', [propertyId]);
 }
 
+export async function getCompanyLeaseComps(companyId) {
+  return query(`SELECT lc.*, p.property_address FROM lease_comps lc LEFT JOIN properties p ON lc.property_id = p.property_id WHERE lc.company_id = $1 ORDER BY lc.commencement_date DESC`, [companyId]);
+}
+
 // ============================================================
 // FORMULA COLUMNS
 // ============================================================

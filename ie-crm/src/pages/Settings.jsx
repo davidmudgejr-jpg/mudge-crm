@@ -4,6 +4,7 @@ import { query } from '../api/database';
 import { db, claude as claudeBridge, airtable as airtableBridge, settings } from '../api/bridge';
 import { formatTimeLogPacific } from '../utils/timezone';
 import UserManagement from '../components/shared/UserManagement';
+import TpeWeightsTable from '../components/shared/TpeWeightsTable';
 import { useAuth } from '../contexts/AuthContext';
 
 function StatusBadge({ ok, label }) {
@@ -229,6 +230,14 @@ export default function Settings() {
           <section>
             <h2 className="text-sm font-medium text-crm-muted uppercase tracking-wider mb-3">Team Management</h2>
             <UserManagement />
+          </section>
+        )}
+
+        {/* TPE Weights — admin only */}
+        {isAdmin && (
+          <section>
+            <h2 className="text-sm font-medium text-crm-muted uppercase tracking-wider mb-3">TPE Engine Weights</h2>
+            <TpeWeightsTable />
           </section>
         )}
 
