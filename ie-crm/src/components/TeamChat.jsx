@@ -35,7 +35,7 @@ function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick }) {
   const bubbleColor = isOwn
     ? 'bg-blue-600 text-white'
     : isHouston
-      ? 'bg-emerald-600/20 text-emerald-100 border border-emerald-500/30'
+      ? 'bg-emerald-600/15 text-crm-text border border-emerald-500/30'
       : 'bg-crm-card text-crm-text';
 
   const reactions = Array.isArray(message.reactions) ? message.reactions : [];
