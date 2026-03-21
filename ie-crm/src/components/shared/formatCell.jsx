@@ -15,11 +15,15 @@ export default function formatCell(value, format) {
   if (value == null || value === '') return <span className="text-crm-muted">--</span>;
 
   switch (format) {
-    case 'number':
-      return Number(value).toLocaleString();
+    case 'number': {
+      const n = Number(value);
+      return isNaN(n) ? <span className="text-crm-muted">--</span> : n.toLocaleString();
+    }
 
-    case 'currency':
-      return `$${Number(value).toLocaleString()}`;
+    case 'currency': {
+      const c = Number(value);
+      return isNaN(c) ? <span className="text-crm-muted">--</span> : `$${c.toLocaleString()}`;
+    }
 
     case 'percent':
       return `${value}%`;
