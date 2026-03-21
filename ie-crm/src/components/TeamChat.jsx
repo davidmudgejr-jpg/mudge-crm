@@ -498,7 +498,7 @@ export default function TeamChat({ isOpen, onClose }) {
 
         // Map entity type to table and search column
         const tableMap = { property: 'properties', contact: 'contacts', company: 'companies', deal: 'deals' };
-        const searchCol = { property: 'address', contact: 'full_name', company: 'company_name', deal: 'deal_name' };
+        const searchCol = { property: 'property_address', contact: 'full_name', company: 'company_name', deal: 'deal_name' };
         const idCol = { property: 'property_id', contact: 'contact_id', company: 'company_id', deal: 'deal_id' };
         const table = tableMap[et];
         const col = searchCol[et];

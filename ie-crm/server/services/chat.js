@@ -1194,10 +1194,10 @@ async function executeSingleAction(action, userId) {
         let propertyId = null;
         if (p.property_address) {
           const propResult = await pool.query(
-            `SELECT id, address FROM properties WHERE address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
+            `SELECT property_id, property_address FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
             ['%' + p.property_address + '%']
           );
-          if (propResult.rows[0]) propertyId = propResult.rows[0].id;
+          if (propResult.rows[0]) propertyId = propResult.rows[0].property_id;
         }
 
         const interResult = await pool.query(
@@ -1270,12 +1270,12 @@ async function executeSingleAction(action, userId) {
         if (!p.address || !p.updates) return { success: false, message: 'Missing address or updates' };
 
         const propResult = await pool.query(
-          `SELECT id FROM properties WHERE address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
+          `SELECT property_id FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
           ['%' + p.address + '%']
         );
         if (propResult.rows.length === 0) return { success: false, message: 'Property "' + p.address + '" not found' };
 
-        const propId = propResult.rows[0].id;
+        const propId = propResult.rows[0].property_id;
         const setClauses2 = [];
         const values2 = [propId];
         let idx2 = 2;
@@ -1285,7 +1285,7 @@ async function executeSingleAction(action, userId) {
           idx2++;
         }
         if (setClauses2.length > 0) {
-          await pool.query('UPDATE properties SET ' + setClauses2.join(', ') + ', updated_at = NOW() WHERE id = $1', values2);
+          await pool.query('UPDATE properties SET ' + setClauses2.join(', ') + ', updated_at = NOW() WHERE property_id = $1', values2);
         }
         return { success: true, message: '\u2705 Updated ' + p.address };
       }
@@ -1423,7 +1423,7 @@ If no actionable offer was made, return:
       // Search for property
       const propResult = await pool.query(
         `SELECT id, address, city, property_type FROM properties
-         WHERE address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 3`,
+         WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 3`,
         [`%${action.address}%`]
       );
       if (propResult.rows.length > 0) {
