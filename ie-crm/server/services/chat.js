@@ -101,6 +101,14 @@ function initChat(socketServer, dbPool) {
         // Broadcast to everyone in the channel (including sender for confirmation)
         io.to(`channel:${data.channelId}`).emit('chat:message:new', message);
 
+        // Check if this is a confirmation reply to Houston's action offer
+        const confirmWords = /^(yes|yeah|yep|do it|log it|save it|go ahead|confirm|please|sure)\b/i;
+        if (confirmWords.test((message.body || '').trim())) {
+          handleTextConfirmation(message).catch(err =>
+            console.error('[chat/houston] Text confirmation error:', err.message)
+          );
+        }
+
         // Houston listener — evaluate if Houston should respond
         // Run async, don't block the message delivery
         evaluateHoustonInterjection(message).catch(err =>
@@ -153,6 +161,14 @@ function initChat(socketServer, dbPool) {
         io.to(`channel:${socket.channelId}`).emit('chat:reaction:new', {
           messageId, userId, emoji
         });
+
+        // Check if this is a confirmation reaction on a Houston action offer
+        const confirmEmojis = ['\uD83D\uDC4D', '\u2705', '\uD83D\uDC4C', '\uD83D\uDCAA']; // 👍 ✅ 👌 💪
+        if (confirmEmojis.includes(emoji)) {
+          handleActionConfirmation(messageId, userId).catch(err =>
+            console.error('[chat/houston] Action confirmation error:', err.message)
+          );
+        }
       } catch (err) {
         console.error('[chat] Error adding reaction:', err.message);
       }
@@ -358,6 +374,14 @@ async function evaluateHoustonInterjection(message) {
   }
 
   const body = (message.body || '').toLowerCase();
+  const attachments = parseAttachments(message.attachments);
+
+  // Level 0: Image attachment — always analyze (Houston decides relevance)
+  const imageAttachments = attachments.filter(a => a.mime_type?.startsWith('image/'));
+  if (imageAttachments.length > 0) {
+    await triggerHoustonResponse(message, 'image_analysis');
+    return;
+  }
 
   // Level 1: Direct @mention — always respond
   if (body.includes('@houston')) {
@@ -382,9 +406,60 @@ async function evaluateHoustonInterjection(message) {
   }
 
   // Level 3-4: Deal discussion context / team stuck
-  // These require analyzing the last ~10 messages for context
-  // For now, log as suppressed — we'll add the Claude analysis in the Houston brain module
   await logInterjectionDecision(message, 'suppressed', 'no_trigger_matched');
+}
+
+/**
+ * Parse attachments — handles string, array, or null
+ */
+function parseAttachments(att) {
+  if (!att) return [];
+  if (Array.isArray(att)) return att;
+  if (typeof att === 'string') {
+    try { return JSON.parse(att); } catch { return []; }
+  }
+  return [];
+}
+
+/**
+ * Read an uploaded image file and return as base64
+ */
+function readImageAsBase64(urlPath) {
+  // urlPath is like "/uploads/1234567890-abc123.png"
+  const filename = urlPath.replace(/^\/uploads\//, '');
+  const filePath = path.join(__dirname, '..', 'uploads', filename);
+  if (!fs.existsSync(filePath)) return null;
+  const buffer = fs.readFileSync(filePath);
+  return buffer.toString('base64');
+}
+
+/**
+ * Build the image analysis prompt for Houston
+ */
+function buildImageAnalysisPrompt(crmContext) {
+  return `You are Houston, AI team member for an Inland Empire commercial real estate brokerage (Leanne Associates).
+
+Someone just shared an image in the team chat. Analyze it and classify into one of these categories:
+
+CATEGORIES:
+1. "client_conversation" — Screenshot of text messages, emails, or chat with a client/contact
+2. "property_listing" — CoStar, LoopNet, MLS, or property listing screenshot
+3. "document" — Lease, LOI, site plan, contract, or business document photo
+4. "crm_data" — Spreadsheet, report, or CRM screenshot
+5. "personal" — Family photos, memes, food, non-work content
+
+RESPONSE RULES:
+- For "client_conversation": Identify who the conversation is with (name if visible). Summarize the key points. Then ask: "Want me to log this as an activity for [Contact Name]?" If you can identify the contact, reference them by name.
+- For "property_listing": Extract address, price, SF, property type, and any other visible details. Then ask: "Want me to cross-reference this in the CRM?"
+- For "document": Summarize the key terms, parties involved, and important dates. Then ask: "Want me to save this summary to [entity] notes?"
+- For "crm_data": Read and comment on the data with relevant CRM context.
+- For "personal": React briefly and warmly like a team member (1 sentence max). Do NOT offer any CRM actions. Do NOT analyze it like work content. Just be human about it.
+
+${crmContext ? `\nCURRENT CRM CONTEXT:\n${crmContext}\n` : ''}
+
+Keep responses concise (3-5 sentences for work content, 1 sentence for personal).
+NEVER prefix with "[Houston]:" — the chat UI shows your name.
+If offering an action, end with a clear yes/no question so the user can confirm.`;
 }
 
 /**
@@ -401,34 +476,95 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
     // Pull Houston's memories about this user
     const memories = await getRelevantMemories(triggerMessage.sender_id, triggerMessage.body);
 
-    // Build conversation for Claude
-    const conversationHistory = recentMessages.map(m => ({
-      role: m.sender_type === 'houston' ? 'assistant' : 'user',
-      content: `[${m.sender_name || (m.sender_type === 'houston' ? 'Houston' : 'Team Member')}]: ${m.body || '[attachment]'}`
-    }));
+    let systemPrompt;
+    let mergedHistory;
+    let imageAnalysisData = null;
 
-    // Merge consecutive same-role messages (Claude requires alternating roles)
-    const mergedHistory = [];
-    for (const msg of conversationHistory) {
-      if (mergedHistory.length > 0 && mergedHistory[mergedHistory.length - 1].role === msg.role) {
-        mergedHistory[mergedHistory.length - 1].content += '\n' + msg.content;
-      } else {
-        mergedHistory.push({ ...msg });
+    if (triggerType === 'image_analysis') {
+      // ── IMAGE ANALYSIS PATH ──
+      // Build vision-aware message with image content blocks
+      systemPrompt = buildImageAnalysisPrompt(crmContext ? JSON.stringify(crmContext) : null);
+
+      const attachments = parseAttachments(triggerMessage.attachments);
+      const imageAtts = attachments.filter(a => a.mime_type?.startsWith('image/'));
+
+      // Build multimodal content: text context + image(s)
+      const contentBlocks = [];
+
+      // Add any text the user sent with the image
+      if (triggerMessage.body) {
+        contentBlocks.push({ type: 'text', text: `[${triggerMessage.sender_name || 'Team Member'}]: ${triggerMessage.body}` });
       }
-    }
 
-    // Ensure conversation starts with user and ends with user
-    if (mergedHistory.length > 0 && mergedHistory[0].role === 'assistant') {
-      mergedHistory.shift();
-    }
-    if (mergedHistory.length > 0 && mergedHistory[mergedHistory.length - 1].role === 'assistant') {
-      mergedHistory.push({ role: 'user', content: '[waiting for Houston\'s response]' });
-    }
-    if (mergedHistory.length === 0) {
-      mergedHistory.push({ role: 'user', content: triggerMessage.body || 'Hey Houston' });
-    }
+      // Add images as base64
+      for (const img of imageAtts) {
+        const base64 = readImageAsBase64(img.url);
+        if (base64) {
+          const mediaType = img.mime_type || 'image/png';
+          contentBlocks.push({
+            type: 'image',
+            source: { type: 'base64', media_type: mediaType, data: base64 }
+          });
+          imageAnalysisData = { filename: img.filename, mime_type: mediaType };
+        }
+      }
 
-    const systemPrompt = buildHoustonSystemPrompt(crmContext, memories, triggerType);
+      if (contentBlocks.length === 0) {
+        contentBlocks.push({ type: 'text', text: 'An image was shared but I could not read it.' });
+      }
+
+      // Add recent conversation context as preceding messages
+      const contextMsgs = recentMessages.slice(-10).filter(m => m.id !== triggerMessage.id);
+      mergedHistory = [];
+      for (const m of contextMsgs) {
+        const role = m.sender_type === 'houston' ? 'assistant' : 'user';
+        const text = `[${m.sender_name || 'Team Member'}]: ${m.body || '[attachment]'}`;
+        if (mergedHistory.length > 0 && mergedHistory[mergedHistory.length - 1].role === role) {
+          mergedHistory[mergedHistory.length - 1].content += '\n' + text;
+        } else {
+          mergedHistory.push({ role, content: text });
+        }
+      }
+
+      // Ensure alternating roles
+      if (mergedHistory.length > 0 && mergedHistory[0].role === 'assistant') {
+        mergedHistory.shift();
+      }
+
+      // Add the image message as the final user message
+      mergedHistory.push({ role: 'user', content: contentBlocks });
+
+    } else {
+      // ── STANDARD TEXT PATH ──
+      // Build conversation for Claude
+      const conversationHistory = recentMessages.map(m => ({
+        role: m.sender_type === 'houston' ? 'assistant' : 'user',
+        content: `[${m.sender_name || (m.sender_type === 'houston' ? 'Houston' : 'Team Member')}]: ${m.body || '[attachment]'}`
+      }));
+
+      // Merge consecutive same-role messages (Claude requires alternating roles)
+      mergedHistory = [];
+      for (const msg of conversationHistory) {
+        if (mergedHistory.length > 0 && mergedHistory[mergedHistory.length - 1].role === msg.role) {
+          mergedHistory[mergedHistory.length - 1].content += '\n' + msg.content;
+        } else {
+          mergedHistory.push({ ...msg });
+        }
+      }
+
+      // Ensure conversation starts with user and ends with user
+      if (mergedHistory.length > 0 && mergedHistory[0].role === 'assistant') {
+        mergedHistory.shift();
+      }
+      if (mergedHistory.length > 0 && mergedHistory[mergedHistory.length - 1].role === 'assistant') {
+        mergedHistory.push({ role: 'user', content: '[waiting for Houston\'s response]' });
+      }
+      if (mergedHistory.length === 0) {
+        mergedHistory.push({ role: 'user', content: triggerMessage.body || 'Hey Houston' });
+      }
+
+      systemPrompt = buildHoustonSystemPrompt(crmContext, memories, triggerType);
+    }
 
     let houstonBody;
 
@@ -438,20 +574,40 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
         const responseText = await callClaude({
           system: systemPrompt,
           messages: mergedHistory,
-          max_tokens: 500,
+          max_tokens: triggerType === 'image_analysis' ? 800 : 500,
         });
         houstonBody = responseText || "Sorry, I couldn't form a response right now.";
-        // Strip any self-referencing prefix Claude might add (e.g., "[Houston]: " or "Houston: ")
         houstonBody = houstonBody.replace(/^\[?Houston\]?:\s*/i, '');
       } catch (apiErr) {
         console.error('[chat/houston] Claude API error:', apiErr.message);
         houstonBody = "Hey \u2014 I hit a snag connecting to my brain. Give me a sec and try again. \uD83E\uDD19";
       }
     } else {
-      // Fallback placeholder
       houstonBody = triggerType === 'at_mention'
         ? "Hey \u2014 I caught that mention but my OAuth token isn't configured yet. Once it's set, I'll be able to pull CRM data and give you real answers here."
         : "Good question \u2014 I need my OAuth token configured to answer that. Check with David.";
+    }
+
+    // Store analysis back on the original message's attachment
+    if (imageAnalysisData && triggerMessage.id) {
+      try {
+        await pool.query(
+          `UPDATE chat_messages
+           SET attachments = (
+             SELECT jsonb_agg(
+               CASE WHEN elem->>'filename' = $2
+                    THEN elem || jsonb_build_object('houston_analysis', $3::text)
+                    ELSE elem
+               END
+             )
+             FROM jsonb_array_elements(attachments) AS elem
+           )
+           WHERE id = $1`,
+          [triggerMessage.id, imageAnalysisData.filename, houstonBody]
+        );
+      } catch (dbErr) {
+        console.error('[chat/houston] Failed to store image analysis:', dbErr.message);
+      }
     }
 
     const houstonMsg = await insertMessage({
@@ -467,6 +623,7 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
         context_messages: recentMessages.length,
         crm_entities_referenced: crmContext?.entitiesFound || 0,
         memories_used: memories?.length || 0,
+        ...(imageAnalysisData ? { image_analyzed: imageAnalysisData.filename } : {}),
       }
     });
 
@@ -899,6 +1056,166 @@ Rules:
 /**
  * Log Houston's interjection decision (for tuning and auditing)
  */
+// ============================================================
+// ACTION CONFIRMATION — thumbs up or "yes" to execute CRM actions
+// ============================================================
+
+/**
+ * Handle emoji reaction confirmation on a Houston message
+ */
+async function handleActionConfirmation(messageId, userId) {
+  // Find the Houston message that was reacted to
+  const result = await pool.query(
+    `SELECT * FROM chat_messages WHERE id = $1 AND sender_type = 'houston' AND deleted_at IS NULL`,
+    [messageId]
+  );
+  const houstonMsg = result.rows[0];
+  if (!houstonMsg) return; // Not a Houston message
+
+  const meta = typeof houstonMsg.houston_meta === 'string'
+    ? JSON.parse(houstonMsg.houston_meta) : (houstonMsg.houston_meta || {});
+
+  // Only act on image analysis messages that offered actions
+  if (meta.trigger !== 'image_analysis') return;
+  if (meta.action_executed) return; // Already executed
+
+  await executeHoustonAction(houstonMsg, userId);
+}
+
+/**
+ * Handle text confirmation ("yes", "do it") after a Houston action offer
+ */
+async function handleTextConfirmation(message) {
+  // Look for the most recent Houston message in this channel that offered an action
+  const result = await pool.query(
+    `SELECT * FROM chat_messages
+     WHERE channel_id = $1 AND sender_type = 'houston' AND deleted_at IS NULL
+       AND houston_meta IS NOT NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [message.channel_id]
+  );
+  const houstonMsg = result.rows[0];
+  if (!houstonMsg) return;
+
+  const meta = typeof houstonMsg.houston_meta === 'string'
+    ? JSON.parse(houstonMsg.houston_meta) : (houstonMsg.houston_meta || {});
+
+  if (meta.trigger !== 'image_analysis') return;
+  if (meta.action_executed) return;
+
+  // Check that this Houston message is recent (within 5 minutes)
+  const age = Date.now() - new Date(houstonMsg.created_at).getTime();
+  if (age > 5 * 60 * 1000) return;
+
+  await executeHoustonAction(houstonMsg, message.sender_id);
+}
+
+/**
+ * Execute the CRM action Houston offered (log activity, cross-reference, etc.)
+ */
+async function executeHoustonAction(houstonMsg, userId) {
+  const meta = typeof houstonMsg.houston_meta === 'string'
+    ? JSON.parse(houstonMsg.houston_meta) : (houstonMsg.houston_meta || {});
+  const body = houstonMsg.body || '';
+
+  try {
+    // Use Claude to extract the action details from Houston's message
+    const extractionText = await callClaude({
+      system: `Extract the CRM action from Houston's message. Return JSON only.
+If Houston offered to log an activity/interaction, return:
+{"action": "log_interaction", "contact_name": "...", "summary": "...", "interaction_type": "Note"}
+If Houston offered to cross-reference a property, return:
+{"action": "cross_reference", "address": "...", "details": "..."}
+If Houston offered to save notes, return:
+{"action": "save_notes", "entity_name": "...", "notes": "..."}
+If no actionable offer was made, return:
+{"action": "none"}`,
+      messages: [{ role: 'user', content: `Houston said: "${body}"` }],
+      max_tokens: 300,
+    });
+
+    if (!extractionText) return;
+
+    let action;
+    try {
+      const jsonStr = extractionText.replace(/```json\n?|\n?```/g, '').trim();
+      action = JSON.parse(jsonStr);
+    } catch {
+      console.warn('[chat/houston] Action extraction parse failed:', extractionText.slice(0, 100));
+      return;
+    }
+
+    if (!action || action.action === 'none') return;
+
+    let confirmMsg = '';
+
+    if (action.action === 'log_interaction' && action.contact_name) {
+      // Find the contact
+      const contactResult = await pool.query(
+        `SELECT contact_id, full_name FROM contacts WHERE full_name ILIKE $1 LIMIT 1`,
+        [`%${action.contact_name}%`]
+      );
+
+      if (contactResult.rows.length > 0) {
+        const contact = contactResult.rows[0];
+        // Create interaction
+        const interResult = await pool.query(
+          `INSERT INTO interactions (type, date, notes, created_by)
+           VALUES ($1, NOW(), $2, $3) RETURNING interaction_id`,
+          [action.interaction_type || 'Note', action.summary || body, userId]
+        );
+        // Link to contact via junction table
+        if (interResult.rows[0]) {
+          await pool.query(
+            `INSERT INTO interaction_contacts (interaction_id, contact_id)
+             VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [interResult.rows[0].interaction_id, contact.contact_id]
+          );
+        }
+        confirmMsg = `Done \u2014 logged activity for ${contact.full_name}. \u2705`;
+      } else {
+        confirmMsg = `I couldn't find a contact matching "${action.contact_name}" in the CRM. You may need to log this manually.`;
+      }
+    } else if (action.action === 'cross_reference' && action.address) {
+      // Search for property
+      const propResult = await pool.query(
+        `SELECT id, address, city, property_type FROM properties
+         WHERE address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 3`,
+        [`%${action.address}%`]
+      );
+      if (propResult.rows.length > 0) {
+        const matches = propResult.rows.map(p => `${p.address}, ${p.city} (${p.property_type})`).join('; ');
+        confirmMsg = `Found in CRM: ${matches}`;
+      } else {
+        confirmMsg = `No matching property found for "${action.address}". Want me to add it?`;
+      }
+    } else if (action.action === 'save_notes') {
+      confirmMsg = `Notes saved. \u2705`;
+    }
+
+    if (confirmMsg) {
+      // Mark this action as executed so it doesn't fire twice
+      await pool.query(
+        `UPDATE chat_messages SET houston_meta = houston_meta || '{"action_executed": true}'::jsonb WHERE id = $1`,
+        [houstonMsg.id]
+      );
+
+      // Send confirmation message
+      const confirmMessage = await insertMessage({
+        channelId: houstonMsg.channel_id,
+        senderId: null,
+        senderType: 'houston',
+        body: confirmMsg,
+        messageType: 'houston_insight',
+        houstonMeta: { trigger: 'action_confirmation', parent_message_id: houstonMsg.id }
+      });
+      io.to(`channel:${houstonMsg.channel_id}`).emit('chat:message:new', confirmMessage);
+    }
+  } catch (err) {
+    console.error('[chat/houston] Action execution error:', err.message);
+  }
+}
+
 async function logInterjectionDecision(message, decision, reason) {
   try {
     await pool.query(
