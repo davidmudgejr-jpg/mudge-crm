@@ -376,6 +376,16 @@ async function evaluateHoustonInterjection(message) {
   const body = (message.body || '').toLowerCase();
   const attachments = parseAttachments(message.attachments);
 
+  // Houston DM channels — ALWAYS respond (personal 1-on-1 with Houston)
+  try {
+    const chResult = await pool.query(`SELECT channel_type FROM chat_channels WHERE id = $1`, [message.channel_id]);
+    if (chResult.rows[0]?.channel_type === 'houston_dm') {
+      const imageAtts = parseAttachments(message.attachments).filter(a => a.mime_type?.startsWith('image/'));
+      await triggerHoustonResponse(message, imageAtts.length > 0 ? 'image_analysis' : 'at_mention');
+      return;
+    }
+  } catch {}
+
   // Level 0: Image attachment — always analyze (Houston decides relevance)
   const imageAttachments = attachments.filter(a => a.mime_type?.startsWith('image/'));
   if (imageAttachments.length > 0) {
@@ -1368,6 +1378,42 @@ function registerChatRoutes(app) {
     } catch (err) {
       console.error('[chat] POST /seed error:', err.message);
       res.status(500).json({ error: 'Failed to seed channels' });
+    }
+  });
+
+  // GET /api/chat/houston-dm — get or create user's personal Houston channel
+  app.get('/api/chat/houston-dm', async (req, res) => {
+    try {
+      const userId = req.query.userId;
+      if (!userId) return res.status(400).json({ error: 'userId required' });
+
+      // Check for existing houston_dm channel for this user
+      let result = await pool.query(
+        `SELECT c.id FROM chat_channels c
+         JOIN chat_channel_members m ON c.id = m.channel_id
+         WHERE c.channel_type = 'houston_dm' AND m.user_id = $1
+         LIMIT 1`,
+        [userId]
+      );
+
+      if (result.rows.length > 0) {
+        return res.json({ channelId: result.rows[0].id });
+      }
+
+      // Create new houston_dm channel
+      const userName = await pool.query(`SELECT display_name FROM users WHERE user_id = $1`, [userId]);
+      const name = `Houston DM - ${userName.rows[0]?.display_name || 'User'}`;
+      const insert = await pool.query(
+        `INSERT INTO chat_channels (name, channel_type, created_by) VALUES ($1, 'houston_dm', $2) RETURNING id`,
+        [name, userId]
+      );
+      const channelId = insert.rows[0].id;
+      await ensureMembership(channelId, userId);
+
+      res.json({ channelId, created: true });
+    } catch (err) {
+      console.error('[chat] GET /houston-dm error:', err.message);
+      res.status(500).json({ error: 'Failed to get Houston DM' });
     }
   });
 }

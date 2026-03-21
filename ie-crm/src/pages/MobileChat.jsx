@@ -2,7 +2,7 @@
 // Two modes: Team Chat + Houston Direct (1-on-1)
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useChat, fetchChannels, seedChannels, uploadFile } from '../hooks/useChat';
+import { useChat, fetchChannels, seedChannels, uploadFile, fetchHoustonDmChannel } from '../hooks/useChat';
 import { useAuth } from '../contexts/AuthContext';
 
 const HOUSTON_COLOR = '#10b981';
@@ -106,9 +106,10 @@ function TypingDots({ users }) {
 // ── Main Page ──
 export default function MobileChat() {
   const { user } = useAuth();
-  const [channels, setChannels] = useState([]);
-  const [activeChannelId, setActiveChannelId] = useState(null);
+  const [teamChannelId, setTeamChannelId] = useState(null);
+  const [houstonChannelId, setHoustonChannelId] = useState(null);
   const [mode, setMode] = useState('team'); // 'team' | 'houston'
+  const activeChannelId = mode === 'houston' ? houstonChannelId : teamChannelId;
   const [imagePreview, setImagePreview] = useState(null);
   const [text, setText] = useState('');
   const messagesEndRef = useRef(null);
@@ -124,15 +125,19 @@ export default function MobileChat() {
     sendMessage, sendTyping, stopTyping, markRead,
   } = useChat(user?.user_id, activeChannelId);
 
-  // Load channels
+  // Load both channels on mount
   useEffect(() => {
     if (!user?.user_id) return;
     (async () => {
       try {
+        // Team channel
         await seedChannels();
         const chs = await fetchChannels(user.user_id);
-        setChannels(chs);
-        if (chs.length > 0 && !activeChannelId) setActiveChannelId(chs[0].id);
+        if (chs.length > 0) setTeamChannelId(chs[0].id);
+
+        // Houston DM channel (auto-created per user)
+        const { channelId: houstonId } = await fetchHoustonDmChannel(user.user_id);
+        setHoustonChannelId(houstonId);
       } catch (err) {
         console.error('[MobileChat] Failed to load channels:', err);
       }
@@ -176,11 +181,7 @@ export default function MobileChat() {
   const handleSend = () => {
     const trimmed = text.trim();
     if (!trimmed) return;
-    // In Houston Direct mode, prefix with @houston if not already
-    const body = mode === 'houston' && !trimmed.toLowerCase().includes('@houston')
-      ? `@houston ${trimmed}`
-      : trimmed;
-    sendMessage(body);
+    sendMessage(trimmed);
     setText('');
     typingRef.current = false;
     stopTyping();
@@ -214,10 +215,8 @@ export default function MobileChat() {
     return (new Date(msg.created_at) - new Date(prev.created_at)) > 5 * 60 * 1000;
   }
 
-  // Filter messages for Houston Direct mode
-  const displayMessages = mode === 'houston'
-    ? messages.filter(m => m.sender_id === user?.user_id || m.sender_type === 'houston')
-    : messages;
+  // Messages come from the active channel — no filtering needed
+  const displayMessages = messages;
 
   return (
     <div className="flex flex-col h-[100dvh] bg-crm-bg text-crm-text">
@@ -232,7 +231,7 @@ export default function MobileChat() {
             <div className="flex items-center justify-center gap-1">
               <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400' : 'bg-red-400'}`} />
               <span className="text-[10px] text-crm-muted">
-                {connected ? (mode === 'houston' ? 'Online' : 'Houston listening') : 'Reconnecting...'}
+                {connected ? (mode === 'houston' ? 'Online' : 'Houston online') : 'Reconnecting...'}
               </span>
             </div>
           </div>
@@ -242,7 +241,7 @@ export default function MobileChat() {
         {/* Mode toggle */}
         <div className="flex px-4 pb-2 gap-1">
           <button
-            onClick={() => setMode('team')}
+            onClick={() => { setMode('team'); prevMsgCount.current = 0; setScrollReady(false); }}
             className={`flex-1 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
               mode === 'team'
                 ? 'bg-crm-accent text-white'
@@ -252,7 +251,7 @@ export default function MobileChat() {
             Team
           </button>
           <button
-            onClick={() => setMode('houston')}
+            onClick={() => { setMode('houston'); prevMsgCount.current = 0; setScrollReady(false); }}
             className={`flex-1 py-1.5 rounded-full text-[13px] font-medium transition-colors ${
               mode === 'houston'
                 ? 'bg-emerald-500 text-white'

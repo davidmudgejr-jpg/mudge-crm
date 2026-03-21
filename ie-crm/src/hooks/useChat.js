@@ -302,3 +302,11 @@ export async function fetchUnreadCount(userId) {
   if (!res.ok) return { unread: 0 };
   return res.json();
 }
+
+export async function fetchHoustonDmChannel(userId) {
+  const res = await fetch(`${API_BASE}/api/chat/houston-dm?userId=${userId}`, {
+    headers: authHeaders()
+  });
+  if (!res.ok) throw new Error('Failed to get Houston DM channel');
+  return res.json();
+}
