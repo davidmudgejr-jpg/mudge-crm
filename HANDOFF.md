@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-20 (Phase 5C: Team Chat + Houston AI brain + RAG memory)
-> Previous sessions: (1) AI fleet architecture — 3-machine OpenClaw fleet, MVA scoring as TPE Model 6, Reonomy-anchored data pipeline, 14 agents, continuous 24/7 processing. (2) Team Chat — Socket.io + Houston AI brain with Claude Sonnet, RAG memory system (preferences, key facts, relationships), infinite scroll message history, CRM context queries with per-section error isolation. Migration 020_team_chat.sql applied.
-> Next tasks: **Image analysis** (Houston reading uploaded screenshots), **"+ New View" save flow** (plan exists in .claude/plans/), **Git cleanup** (merge feature branches), **Email strategies session**, **Auth/RBAC (Phase 4)**.
+> Updated: 2026-03-21 (Phase 5D: Git cleanup + Chat UX overhaul + Houston image analysis + OAuth migration)
+> Previous sessions: (1) AI fleet architecture — 3-machine OpenClaw fleet, MVA scoring as TPE Model 6, Reonomy-anchored data pipeline, 14 agents, continuous 24/7 processing. (2) Team Chat — Socket.io + Houston AI brain with Claude Sonnet, RAG memory system (preferences, key facts, relationships), infinite scroll message history, CRM context queries with per-section error isolation. Migration 020_team_chat.sql applied. (3) Git cleanup — merged all feature branches into main (34 commits, 164 files). Chat UX overhaul — draggable, resizable, non-blocking chat. Houston image analysis via Claude Vision API. All Claude calls switched to OAuth (Claude Max subscription).
+> Next tasks: **"+ New View" save flow** (plan exists in .claude/plans/), **Email strategies session**, **Auth/RBAC (Phase 4)**, **Test Houston image analysis end-to-end**.
 
 ---
 
@@ -158,6 +158,45 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **CLAUDE.md rewritten** — removed Electron references, updated for Vercel/Railway/Neon web deployment, added AI Master System section
 - [x] **Memory system built** — 8 files in `.claude/projects/.../memory/`: user_profile, project_architecture, project_status, project_competitive_edge, feedback_coding_style, feedback_communication, reference_external_systems, reference_key_documents
 - [x] **Multiple tenant companies confirmed** — property_companies junction table supports unlimited companies per property (5 properties already have 2+ linked)
+
+### Git Cleanup & Branch Consolidation ✅ (2026-03-21)
+- [x] **Merged `feature/ai-ops-dashboard` into `main`** — 34 commits, 164 files, ~15k lines. Resolved merge conflicts in package.json, server/index.js, Settings.jsx
+- [x] **Fixed corrupt git objects** — re-hashed all working tree files to repair pack file gaps from multi-machine workflow
+- [x] **Deleted stale branches** — `feature/ai-ops-dashboard`, `feature/tpe-view`, `apple-inspired-ui-overhaul`, `claude/naughty-yalow`, `claude/upbeat-panini` (local + remote)
+- [x] **Single `main` branch** — clean repo, auto-deploys to Vercel + Railway
+
+### Security: Credential Rotation ✅ (2026-03-21)
+- [x] **Neon DB password rotated** — old `npg_LFY9Gyds7VDA` replaced everywhere, Railway env var updated
+- [x] **Hardcoded credentials removed** — 9 script files had inline PostgreSQL connection strings; replaced with `dotenv` + `process.env.DATABASE_URL`
+- [x] **GitGuardian alert resolved** — PostgreSQL URI no longer in any tracked files
+
+### Team Chat UX Overhaul ✅ (2026-03-21)
+- [x] **Non-blocking chat** — removed full-screen backdrop overlay; CRM stays fully interactive behind chat
+- [x] **Draggable** — grab header to move chat anywhere in the app window (useDrag hook)
+- [x] **Resizable** — drag bottom-right corner handle to resize freely (useResize hook, min 320x300)
+- [x] **Expand/Restore** — header button toggles near-full-screen mode
+- [x] **Minimize** — collapses to header bar only
+- [x] **Unread badge** — red count badge on toggle button when chat is closed, polls every 15s
+- [x] **Scroll-to-bottom on open** — chat opens instantly at most recent messages, no flash/jump
+- [x] **Future: detachable window** — when Mac desktop app is built (Electron/Tauri), chat can be dragged out of the app into its own OS window
+
+### Houston OAuth Migration ✅ (2026-03-21)
+- [x] **Houston brain switched to OAuth** — `ANTHROPIC_OAUTH_TOKEN` via fetch (not SDK), runs on Claude Max subscription (no API credit burn)
+- [x] **Server Anthropic client prefers OAuth** — falls back to API key if no OAuth token
+- [x] **All Claude calls use `claude-sonnet-4-6`** — consistent model across Houston brain, ClaudePanel, ElevenLabs ConvAI route
+- [x] **dotenv Node 25 fix** — `override: true` flag for dotenv compatibility with Node 25 native .env loading
+- [x] **express-rate-limit IPv6 fix** — custom keyGenerator no longer triggers IPv6 validation error
+
+### Houston Image Analysis ✅ (2026-03-21)
+- [x] **Claude Vision integration** — images uploaded to chat are read from disk as base64 and sent to Claude Vision API
+- [x] **5-category classification** — `client_conversation`, `property_listing`, `document`, `crm_data`, `personal`
+- [x] **Smart behavior per category** — work images get analysis + action offers; personal photos get brief friendly reactions (no CRM spam)
+- [x] **Action confirmation flow** — thumbs up emoji or "yes"/"do it" text confirms Houston's offered action
+- [x] **Auto-create interactions** — for `client_conversation` screenshots: Houston identifies contact, summarizes convo, creates interaction record linked to contact on confirmation
+- [x] **Cross-reference properties** — for `property_listing` screenshots: Houston extracts address and searches CRM
+- [x] **Analysis stored** — `houston_analysis` field in attachment JSONB for future reference
+- [x] **Action deduplication** — `houston_meta.action_executed` flag prevents double-execution
+- [x] **5-minute timeout** — text confirmations only work within 5 minutes of Houston's offer
 
 ### AI Ops 3D War Room ✅ (2026-03-18)
 - [x] **Full Three.js rebuild** — Replaced flat SVG isometric room with real 3D scene using `three`, `@react-three/fiber`, `@react-three/drei`, `gsap`
