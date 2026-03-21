@@ -39,6 +39,7 @@ import InteractionDetail from './pages/InteractionDetail';
 import ActionItemDetail from './pages/ActionItemDetail';
 import CompDetail from './pages/CompDetail';
 import CampaignDetail from './pages/CampaignDetail';
+import MobileChat from './pages/MobileChat';
 
 const DETAIL_COMPONENTS = {
   property: PropertyDetail,
@@ -180,7 +181,10 @@ function AuthGate() {
     <DevModeProvider>
       <ToastProvider>
         <SlideOverProvider>
-          <AppShell />
+          <Routes>
+            <Route path="/chat" element={<MobileChat />} />
+            <Route path="*" element={<AppShell />} />
+          </Routes>
         </SlideOverProvider>
       </ToastProvider>
     </DevModeProvider>
