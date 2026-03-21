@@ -392,11 +392,29 @@ export default function TeamChat({ isOpen, onClose }) {
 
   // Auto-scroll to bottom on new messages (only if already near bottom)
   const prevMsgCountRef = useRef(0);
+  const initialScrollDone = useRef(false);
   useEffect(() => {
-    const container = chatContainerRef.current;
-    if (!container) return;
+    // Reset scroll tracking when chat opens
+    if (!isOpen) {
+      initialScrollDone.current = false;
+      prevMsgCountRef.current = 0;
+      return;
+    }
 
-    if (messages.length > prevMsgCountRef.current && prevMsgCountRef.current > 0) {
+    const container = chatContainerRef.current;
+    if (!container || messages.length === 0) return;
+
+    // Initial load — scroll to bottom after a short delay so DOM renders
+    if (!initialScrollDone.current) {
+      initialScrollDone.current = true;
+      requestAnimationFrame(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      });
+      prevMsgCountRef.current = messages.length;
+      return;
+    }
+
+    if (messages.length > prevMsgCountRef.current) {
       const addedCount = messages.length - prevMsgCountRef.current;
       const firstNewMsg = messages[0];
       const wasLoadingOlder = addedCount > 1 && firstNewMsg?.created_at < (messages[addedCount]?.created_at || '');
@@ -407,11 +425,9 @@ export default function TeamChat({ isOpen, onClose }) {
           messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
       }
-    } else if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'auto' });
     }
     prevMsgCountRef.current = messages.length;
-  }, [messages]);
+  }, [messages, isOpen]);
 
   // Detect scroll to top for loading older messages
   useEffect(() => {
