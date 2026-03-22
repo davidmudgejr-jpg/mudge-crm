@@ -112,6 +112,7 @@ export default function MobileChat() {
   const activeChannelId = mode === 'houston' ? houstonChannelId : teamChannelId;
   const [imagePreview, setImagePreview] = useState(null);
   const [text, setText] = useState('');
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [viewportHeight, setViewportHeight] = useState('100dvh');
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
@@ -225,6 +226,7 @@ export default function MobileChat() {
         URL.revokeObjectURL(pendingImage.previewUrl);
         setPendingImage(null);
         setText('');
+        if (inputRef.current) inputRef.current.textContent = '';
         typingRef.current = false;
         stopTyping();
         clearTimeout(typingTimer.current);
@@ -236,18 +238,14 @@ export default function MobileChat() {
     if (!trimmed) return;
     sendMessage(trimmed);
     setText('');
+    if (inputRef.current) inputRef.current.textContent = '';
     typingRef.current = false;
     stopTyping();
     clearTimeout(typingTimer.current);
     inputRef.current?.focus();
   };
 
-  const handleChange = (e) => {
-    setText(e.target.value);
-    if (!typingRef.current) { typingRef.current = true; sendTyping(user?.display_name); }
-    clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() => { typingRef.current = false; stopTyping(); }, 2000);
-  };
+  // handleChange removed — contentEditable uses onInput directly
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -430,7 +428,7 @@ export default function MobileChat() {
       )}
 
       {/* ── Input bar ── */}
-      <div className="flex items-end gap-1.5 px-2 py-1 flex-shrink-0" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 4px)' }}>
+      <div className="flex items-end gap-1.5 px-2 py-1 flex-shrink-0 border-t border-gray-200/30" style={{ paddingBottom: keyboardOpen ? '0px' : 'env(safe-area-inset-bottom, 0px)' }}>
         <button
           onClick={() => fileInputRef.current?.click()}
           className="w-9 h-9 flex items-center justify-center text-crm-accent rounded-full flex-shrink-0 mb-0.5"
@@ -447,20 +445,28 @@ export default function MobileChat() {
           accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
           onChange={handleFileChange}
         />
-        <div className="flex-1 min-h-[36px] rounded-full border border-crm-border/40 flex items-end overflow-hidden">
-          <textarea
+        <div className="flex-1 min-h-[36px] rounded-full border border-crm-border/40 flex items-end overflow-hidden bg-white/5">
+          <div
             ref={inputRef}
-            value={text}
-            onChange={handleChange}
+            contentEditable
+            role="textbox"
+            onInput={(e) => {
+              const val = e.currentTarget.textContent || '';
+              setText(val);
+              if (!typingRef.current) { typingRef.current = true; sendTyping(user?.display_name); }
+              clearTimeout(typingTimer.current);
+              typingTimer.current = setTimeout(() => { typingRef.current = false; stopTyping(); }, 2000);
+            }}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
             onPaste={handlePaste}
-            placeholder={pendingImage ? 'Add a caption...' : (mode === 'houston' ? 'Ask Houston...' : 'Message...')}
-            rows={1}
-            className="flex-1 bg-transparent text-[16px] text-crm-text placeholder-crm-muted/50 px-4 py-2 resize-none outline-none max-h-24 leading-[20px]"
-            style={{ minHeight: '36px', WebkitAppearance: 'none' }}
+            onFocus={() => setKeyboardOpen(true)}
+            onBlur={() => setKeyboardOpen(false)}
+            data-placeholder={pendingImage ? 'Add a caption...' : (mode === 'houston' ? 'Ask Houston...' : 'Message...')}
+            className="flex-1 bg-transparent text-[16px] text-crm-text px-4 py-2 outline-none max-h-24 leading-[20px] empty:before:content-[attr(data-placeholder)] empty:before:text-crm-muted/50 whitespace-pre-wrap break-words"
+            style={{ minHeight: '36px', WebkitAppearance: 'none', WebkitUserSelect: 'text', userSelect: 'text' }}
           />
         </div>
-        {(text.trim() || pendingImage) ? (
+        {(text.trim() || pendingImage) && (
           <button
             onClick={handleSend}
             disabled={uploading}
@@ -468,16 +474,6 @@ export default function MobileChat() {
           >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25H13.5a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
-            </svg>
-          </button>
-        ) : (
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="w-9 h-9 flex items-center justify-center text-crm-muted/40 rounded-full flex-shrink-0 mb-0.5"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </button>
         )}
