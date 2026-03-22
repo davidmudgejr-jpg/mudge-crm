@@ -112,50 +112,12 @@ export default function MobileChat() {
   const activeChannelId = mode === 'houston' ? houstonChannelId : teamChannelId;
   const [imagePreview, setImagePreview] = useState(null);
   const [text, setText] = useState('');
-  const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [inputBarBottom, setInputBarBottom] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(window.innerHeight);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const inputRef = useRef(null);
-  const inputBarRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingRef = useRef(false);
   const typingTimer = useRef(null);
-
-  // Visual Viewport API — position input bar flush against keyboard
-  // On iOS Safari, the accessory bar sits between content and keyboard.
-  // By using position:fixed and tracking visualViewport, we place the input
-  // bar at the exact bottom of the visual viewport, visually covering the gap.
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    const update = () => {
-      // visualViewport.height = visible area (excludes keyboard + accessory bar)
-      // visualViewport.offsetTop = scroll offset of visual viewport within layout viewport
-      const bottom = window.innerHeight - (vv.height + vv.offsetTop);
-      setInputBarBottom(bottom);
-      setViewportHeight(vv.height + vv.offsetTop);
-
-      // Auto-scroll messages to bottom when keyboard opens
-      const container = chatContainerRef.current;
-      if (container) {
-        requestAnimationFrame(() => {
-          container.scrollTop = container.scrollHeight;
-        });
-      }
-    };
-
-    vv.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
-    update();
-
-    return () => {
-      vv.removeEventListener('resize', update);
-      vv.removeEventListener('scroll', update);
-    };
-  }, []);
 
   const {
     messages, typingUsers, connected, loading,
@@ -246,7 +208,6 @@ export default function MobileChat() {
         URL.revokeObjectURL(pendingImage.previewUrl);
         setPendingImage(null);
         setText('');
-        if (inputRef.current) inputRef.current.textContent = '';
         typingRef.current = false;
         stopTyping();
         clearTimeout(typingTimer.current);
@@ -258,14 +219,11 @@ export default function MobileChat() {
     if (!trimmed) return;
     sendMessage(trimmed);
     setText('');
-    if (inputRef.current) inputRef.current.textContent = '';
     typingRef.current = false;
     stopTyping();
     clearTimeout(typingTimer.current);
     inputRef.current?.focus();
   };
-
-  // handleChange removed — contentEditable uses onInput directly
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -325,24 +283,11 @@ export default function MobileChat() {
   // Messages come from the active channel — no filtering needed
   const displayMessages = messages;
 
-  // Compute input bar height for bottom padding on messages
-  const [inputBarHeight, setInputBarHeight] = useState(52);
-  useEffect(() => {
-    if (!inputBarRef.current) return;
-    const ro = new ResizeObserver(entries => {
-      for (const entry of entries) {
-        setInputBarHeight(entry.borderBoxSize?.[0]?.blockSize || entry.contentRect.height + 12);
-      }
-    });
-    ro.observe(inputBarRef.current);
-    return () => ro.disconnect();
-  }, []);
+  // Input bar is a fixed height — use constant for message padding
+  const INPUT_BAR_HEIGHT = 52;
 
   return (
-    <div
-      className="fixed inset-0 flex flex-col bg-crm-bg text-crm-text overflow-hidden"
-      style={{ height: viewportHeight + 'px' }}
-    >
+    <div className="fixed inset-0 flex flex-col bg-crm-bg text-crm-text overflow-hidden">
       {/* ── Header ── */}
       <div className="flex-shrink-0 bg-crm-bg/90 backdrop-blur-xl border-b border-crm-border/20 z-10" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="flex items-center justify-between px-4 py-2">
@@ -390,7 +335,7 @@ export default function MobileChat() {
       <div
         ref={chatContainerRef}
         className={`flex-1 overflow-y-auto px-3 py-2 ${scrollReady || loading || displayMessages.length === 0 ? '' : 'invisible'}`}
-        style={{ paddingBottom: inputBarHeight + (pendingImage ? 110 : 0) + 8 }}
+        style={{ paddingBottom: INPUT_BAR_HEIGHT + (pendingImage ? 110 : 0) + 8 }}
       >
         {loadingOlder && (
           <div className="flex justify-center py-3">
@@ -437,15 +382,9 @@ export default function MobileChat() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── Fixed Input Bar — positioned at bottom of visual viewport ── */}
-      {/* On iOS, this sits right at the keyboard edge, covering the accessory bar gap */}
+      {/* ── Fixed Input Bar — simple fixed bottom, let iOS handle keyboard ── */}
       <div
-        ref={inputBarRef}
-        className="fixed left-0 right-0 z-20 bg-crm-bg"
-        style={{
-          bottom: inputBarBottom + 'px',
-          transition: keyboardOpen ? 'none' : 'bottom 0.1s ease-out',
-        }}
+        className="fixed left-0 right-0 bottom-0 z-20 bg-[#f0f0f0] dark:bg-[#1c1c1e]"
       >
         {/* Image preview strip */}
         {pendingImage && (
@@ -475,13 +414,10 @@ export default function MobileChat() {
         )}
 
         {/* Input row */}
-        <div
-          className="flex items-end gap-1.5 px-2 py-1 border-t border-crm-border/20"
-          style={{ paddingBottom: keyboardOpen ? '4px' : 'max(4px, env(safe-area-inset-bottom, 4px))' }}
-        >
+        <div className="flex items-center gap-1.5 px-2 py-1.5">
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="w-9 h-9 flex items-center justify-center text-crm-accent rounded-full flex-shrink-0 mb-0.5"
+            className="w-9 h-9 flex items-center justify-center text-crm-accent rounded-full flex-shrink-0"
           >
             <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24">
               <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" />
@@ -495,35 +431,50 @@ export default function MobileChat() {
             accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
             onChange={handleFileChange}
           />
-          <div className="flex-1 min-h-[36px] rounded-full border border-crm-border/40 flex items-end overflow-hidden bg-white/5">
-            <div
-              ref={inputRef}
-              contentEditable
-              role="textbox"
-              onInput={(e) => {
-                const val = e.currentTarget.textContent || '';
-                setText(val);
-                if (!typingRef.current) { typingRef.current = true; sendTyping(user?.display_name); }
-                clearTimeout(typingTimer.current);
-                typingTimer.current = setTimeout(() => { typingRef.current = false; stopTyping(); }, 2000);
-              }}
-              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-              onPaste={handlePaste}
-              onFocus={() => setKeyboardOpen(true)}
-              onBlur={() => setKeyboardOpen(false)}
-              data-placeholder={pendingImage ? 'Add a caption...' : (mode === 'houston' ? 'Ask Houston...' : 'Message...')}
-              className="flex-1 bg-transparent text-[16px] text-crm-text px-4 py-2 outline-none max-h-24 leading-[20px] empty:before:content-[attr(data-placeholder)] empty:before:text-crm-muted/50 whitespace-pre-wrap break-words"
-              style={{ minHeight: '36px', WebkitAppearance: 'none', WebkitUserSelect: 'text', userSelect: 'text' }}
-            />
-          </div>
-          {(text.trim() || pendingImage) && (
+          <input
+            ref={inputRef}
+            type="text"
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              if (!typingRef.current) { typingRef.current = true; sendTyping(user?.display_name); }
+              clearTimeout(typingTimer.current);
+              typingTimer.current = setTimeout(() => { typingRef.current = false; stopTyping(); }, 2000);
+            }}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSend(); } }}
+            onPaste={handlePaste}
+            placeholder={pendingImage ? 'Add a caption...' : (mode === 'houston' ? 'Ask Houston...' : 'Message...')}
+            className="flex-1 h-[36px] rounded-full border border-crm-border/40 bg-white dark:bg-white/10 text-[16px] text-crm-text px-4 outline-none"
+            style={{ fontSize: '16px' }}
+            autoComplete="off"
+            autoCorrect="on"
+            enterKeyHint="send"
+          />
+          {(text.trim() || pendingImage) ? (
             <button
               onClick={handleSend}
               disabled={uploading}
-              className={`w-9 h-9 flex items-center justify-center rounded-full flex-shrink-0 mb-0.5 active:scale-90 transition-transform ${uploading ? 'bg-crm-muted/30 text-crm-muted' : 'bg-crm-accent text-white'}`}
+              className={`w-9 h-9 flex items-center justify-center rounded-full flex-shrink-0 active:scale-90 transition-transform ${uploading ? 'bg-crm-muted/30 text-crm-muted' : 'bg-crm-accent text-white'}`}
             >
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
                 <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25H13.5a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                // Camera — trigger file input with camera capture
+                if (fileInputRef.current) {
+                  fileInputRef.current.setAttribute('capture', 'environment');
+                  fileInputRef.current.click();
+                  setTimeout(() => fileInputRef.current?.removeAttribute('capture'), 500);
+                }
+              }}
+              className="w-9 h-9 flex items-center justify-center text-crm-muted rounded-full flex-shrink-0"
+            >
+              <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0z" />
               </svg>
             </button>
           )}
