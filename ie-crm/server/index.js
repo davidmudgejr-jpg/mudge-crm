@@ -1887,6 +1887,245 @@ app.get('/api/ai/logs', async (req, res) => {
 });
 
 // ============================================================
+// COUNCIL CHANNEL ROUTES (JWT auth — user-facing)
+// ============================================================
+
+// GET /api/council/messages — Read council messages (paginated)
+app.get('/api/council/messages', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { limit = 50, before } = req.query;
+    const lim = Math.min(parseInt(limit) || 50, 200);
+
+    // Find council channel
+    const ch = await pool.query(
+      "SELECT id FROM chat_channels WHERE channel_type = 'council' LIMIT 1"
+    );
+    if (ch.rows.length === 0) {
+      return res.json([]);
+    }
+    const councilChannelId = ch.rows[0].id;
+
+    let query = `
+      SELECT m.*,
+             CASE
+               WHEN m.sender_type = 'houston' THEN COALESCE(m.houston_meta->>'sender_name', 'Houston')
+               ELSE COALESCE(u.display_name, 'Admin')
+             END AS sender_name,
+             CASE
+               WHEN m.sender_type = 'houston' AND m.message_type = 'council_action_request' THEN '#AF52DE'
+               WHEN m.sender_type = 'houston' THEN '#818cf8'
+               ELSE COALESCE(u.avatar_color, '#007AFF')
+             END AS sender_color,
+             m.houston_meta->>'message_type' AS council_message_type,
+             p.id AS proposal_id,
+             p.status AS proposal_status,
+             p.approval_notes,
+             p.reviewed_at AS proposal_reviewed_at,
+             (SELECT display_name FROM users WHERE user_id = p.approved_by) AS proposal_reviewed_by
+      FROM chat_messages m
+      LEFT JOIN users u ON m.sender_id = u.user_id
+      LEFT JOIN council_proposals p ON p.message_id = m.id
+      WHERE m.channel_id = $1 AND m.deleted_at IS NULL
+    `;
+    const params = [councilChannelId];
+
+    if (before) {
+      query += ` AND m.created_at < $${params.length + 1}`;
+      params.push(before);
+    }
+
+    query += ` ORDER BY m.created_at DESC LIMIT $${params.length + 1}`;
+    params.push(lim);
+
+    const result = await pool.query(query, params);
+    // Return chronological order (oldest first)
+    res.json(result.rows.reverse());
+  } catch (err) {
+    console.error('[council/messages] Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch council messages' });
+  }
+});
+
+// POST /api/council/message — Admin posts message to council
+app.post('/api/council/message', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: 'message is required' });
+
+    const ch = await pool.query(
+      "SELECT id FROM chat_channels WHERE channel_type = 'council' LIMIT 1"
+    );
+    if (ch.rows.length === 0) {
+      return res.status(404).json({ error: 'Council channel not found' });
+    }
+    const councilChannelId = ch.rows[0].id;
+
+    const result = await pool.query(
+      `INSERT INTO chat_messages
+         (channel_id, sender_id, sender_type, body, message_type)
+       VALUES ($1, $2, 'user', $3, 'text')
+       RETURNING *`,
+      [councilChannelId, req.user.user_id, message]
+    );
+
+    const newMessage = result.rows[0];
+    // Fetch sender info
+    const userInfo = await pool.query(
+      'SELECT display_name, avatar_color FROM users WHERE user_id = $1',
+      [req.user.user_id]
+    );
+    if (userInfo.rows[0]) {
+      newMessage.sender_name = userInfo.rows[0].display_name;
+      newMessage.sender_color = userInfo.rows[0].avatar_color;
+    }
+
+    // Emit via Socket.io
+    if (io) {
+      io.to('council').emit('council:message:new', newMessage);
+    }
+
+    res.json({ ok: true, message: newMessage });
+  } catch (err) {
+    console.error('[council/message] Error:', err.message);
+    res.status(500).json({ error: 'Failed to post council message' });
+  }
+});
+
+// POST /api/council/approve — Approve or reject a council proposal
+app.post('/api/council/approve', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin access required' });
+    }
+
+    const { messageId, approved, notes } = req.body;
+    if (!messageId || typeof approved !== 'boolean') {
+      return res.status(400).json({ error: 'messageId and approved (boolean) are required' });
+    }
+
+    const newStatus = approved ? 'approved' : 'rejected';
+    const result = await pool.query(
+      `UPDATE council_proposals
+       SET status = $1, approved_by = $2, approval_notes = $3, reviewed_at = NOW()
+       WHERE message_id = $4 AND status = 'pending'
+       RETURNING *`,
+      [newStatus, req.user.user_id, notes || null, messageId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Proposal not found or already reviewed' });
+    }
+
+    // Post a system message about the decision
+    const ch = await pool.query(
+      "SELECT id FROM chat_channels WHERE channel_type = 'council' LIMIT 1"
+    );
+    if (ch.rows.length > 0) {
+      const statusEmoji = approved ? '✅' : '❌';
+      const statusLabel = approved ? 'APPROVED' : 'REJECTED';
+      const systemMsg = await pool.query(
+        `INSERT INTO chat_messages
+           (channel_id, sender_id, sender_type, body, message_type)
+         VALUES ($1, $2, 'user', $3, 'system')
+         RETURNING *`,
+        [
+          ch.rows[0].id,
+          req.user.user_id,
+          `${statusEmoji} Proposal ${statusLabel} by ${req.user.display_name}${notes ? `: ${notes}` : ''}`,
+        ]
+      );
+
+      // Emit via Socket.io
+      if (io) {
+        const msg = systemMsg.rows[0];
+        msg.sender_name = req.user.display_name;
+        io.to('council').emit('council:message:new', msg);
+        io.to('council').emit('council:proposal:updated', {
+          messageId,
+          status: newStatus,
+          reviewedBy: req.user.display_name,
+          notes,
+        });
+      }
+
+      // If approved, relay to Team Chat
+      if (approved) {
+        const generalCh = await pool.query(
+          "SELECT id FROM chat_channels WHERE name = 'General' AND channel_type = 'group' LIMIT 1"
+        );
+        if (generalCh.rows.length > 0) {
+          const relayMsg = await pool.query(
+            `INSERT INTO chat_messages
+               (channel_id, sender_id, sender_type, body, message_type, houston_meta)
+             VALUES ($1, NULL, 'houston', $2, 'houston_insight', $3)
+             RETURNING *`,
+            [
+              generalCh.rows[0].id,
+              `📋 **Council Approved:** ${result.rows[0].proposal_text}`,
+              JSON.stringify({
+                trigger: 'council_approval',
+                sender_name: 'Houston',
+                proposal_id: result.rows[0].id,
+              }),
+            ]
+          );
+          if (io) {
+            const relayed = relayMsg.rows[0];
+            relayed.sender_name = 'Houston';
+            relayed.sender_color = '#10b981';
+            io.to(`channel:${generalCh.rows[0].id}`).emit('chat:message:new', relayed);
+          }
+        }
+      }
+    }
+
+    res.json({ ok: true, proposal: result.rows[0] });
+  } catch (err) {
+    console.error('[council/approve] Error:', err.message);
+    res.status(500).json({ error: 'Failed to update proposal' });
+  }
+});
+
+// GET /api/council/proposals — Get pending proposals
+app.get('/api/council/proposals', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const { status = 'pending' } = req.query;
+    const result = await pool.query(
+      `SELECT p.*, m.body AS message_body, m.created_at AS message_created_at
+       FROM council_proposals p
+       JOIN chat_messages m ON m.id = p.message_id
+       WHERE p.status = $1
+       ORDER BY p.created_at DESC`,
+      [status]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[council/proposals] Error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch proposals' });
+  }
+});
+
+// GET /api/council/channel-id — Get the council channel ID
+app.get('/api/council/channel-id', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not configured' });
+  try {
+    const ch = await pool.query(
+      "SELECT id FROM chat_channels WHERE channel_type = 'council' LIMIT 1"
+    );
+    if (ch.rows.length === 0) {
+      return res.status(404).json({ error: 'Council channel not found' });
+    }
+    res.json({ channelId: ch.rows[0].id });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // SAVED VIEWS ROUTES
 // ============================================================
 

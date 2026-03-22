@@ -68,6 +68,16 @@ function initChat(socketServer, dbPool) {
   io.on('connection', (socket) => {
     console.log(`[chat] User connected: ${socket.id}`);
 
+    // ── Join council room (AI Ops page) ──
+    socket.on('council:join', ({ userId }) => {
+      socket.join('council');
+      console.log(`[chat] User ${userId} joined council room`);
+    });
+
+    socket.on('council:leave', () => {
+      socket.leave('council');
+    });
+
     // ── Join channels ──
     socket.on('chat:join', async ({ channelId, userId }) => {
       socket.join(`channel:${channelId}`);

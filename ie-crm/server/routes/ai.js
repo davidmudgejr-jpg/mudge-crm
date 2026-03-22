@@ -869,6 +869,78 @@ router.post('/chat/post', async (req, res) => {
 });
 
 // ============================================================
+// 17. POST /api/ai/council/post — Houston Command posts to Council channel
+// ============================================================
+router.post('/council/post', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { message, sender_name, message_type } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'message is required' });
+    }
+
+    const validTypes = ['analysis', 'strategy', 'action_request', 'insight', 'status'];
+    const resolvedType = validTypes.includes(message_type) ? message_type : 'insight';
+    const dbMessageType = `council_${resolvedType}`;
+    const displayName = sender_name || 'Houston Command';
+
+    // Find council channel
+    const ch = await pool.query(
+      "SELECT id FROM chat_channels WHERE channel_type = 'council' LIMIT 1"
+    );
+    if (ch.rows.length === 0) {
+      return res.status(404).json({ error: 'Council channel not found' });
+    }
+    const councilChannelId = ch.rows[0].id;
+
+    // Insert the message
+    const result = await pool.query(
+      `INSERT INTO chat_messages
+         (channel_id, sender_id, sender_type, body, message_type, houston_meta)
+       VALUES ($1, NULL, 'houston', $2, $3, $4)
+       RETURNING *`,
+      [
+        councilChannelId,
+        message,
+        dbMessageType,
+        JSON.stringify({
+          trigger: 'council_post',
+          sender_name: displayName,
+          message_type: resolvedType,
+          agent: req.agentName,
+        }),
+      ]
+    );
+
+    const newMessage = result.rows[0];
+    newMessage.sender_name = displayName;
+    newMessage.sender_color = resolvedType === 'action_request' ? '#AF52DE' : '#818cf8'; // purple for requests, indigo for others
+
+    // If action_request, create a council proposal
+    if (resolvedType === 'action_request') {
+      await pool.query(
+        `INSERT INTO council_proposals (message_id, channel_id, proposal_text, sender_name)
+         VALUES ($1, $2, $3, $4)`,
+        [newMessage.id, councilChannelId, message, displayName]
+      );
+    }
+
+    // Emit via Socket.io for real-time delivery
+    const io = getIo();
+    if (io) {
+      io.to('council').emit('council:message:new', newMessage);
+    }
+
+    res.json({ ok: true, message_id: newMessage.id });
+  } catch (err) {
+    console.error('[AI API] /council/post error:', err.message);
+    res.status(500).json({ error: 'Failed to post council message' });
+  }
+});
+
+// ============================================================
 // MOUNT FUNCTION — called from server/index.js
 // ============================================================
 
