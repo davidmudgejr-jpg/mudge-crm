@@ -33,14 +33,15 @@ function requireAgentKey(req, res, next) {
   next();
 }
 
-// Rate limit: 60 requests/minute per key
+// Rate limit: 200 requests/minute per key
 const agentLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 60,
-  keyGenerator: (req) => req.headers['x-agent-key'] || req.ip,
+  max: 200,
+  keyGenerator: (req) => req.headers['x-agent-key'] || 'anonymous',
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Agent rate limit exceeded (60/min)' },
+  validate: false, // Disable validation warnings (IPv6, X-Forwarded-For)
+  message: { error: 'Agent rate limit exceeded (200/min)' },
 });
 
 // Apply to all AI routes

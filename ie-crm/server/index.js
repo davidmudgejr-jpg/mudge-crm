@@ -18,6 +18,7 @@ const { mountAiRoutes } = require('./routes/ai');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
 
 const app = express();
+app.set('trust proxy', 1); // Trust first proxy (Railway/Vercel)
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3001;
 
@@ -88,6 +89,7 @@ const apiLimiter = rateLimit({
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false,
   message: { error: 'Too many requests, please try again later' },
 });
 
@@ -97,6 +99,7 @@ const authLimiter = rateLimit({
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
+  validate: false,
   message: { error: 'Too many login attempts, please try again in 15 minutes' },
 });
 
