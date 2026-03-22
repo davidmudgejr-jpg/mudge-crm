@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 
 const AuthContext = createContext(null);
 
@@ -8,6 +8,8 @@ const TOKEN_KEY = 'crm-auth-token';
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const refreshingRef = useRef(false);
+  const refreshPromiseRef = useRef(null);
 
   // Validate existing token on mount
   useEffect(() => {
@@ -57,47 +59,136 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
-  // Periodic token revalidation — catch expired JWTs during active sessions
+  // Attempt to refresh the token — returns true if successful
+  const refreshToken = useCallback(async () => {
+    // Deduplicate concurrent refresh attempts
+    if (refreshingRef.current) {
+      return refreshPromiseRef.current;
+    }
+    refreshingRef.current = true;
+
+    const promise = (async () => {
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (!token) return false;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!res.ok) return false;
+
+        const data = await res.json();
+        if (data.token) {
+          localStorage.setItem(TOKEN_KEY, data.token);
+          setUser(data.user);
+          return true;
+        }
+        return false;
+      } catch {
+        return false;
+      } finally {
+        refreshingRef.current = false;
+        refreshPromiseRef.current = null;
+      }
+    })();
+
+    refreshPromiseRef.current = promise;
+    return promise;
+  }, []);
+
+  // Proactive token refresh — refresh the token every 7 days while the session is active
+  // This prevents the 30-day token from ever expiring during active use
   useEffect(() => {
     if (!user) return;
     const interval = setInterval(async () => {
       const token = localStorage.getItem(TOKEN_KEY);
       if (!token) { setUser(null); return; }
-      try {
-        const res = await fetch(`${API_BASE}/api/auth/me`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) {
-          console.warn('[auth] Token expired during session — logging out');
-          localStorage.removeItem(TOKEN_KEY);
-          setUser(null);
-        }
-      } catch {}
-    }, 5 * 60 * 1000); // Check every 5 minutes
-    return () => clearInterval(interval);
-  }, [user]);
 
-  // Global 401 listener — catch expired tokens from any fetch call
+      // Try to refresh proactively
+      const success = await refreshToken();
+      if (!success) {
+        // If refresh fails, validate current token
+        try {
+          const res = await fetch(`${API_BASE}/api/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (!res.ok) {
+            console.warn('[auth] Token expired during session — logging out');
+            localStorage.removeItem(TOKEN_KEY);
+            setUser(null);
+          }
+        } catch {
+          // Network error — don't log out, just wait for next check
+        }
+      }
+    }, 7 * 24 * 60 * 60 * 1000); // Every 7 days
+    return () => clearInterval(interval);
+  }, [user, refreshToken]);
+
+  // Global 401 interceptor — catch expired tokens from any fetch call
+  // Instead of immediately logging out, try to refresh the token first
   useEffect(() => {
     if (!user) return;
     const originalFetch = window.fetch;
+    let retryingUrls = new Set();
+
     window.fetch = async (...args) => {
       const res = await originalFetch(...args);
+
       if (res.status === 401 && localStorage.getItem(TOKEN_KEY)) {
         const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
-        if (url.includes('/api/') && !url.includes('/api/auth/login')) {
-          console.warn('[auth] 401 detected — session expired');
-          localStorage.removeItem(TOKEN_KEY);
-          setUser(null);
+
+        // Only intercept our API calls, not auth endpoints themselves
+        if (url.includes('/api/') && !url.includes('/api/auth/')) {
+          // Prevent infinite retry loops
+          if (retryingUrls.has(url)) {
+            retryingUrls.delete(url);
+            console.warn('[auth] Retry also returned 401 — logging out');
+            localStorage.removeItem(TOKEN_KEY);
+            setUser(null);
+            return res;
+          }
+
+          // Try to refresh the token
+          const refreshed = await refreshToken();
+          if (refreshed) {
+            // Retry the original request with the new token
+            const newToken = localStorage.getItem(TOKEN_KEY);
+            const [input, init] = args;
+            const newInit = { ...init };
+            if (newInit.headers instanceof Headers) {
+              newInit.headers = new Headers(newInit.headers);
+              newInit.headers.set('Authorization', `Bearer ${newToken}`);
+            } else if (typeof newInit.headers === 'object') {
+              newInit.headers = { ...newInit.headers, Authorization: `Bearer ${newToken}` };
+            } else {
+              newInit.headers = { Authorization: `Bearer ${newToken}` };
+            }
+            retryingUrls.add(url);
+            const retryRes = await window.fetch(input, newInit);
+            retryingUrls.delete(url);
+            return retryRes;
+          } else {
+            // Refresh failed — token is truly expired, log out
+            console.warn('[auth] Token refresh failed — logging out');
+            localStorage.removeItem(TOKEN_KEY);
+            setUser(null);
+          }
         }
       }
       return res;
     };
+
     return () => { window.fetch = originalFetch; };
-  }, [user]);
+  }, [user, refreshToken]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshToken }}>
       {children}
     </AuthContext.Provider>
   );

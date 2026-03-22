@@ -212,6 +212,35 @@ app.get('/api/auth/me', requireAuth, async (req, res) => {
   }
 });
 
+// POST /api/auth/refresh — issue a new token from a valid existing token
+app.post('/api/auth/refresh', requireAuth, async (req, res) => {
+  try {
+    // Token is already verified by requireAuth — just issue a fresh one
+    let userData = req.user;
+    if (pool) {
+      const result = await pool.query(
+        'SELECT user_id, email, display_name, role, avatar_color FROM users WHERE user_id = $1',
+        [req.user.user_id]
+      );
+      if (result.rows[0]) userData = result.rows[0];
+    }
+    const token = signToken(userData);
+    res.json({
+      token,
+      user: {
+        user_id: userData.user_id,
+        email: userData.email,
+        display_name: userData.display_name,
+        role: userData.role,
+        avatar_color: userData.avatar_color,
+      },
+    });
+  } catch (err) {
+    console.error('[auth/refresh] Error:', err.message);
+    res.status(500).json({ error: 'Token refresh failed' });
+  }
+});
+
 // POST /api/auth/change-password
 app.post('/api/auth/change-password', authLimiter, requireAuth, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not configured' });
