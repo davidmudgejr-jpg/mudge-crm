@@ -9,21 +9,24 @@ const Anthropic = require('@anthropic-ai/sdk');
 // ============================================================
 // CLAUDE SDK CLIENT — uses OAuth token or API key
 // ============================================================
-const HOUSTON_MODEL = 'claude-sonnet-4-6';
+const HOUSTON_MODEL = 'claude-sonnet-4-20250514';
 let claudeClient = null;
 
 function getClaudeClient() {
   if (claudeClient) return claudeClient;
-  // Use API key for SDK calls (OAuth tokens don't work with x-api-key header)
+  // Prefer OAuth token (authToken param), fall back to API key
+  const oauthToken = process.env.ANTHROPIC_OAUTH_TOKEN;
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (apiKey) {
+  if (oauthToken) {
+    claudeClient = new Anthropic({ authToken: oauthToken });
+  } else if (apiKey) {
     claudeClient = new Anthropic({ apiKey });
   }
   return claudeClient;
 }
 
 function isClaudeAvailable() {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY);
 }
 
 /**
