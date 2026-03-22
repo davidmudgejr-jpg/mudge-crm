@@ -113,27 +113,47 @@ export default function MobileChat() {
   const [imagePreview, setImagePreview] = useState(null);
   const [text, setText] = useState('');
   const [keyboardOpen, setKeyboardOpen] = useState(false);
-  const [viewportHeight, setViewportHeight] = useState('100dvh');
+  const [inputBarBottom, setInputBarBottom] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(window.innerHeight);
   const messagesEndRef = useRef(null);
   const chatContainerRef = useRef(null);
   const inputRef = useRef(null);
+  const inputBarRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingRef = useRef(false);
   const typingTimer = useRef(null);
 
-  // Track visual viewport to handle keyboard resize (iOS)
+  // Visual Viewport API — position input bar flush against keyboard
+  // On iOS Safari, the accessory bar sits between content and keyboard.
+  // By using position:fixed and tracking visualViewport, we place the input
+  // bar at the exact bottom of the visual viewport, visually covering the gap.
   useEffect(() => {
-    if (!window.visualViewport) return;
-    const onResize = () => {
-      setViewportHeight(window.visualViewport.height + 'px');
-      // Scroll input into view when keyboard opens
-      setTimeout(() => inputRef.current?.scrollIntoView?.({ block: 'nearest' }), 100);
+    const vv = window.visualViewport;
+    if (!vv) return;
+
+    const update = () => {
+      // visualViewport.height = visible area (excludes keyboard + accessory bar)
+      // visualViewport.offsetTop = scroll offset of visual viewport within layout viewport
+      const bottom = window.innerHeight - (vv.height + vv.offsetTop);
+      setInputBarBottom(bottom);
+      setViewportHeight(vv.height + vv.offsetTop);
+
+      // Auto-scroll messages to bottom when keyboard opens
+      const container = chatContainerRef.current;
+      if (container) {
+        requestAnimationFrame(() => {
+          container.scrollTop = container.scrollHeight;
+        });
+      }
     };
-    window.visualViewport.addEventListener('resize', onResize);
-    window.visualViewport.addEventListener('scroll', onResize);
+
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    update();
+
     return () => {
-      window.visualViewport.removeEventListener('resize', onResize);
-      window.visualViewport.removeEventListener('scroll', onResize);
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
     };
   }, []);
 
@@ -305,10 +325,26 @@ export default function MobileChat() {
   // Messages come from the active channel — no filtering needed
   const displayMessages = messages;
 
+  // Compute input bar height for bottom padding on messages
+  const [inputBarHeight, setInputBarHeight] = useState(52);
+  useEffect(() => {
+    if (!inputBarRef.current) return;
+    const ro = new ResizeObserver(entries => {
+      for (const entry of entries) {
+        setInputBarHeight(entry.borderBoxSize?.[0]?.blockSize || entry.contentRect.height + 12);
+      }
+    });
+    ro.observe(inputBarRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div className="flex flex-col bg-crm-bg text-crm-text" style={{ height: viewportHeight }}>
+    <div
+      className="fixed inset-0 flex flex-col bg-crm-bg text-crm-text overflow-hidden"
+      style={{ height: viewportHeight + 'px' }}
+    >
       {/* ── Header ── */}
-      <div className="flex-shrink-0 bg-crm-bg/90 backdrop-blur-xl border-b border-crm-border/20" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
+      <div className="flex-shrink-0 bg-crm-bg/90 backdrop-blur-xl border-b border-crm-border/20 z-10" style={{ paddingTop: 'env(safe-area-inset-top)' }}>
         <div className="flex items-center justify-between px-4 py-2">
           <div className="w-12" /> {/* Spacer */}
           <div className="text-center">
@@ -354,6 +390,7 @@ export default function MobileChat() {
       <div
         ref={chatContainerRef}
         className={`flex-1 overflow-y-auto px-3 py-2 ${scrollReady || loading || displayMessages.length === 0 ? '' : 'invisible'}`}
+        style={{ paddingBottom: inputBarHeight + (pendingImage ? 110 : 0) + 8 }}
       >
         {loadingOlder && (
           <div className="flex justify-center py-3">
@@ -400,86 +437,100 @@ export default function MobileChat() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── Image preview strip ── */}
-      {pendingImage && (
-        <div className="px-3 pt-2 pb-1 flex-shrink-0">
-          <div className="relative inline-block">
-            <img
-              src={pendingImage.previewUrl}
-              alt="Preview"
-              className="h-24 rounded-2xl border border-crm-border/40 object-cover"
-            />
-            <button
-              onClick={cancelImage}
-              className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-sm font-bold hover:bg-red-400 transition-colors shadow-sm"
-            >
-              &times;
-            </button>
-            {uploading && (
-              <div className="absolute inset-0 bg-black/40 rounded-2xl flex items-center justify-center">
-                <svg className="w-6 h-6 animate-spin text-white" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-              </div>
-            )}
+      {/* ── Fixed Input Bar — positioned at bottom of visual viewport ── */}
+      {/* On iOS, this sits right at the keyboard edge, covering the accessory bar gap */}
+      <div
+        ref={inputBarRef}
+        className="fixed left-0 right-0 z-20 bg-crm-bg"
+        style={{
+          bottom: inputBarBottom + 'px',
+          transition: keyboardOpen ? 'none' : 'bottom 0.1s ease-out',
+        }}
+      >
+        {/* Image preview strip */}
+        {pendingImage && (
+          <div className="px-3 pt-2 pb-1">
+            <div className="relative inline-block">
+              <img
+                src={pendingImage.previewUrl}
+                alt="Preview"
+                className="h-24 rounded-2xl border border-crm-border/40 object-cover"
+              />
+              <button
+                onClick={cancelImage}
+                className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-sm font-bold hover:bg-red-400 transition-colors shadow-sm"
+              >
+                &times;
+              </button>
+              {uploading && (
+                <div className="absolute inset-0 bg-black/40 rounded-2xl flex items-center justify-center">
+                  <svg className="w-6 h-6 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ── Input bar ── */}
-      <div className="flex items-end gap-1.5 px-2 py-1 flex-shrink-0 border-t border-gray-200/30" style={{ paddingBottom: keyboardOpen ? '0px' : 'env(safe-area-inset-bottom, 0px)' }}>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="w-9 h-9 flex items-center justify-center text-crm-accent rounded-full flex-shrink-0 mb-0.5"
+        {/* Input row */}
+        <div
+          className="flex items-end gap-1.5 px-2 py-1 border-t border-crm-border/20"
+          style={{ paddingBottom: keyboardOpen ? '4px' : 'max(4px, env(safe-area-inset-bottom, 4px))' }}
         >
-          <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" />
-            <path stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" d="M12 8v8M8 12h8" />
-          </svg>
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          className="hidden"
-          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-          onChange={handleFileChange}
-        />
-        <div className="flex-1 min-h-[36px] rounded-full border border-crm-border/40 flex items-end overflow-hidden bg-white/5">
-          <div
-            ref={inputRef}
-            contentEditable
-            role="textbox"
-            onInput={(e) => {
-              const val = e.currentTarget.textContent || '';
-              setText(val);
-              if (!typingRef.current) { typingRef.current = true; sendTyping(user?.display_name); }
-              clearTimeout(typingTimer.current);
-              typingTimer.current = setTimeout(() => { typingRef.current = false; stopTyping(); }, 2000);
-            }}
-            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            onPaste={handlePaste}
-            onFocus={() => setKeyboardOpen(true)}
-            onBlur={() => setKeyboardOpen(false)}
-            data-placeholder={pendingImage ? 'Add a caption...' : (mode === 'houston' ? 'Ask Houston...' : 'Message...')}
-            className="flex-1 bg-transparent text-[16px] text-crm-text px-4 py-2 outline-none max-h-24 leading-[20px] empty:before:content-[attr(data-placeholder)] empty:before:text-crm-muted/50 whitespace-pre-wrap break-words"
-            style={{ minHeight: '36px', WebkitAppearance: 'none', WebkitUserSelect: 'text', userSelect: 'text' }}
-          />
-        </div>
-        {(text.trim() || pendingImage) && (
           <button
-            onClick={handleSend}
-            disabled={uploading}
-            className={`w-9 h-9 flex items-center justify-center rounded-full flex-shrink-0 mb-0.5 active:scale-90 transition-transform ${uploading ? 'bg-crm-muted/30 text-crm-muted' : 'bg-crm-accent text-white'}`}
+            onClick={() => fileInputRef.current?.click()}
+            className="w-9 h-9 flex items-center justify-center text-crm-accent rounded-full flex-shrink-0 mb-0.5"
           >
-            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
-              <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25H13.5a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
+            <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" />
+              <path stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" d="M12 8v8M8 12h8" />
             </svg>
           </button>
-        )}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+            onChange={handleFileChange}
+          />
+          <div className="flex-1 min-h-[36px] rounded-full border border-crm-border/40 flex items-end overflow-hidden bg-white/5">
+            <div
+              ref={inputRef}
+              contentEditable
+              role="textbox"
+              onInput={(e) => {
+                const val = e.currentTarget.textContent || '';
+                setText(val);
+                if (!typingRef.current) { typingRef.current = true; sendTyping(user?.display_name); }
+                clearTimeout(typingTimer.current);
+                typingTimer.current = setTimeout(() => { typingRef.current = false; stopTyping(); }, 2000);
+              }}
+              onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+              onPaste={handlePaste}
+              onFocus={() => setKeyboardOpen(true)}
+              onBlur={() => setKeyboardOpen(false)}
+              data-placeholder={pendingImage ? 'Add a caption...' : (mode === 'houston' ? 'Ask Houston...' : 'Message...')}
+              className="flex-1 bg-transparent text-[16px] text-crm-text px-4 py-2 outline-none max-h-24 leading-[20px] empty:before:content-[attr(data-placeholder)] empty:before:text-crm-muted/50 whitespace-pre-wrap break-words"
+              style={{ minHeight: '36px', WebkitAppearance: 'none', WebkitUserSelect: 'text', userSelect: 'text' }}
+            />
+          </div>
+          {(text.trim() || pendingImage) && (
+            <button
+              onClick={handleSend}
+              disabled={uploading}
+              className={`w-9 h-9 flex items-center justify-center rounded-full flex-shrink-0 mb-0.5 active:scale-90 transition-transform ${uploading ? 'bg-crm-muted/30 text-crm-muted' : 'bg-crm-accent text-white'}`}
+            >
+              <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25H13.5a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Image preview */}
+      {/* Image lightbox */}
       {imagePreview && (
         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center" onClick={() => setImagePreview(null)}>
           <img src={imagePreview.url} alt={imagePreview.filename} className="max-w-[95vw] max-h-[90vh] rounded-lg" />
