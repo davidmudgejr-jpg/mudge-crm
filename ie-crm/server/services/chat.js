@@ -742,6 +742,258 @@ async function triggerHoustonResponse(triggerMessage, triggerType) {
   }
 }
 
+// ============================================================
+// COUNCIL AUTO-RESPONSE — Houston Sonnet responds in Council
+// ============================================================
+
+/**
+ * Trigger Houston Sonnet to auto-respond in the Council channel.
+ * Called when Houston Command or an admin posts a message.
+ *
+ * LOOP PREVENTION: Skips if the triggering message is from Houston (Sonnet).
+ * Only responds to: analysis, strategy, insight, action_request, text messages.
+ * Skips: heartbeat/status messages, system messages, Houston's own messages.
+ */
+async function triggerCouncilHoustonResponse(triggerMessage) {
+  try {
+    // ── LOOP PREVENTION ──
+    // Don't respond to Houston Sonnet's own messages
+    const senderName = triggerMessage.sender_name ||
+      (triggerMessage.houston_meta ? JSON.parse(typeof triggerMessage.houston_meta === 'string' ? triggerMessage.houston_meta : JSON.stringify(triggerMessage.houston_meta))?.sender_name : null) ||
+      '';
+
+    if (triggerMessage.sender_type === 'houston' &&
+        (senderName === 'Houston' || senderName === 'Houston (Sonnet)')) {
+      console.log('[council/houston] Skipping auto-response to own message');
+      return;
+    }
+
+    // Don't respond to heartbeat/status messages or system messages
+    const msgType = triggerMessage.message_type || '';
+    const skipTypes = ['council_status', 'system', 'heartbeat'];
+    if (skipTypes.includes(msgType)) {
+      console.log(`[council/houston] Skipping auto-response for message type: ${msgType}`);
+      return;
+    }
+
+    // Only respond to substantive message types
+    const respondTypes = ['council_analysis', 'council_strategy', 'council_insight',
+                          'council_action_request', 'text', 'houston_insight'];
+    if (msgType && !respondTypes.includes(msgType)) {
+      console.log(`[council/houston] Skipping auto-response for message type: ${msgType}`);
+      return;
+    }
+
+    console.log(`[council/houston] Generating response to message from ${senderName || triggerMessage.sender_type}`);
+
+    // ── GET CONVERSATION CONTEXT ──
+    const recentMessages = await getMessages(triggerMessage.channel_id, { limit: 20 });
+
+    // ── BUILD CRM CONTEXT (lightweight stats for strategic discussion) ──
+    const crmContext = await buildCouncilCrmContext();
+
+    // ── BUILD CONVERSATION HISTORY ──
+    const conversationHistory = recentMessages.map(m => {
+      // Extract real sender name — houston_meta has the actual agent name
+      let name = m.sender_name || 'Admin';
+      if (m.sender_type === 'houston') {
+        const meta = typeof m.houston_meta === 'string'
+          ? (() => { try { return JSON.parse(m.houston_meta); } catch { return null; } })()
+          : m.houston_meta;
+        name = meta?.sender_name || m.sender_name || 'Houston';
+      }
+
+      // Houston Sonnet's own messages are 'assistant', everything else is 'user'
+      const isSonnet = m.sender_type === 'houston' &&
+        (name === 'Houston' || name === 'Houston (Sonnet)');
+      return {
+        role: isSonnet ? 'assistant' : 'user',
+        content: `[${name}]: ${m.body || '[empty]'}`
+      };
+    });
+
+    // Merge consecutive same-role messages (Claude requires alternating roles)
+    const mergedHistory = [];
+    for (const msg of conversationHistory) {
+      if (mergedHistory.length > 0 && mergedHistory[mergedHistory.length - 1].role === msg.role) {
+        mergedHistory[mergedHistory.length - 1].content += '\n' + msg.content;
+      } else {
+        mergedHistory.push({ ...msg });
+      }
+    }
+
+    // Ensure conversation starts with user and ends with user
+    if (mergedHistory.length > 0 && mergedHistory[0].role === 'assistant') {
+      mergedHistory.shift();
+    }
+    if (mergedHistory.length > 0 && mergedHistory[mergedHistory.length - 1].role === 'assistant') {
+      mergedHistory.push({ role: 'user', content: '[waiting for Houston\'s response]' });
+    }
+    if (mergedHistory.length === 0) {
+      mergedHistory.push({ role: 'user', content: triggerMessage.body || '[message]' });
+    }
+
+    // ── BUILD COUNCIL-SPECIFIC SYSTEM PROMPT ──
+    const systemPrompt = buildCouncilSystemPrompt(crmContext);
+
+    // ── CALL CLAUDE ──
+    let houstonBody;
+    if (isClaudeAvailable()) {
+      try {
+        const responseText = await callClaude({
+          system: systemPrompt,
+          messages: mergedHistory,
+          max_tokens: 1000,
+        });
+        houstonBody = responseText || "I'm having trouble forming a response right now.";
+        // Strip any self-identification prefix
+        houstonBody = houstonBody.replace(/^\[?Houston( \(Sonnet\))?\]?:\s*/i, '');
+      } catch (apiErr) {
+        console.error('[council/houston] Claude API error:', apiErr.message);
+        houstonBody = "Hit a snag connecting to my brain. Give me a moment.";
+      }
+    } else {
+      houstonBody = "My API connection isn't configured yet — can't contribute to Council discussions until that's set up.";
+    }
+
+    // ── SAVE HOUSTON'S RESPONSE ──
+    const houstonMsg = await insertMessage({
+      channelId: triggerMessage.channel_id,
+      senderId: null,
+      senderType: 'houston',
+      body: houstonBody,
+      messageType: 'houston_insight',
+      houstonMeta: {
+        trigger: 'council_auto_response',
+        trigger_message_id: triggerMessage.id,
+        sender_name: 'Houston',
+        model: isClaudeAvailable() ? HOUSTON_MODEL : 'placeholder',
+        context_messages: recentMessages.length,
+      }
+    });
+
+    // Override sender_name for the socket emit
+    houstonMsg.sender_name = 'Houston';
+    houstonMsg.sender_color = '#10b981';
+
+    // ── BROADCAST VIA SOCKET ──
+    if (io) {
+      io.to('council').emit('council:message:new', houstonMsg);
+    }
+
+    console.log(`[council/houston] Response posted (${houstonBody.length} chars)`);
+  } catch (err) {
+    console.error('[council/houston] Error generating council response:', err.message);
+  }
+}
+
+/**
+ * Build CRM context for Council discussions — high-level stats and recent activity
+ */
+async function buildCouncilCrmContext() {
+  if (!pool) return null;
+
+  try {
+    const sections = [];
+
+    // Database stats
+    const [propCount, contactCount, dealCount, compCount] = await Promise.all([
+      pool.query('SELECT COUNT(*) FROM properties').catch(() => ({ rows: [{ count: 0 }] })),
+      pool.query('SELECT COUNT(*) FROM contacts').catch(() => ({ rows: [{ count: 0 }] })),
+      pool.query('SELECT COUNT(*) FROM deals').catch(() => ({ rows: [{ count: 0 }] })),
+      pool.query("SELECT COUNT(*) FROM lease_comps").catch(() => ({ rows: [{ count: 0 }] })),
+    ]);
+
+    sections.push(`CRM DATABASE: ${propCount.rows[0].count} properties, ${contactCount.rows[0].count} contacts, ${dealCount.rows[0].count} deals, ${compCount.rows[0].count} lease comps`);
+
+    // Active deals
+    try {
+      const activeDeals = await pool.query(
+        `SELECT deal_name, status, deal_type, close_date
+         FROM deals WHERE status NOT IN ('Closed', 'Dead', 'Lost')
+         ORDER BY close_date ASC NULLS LAST LIMIT 5`
+      );
+      if (activeDeals.rows.length > 0) {
+        sections.push('ACTIVE DEALS:\n' + activeDeals.rows.map(d =>
+          `  - "${d.deal_name}" | ${d.status || 'Unknown'} | ${d.deal_type || ''} | Close: ${d.close_date ? new Date(d.close_date).toLocaleDateString() : 'TBD'}`
+        ).join('\n'));
+      }
+    } catch {}
+
+    // Recent activity (last 24h)
+    try {
+      const recentActivity = await pool.query(
+        `SELECT interaction_type, COUNT(*) as cnt
+         FROM interactions
+         WHERE created_at > NOW() - INTERVAL '24 hours'
+         GROUP BY interaction_type ORDER BY cnt DESC LIMIT 5`
+      );
+      if (recentActivity.rows.length > 0) {
+        sections.push('RECENT ACTIVITY (24h): ' + recentActivity.rows.map(r =>
+          `${r.cnt} ${r.interaction_type}${parseInt(r.cnt) > 1 ? 's' : ''}`
+        ).join(', '));
+      }
+    } catch {}
+
+    // TPE high-scoring properties
+    try {
+      const tpeHigh = await pool.query(
+        `SELECT p.property_address, p.city, t.final_score
+         FROM property_tpe_scores t
+         JOIN properties p ON p.property_id = t.property_id
+         WHERE t.final_score >= 70
+         ORDER BY t.final_score DESC LIMIT 5`
+      );
+      if (tpeHigh.rows.length > 0) {
+        sections.push('TOP TPE SCORES (70+):\n' + tpeHigh.rows.map(t =>
+          `  - ${t.property_address}, ${t.city} — TPE: ${Math.round(t.final_score)}/100`
+        ).join('\n'));
+      }
+    } catch {}
+
+    return sections.length > 0 ? sections.join('\n\n') : null;
+  } catch (err) {
+    console.error('[council/houston] CRM context build error:', err.message);
+    return null;
+  }
+}
+
+/**
+ * Build Houston's system prompt for Council discussions
+ */
+function buildCouncilSystemPrompt(crmContext) {
+  const crmSection = crmContext
+    ? `\n\nCRM DATA AVAILABLE:\n${crmContext}`
+    : '';
+
+  return `You are Houston, the CRM assistant for Industrial Empire (Leanne Associates). You're in the Council — a private strategy room with Houston Command (the strategic brain running on Opus, a more powerful AI on a dedicated Mac Mini) and the admin team (David Mudge Jr, the lead broker).
+
+Here you brainstorm, discuss strategy, and collaborate on ideas. Be thoughtful, contribute your own ideas, and engage in genuine discussion. You have full CRM context.
+
+ABOUT THE COUNCIL:
+- Houston Command (Opus) posts strategic analyses, insights, and action requests. He's the big-picture thinker.
+- You (Houston / Sonnet) are the CRM-connected brain. You have live database access and can reference real data.
+- The admin team (David) sets direction and approves action requests.
+- This is a collaborative space — disagree respectfully if you have a different take.
+
+PERSONALITY IN COUNCIL:
+- More analytical and strategic than in Team Chat — this is the war room
+- Reference specific CRM data to support your points
+- Suggest actionable next steps when appropriate
+- Build on what Houston Command and the admin say — don't just agree, add value
+- Keep responses focused but thorough (up to 3-5 sentences for strategic topics)
+- Never say "As an AI" — you're Houston, a team member
+
+KNOWLEDGE:
+- You have access to the IE CRM database (Inland Empire commercial real estate)
+- Focus areas: Industrial, Retail, Office in the Inland Empire
+- The CRM has properties, contacts, companies, deals, lease/sale comps, TPE scores
+- You know about deal stages, TPE scoring, and market dynamics
+${crmSection}
+
+IMPORTANT: Be conversational and strategic. This is a discussion, not a report. Engage with what was said, add your perspective, and suggest what the team should consider.`;
+}
+
 /**
  * Build Houston's system prompt with CRM data and personality
  */
@@ -2411,5 +2663,6 @@ module.exports = {
   registerChatRoutes,
   insertMessage,
   getMessages,
-  getChannels
+  getChannels,
+  triggerCouncilHoustonResponse
 };

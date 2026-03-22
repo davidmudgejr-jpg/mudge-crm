@@ -11,6 +11,7 @@ const router = express.Router();
 // pool and io are created after route registration, so we use getters)
 let getPool = () => null;
 let getIo = () => null;
+let getCouncilResponder = () => null;
 
 // ============================================================
 // AUTH MIDDLEWARE — X-Agent-Key
@@ -933,6 +934,14 @@ router.post('/council/post', async (req, res) => {
       io.to('council').emit('council:message:new', newMessage);
     }
 
+    // Trigger Houston Sonnet auto-response (async, don't block the response)
+    const councilResponder = getCouncilResponder();
+    if (councilResponder) {
+      councilResponder(newMessage).catch(err =>
+        console.error('[AI API] Houston council auto-response error:', err.message)
+      );
+    }
+
     res.json({ ok: true, message_id: newMessage.id });
   } catch (err) {
     console.error('[AI API] /council/post error:', err.message);
@@ -957,6 +966,9 @@ router.post('/council/post', async (req, res) => {
 function mountAiRoutes(app, deps) {
   getPool = deps.getPool;
   getIo = deps.getIo;
+  if (deps.getCouncilResponder) {
+    getCouncilResponder = deps.getCouncilResponder;
+  }
   app.use('/api/ai', router);
   console.log('[server] AI Master System API mounted at /api/ai');
 }

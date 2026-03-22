@@ -234,20 +234,67 @@ export default function CouncilChat() {
   const fetchData = useCallback(async () => {
     try {
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const [msgsRes, dashRes, logsRes] = await Promise.all([
+      const [msgsRes, dashRes, logsRes, heartbeatsRes] = await Promise.all([
         fetch(`${API_BASE}/api/council/messages?limit=100`, { headers }),
         fetch(`${API_BASE}/api/ai/dashboard/summary`, { headers }),
         fetch(`${API_BASE}/api/ai/logs?limit=100`, { headers }),
+        fetch(`${API_BASE}/api/ai/heartbeats`, { headers }),
       ]);
 
       if (msgsRes.ok) {
         const msgs = await msgsRes.json();
         setMessages(msgs);
       }
+
+      // Merge dashboard agents with heartbeat data for real online status
+      let dashAgents = [];
       if (dashRes.ok) {
         const dash = await dashRes.json();
-        setAgents(dash.agents || []);
+        dashAgents = dash.agents || [];
       }
+
+      let heartbeats = [];
+      if (heartbeatsRes.ok) {
+        heartbeats = await heartbeatsRes.json();
+      }
+
+      // Build a map of heartbeat statuses (recent = within 5 minutes)
+      const heartbeatMap = {};
+      const FIVE_MINUTES = 5 * 60 * 1000;
+      for (const hb of heartbeats) {
+        const isRecent = hb.updated_at && (Date.now() - new Date(hb.updated_at).getTime()) < FIVE_MINUTES;
+        heartbeatMap[hb.agent_name] = {
+          status: isRecent ? (hb.status || 'active') : 'offline',
+          current_task: hb.current_task,
+          items_processed_today: hb.items_processed_today || 0,
+          updated_at: hb.updated_at,
+          tier: hb.tier,
+        };
+      }
+
+      // Merge heartbeat data into dashboard agents
+      if (dashAgents.length > 0) {
+        const mergedAgents = dashAgents.map(agent => {
+          const hb = heartbeatMap[agent.agent_name];
+          if (hb) {
+            return { ...agent, ...hb };
+          }
+          return agent;
+        });
+        // Add any heartbeat agents not in dashboard
+        for (const [name, hb] of Object.entries(heartbeatMap)) {
+          if (!mergedAgents.some(a => a.agent_name === name)) {
+            mergedAgents.push({ agent_name: name, ...hb });
+          }
+        }
+        setAgents(mergedAgents);
+      } else if (heartbeats.length > 0) {
+        // No dashboard agents, use heartbeats directly
+        setAgents(Object.entries(heartbeatMap).map(([name, hb]) => ({
+          agent_name: name, ...hb,
+        })));
+      }
+
       if (logsRes.ok) {
         const logData = await logsRes.json();
         setLogs(logData);

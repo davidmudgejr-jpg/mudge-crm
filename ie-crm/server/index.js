@@ -11,7 +11,7 @@ const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
 const { Server: SocketServer } = require('socket.io');
 const multer = require('multer');
-const { initChat, registerChatRoutes } = require('./services/chat');
+const { initChat, registerChatRoutes, triggerCouncilHoustonResponse } = require('./services/chat');
 const { mountAiRoutes } = require('./routes/ai');
 
 // Load env
@@ -269,6 +269,7 @@ app.post('/api/auth/change-password', authLimiter, requireAuth, async (req, res)
 mountAiRoutes(app, {
   getPool: () => pool,
   getIo: () => io,
+  getCouncilResponder: () => triggerCouncilHoustonResponse,
 });
 
 // Protect all API routes below this line (except Houston completions which use optionalAuth)
@@ -2014,6 +2015,11 @@ app.post('/api/council/message', async (req, res) => {
     if (io) {
       io.to('council').emit('council:message:new', newMessage);
     }
+
+    // Trigger Houston Sonnet auto-response (async, don't block the response)
+    triggerCouncilHoustonResponse(newMessage).catch(err =>
+      console.error('[council/message] Houston auto-response error:', err.message)
+    );
 
     res.json({ ok: true, message: newMessage });
   } catch (err) {
