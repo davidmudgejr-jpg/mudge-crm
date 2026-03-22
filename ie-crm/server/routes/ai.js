@@ -950,6 +950,291 @@ router.post('/council/post', async (req, res) => {
 });
 
 // ============================================================
+// DIRECTIVES — Decision Cascade System
+// Separate router with dual auth: X-Agent-Key OR JWT (admin)
+// ============================================================
+
+const directivesRouter = express.Router();
+directivesRouter.use(agentLimiter);
+
+const jwt = require('jsonwebtoken');
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+
+// Middleware: accepts either agent key or JWT admin auth
+function requireAgentOrAdmin(req, res, next) {
+  // Try agent key first
+  const agentKey = req.headers['x-agent-key'];
+  const validKey = process.env.AGENT_API_KEY;
+  if (validKey && agentKey === validKey) {
+    req.agentName = req.headers['x-agent-name'] || 'unknown';
+    req.authType = 'agent';
+    return next();
+  }
+
+  // Try JWT
+  const header = req.headers.authorization;
+  if (header && header.startsWith('Bearer ')) {
+    try {
+      const token = header.slice(7);
+      const payload = jwt.verify(token, JWT_SECRET);
+      req.user = {
+        user_id: payload.user_id,
+        email: payload.email,
+        display_name: payload.display_name,
+        role: payload.role || 'broker',
+      };
+      req.authType = 'jwt';
+      return next();
+    } catch { /* fall through */ }
+  }
+
+  return res.status(401).json({ error: 'Authentication required (agent key or JWT)' });
+}
+
+// Middleware: JWT admin only
+function requireJwtAdmin(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header || !header.startsWith('Bearer ')) {
+    return res.status(401).json({ error: 'Admin authentication required' });
+  }
+  try {
+    const token = header.slice(7);
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.user = {
+      user_id: payload.user_id,
+      email: payload.email,
+      display_name: payload.display_name,
+      role: payload.role || 'broker',
+    };
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Admin role required' });
+    }
+    req.authType = 'jwt';
+    return next();
+  } catch {
+    return res.status(401).json({ error: 'Invalid or expired token' });
+  }
+}
+
+const COUNCIL_CHANNEL_ID = '0fddc747-10ad-4b20-ac01-5e2242e8755f';
+
+// 18. POST /api/ai/directive — Create a new directive
+directivesRouter.post('/directive', requireAgentOrAdmin, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { title, body, priority, scope, source } = req.body;
+    if (!title || !body) {
+      return res.status(400).json({ error: 'title and body are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO directives (title, body, priority, scope, source)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING *`,
+      [
+        title,
+        body,
+        priority || 'normal',
+        scope || 'all',
+        source || (req.authType === 'jwt' ? 'admin' : req.agentName || 'agent'),
+      ]
+    );
+
+    const directive = result.rows[0];
+
+    // Post summary to the Council channel
+    const summary = body.length > 100 ? body.slice(0, 100) + '...' : body;
+    try {
+      await pool.query(
+        `INSERT INTO chat_messages
+           (channel_id, sender_id, sender_type, body, message_type, houston_meta)
+         VALUES ($1, NULL, 'houston', $2, 'system', $3)`,
+        [
+          COUNCIL_CHANNEL_ID,
+          `\ud83d\udccb New Directive: ${title} \u2014 ${summary}`,
+          JSON.stringify({ trigger: 'directive_created', directive_id: directive.id }),
+        ]
+      );
+    } catch (chatErr) {
+      console.error('[AI API] Failed to post directive to council:', chatErr.message);
+    }
+
+    // Emit socket event
+    const io = getIo();
+    if (io) {
+      io.to('council').emit('directive:new', directive);
+      // Also emit the council message
+      io.to('council').emit('council:message:new', {
+        id: directive.id + '-notif',
+        channel_id: COUNCIL_CHANNEL_ID,
+        sender_type: 'houston',
+        sender_name: 'System',
+        body: `\ud83d\udccb New Directive: ${title} \u2014 ${summary}`,
+        message_type: 'system',
+        created_at: new Date().toISOString(),
+      });
+    }
+
+    res.status(201).json(directive);
+  } catch (err) {
+    console.error('[AI API] /directive error:', err.message);
+    res.status(500).json({ error: 'Failed to create directive' });
+  }
+});
+
+// 19. GET /api/ai/directives — List directives (filtered)
+directivesRouter.get('/directives', requireAgentOrAdmin, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { scope, status, since } = req.query;
+    const conditions = [];
+    const params = [];
+    let idx = 1;
+
+    // Agents only see directives for 'all' or their specific scope
+    if (scope) {
+      conditions.push(`(scope = 'all' OR scope = $${idx})`);
+      params.push(scope);
+      idx++;
+    }
+
+    if (status) {
+      conditions.push(`status = $${idx}`);
+      params.push(status);
+      idx++;
+    } else {
+      // Default to active directives
+      conditions.push(`status = 'active'`);
+    }
+
+    if (since) {
+      conditions.push(`created_at > $${idx}`);
+      params.push(since);
+      idx++;
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const result = await pool.query(
+      `SELECT * FROM directives ${where} ORDER BY
+        CASE priority WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 WHEN 'low' THEN 3 END,
+        created_at DESC`,
+      params
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[AI API] /directives error:', err.message);
+    res.status(500).json({ error: 'Failed to query directives' });
+  }
+});
+
+// 20. POST /api/ai/directive/:id/acknowledge — Agent acknowledges a directive
+directivesRouter.post('/directive/:id/acknowledge', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const { agent_name } = req.body;
+
+    if (!agent_name) {
+      return res.status(400).json({ error: 'agent_name is required' });
+    }
+
+    // Add agent_name to acknowledged_by array (if not already present)
+    const result = await pool.query(
+      `UPDATE directives
+       SET acknowledged_by = CASE
+         WHEN NOT (acknowledged_by @> $2::jsonb)
+         THEN acknowledged_by || $2::jsonb
+         ELSE acknowledged_by
+       END,
+       updated_at = NOW()
+       WHERE id = $1
+       RETURNING *`,
+      [id, JSON.stringify(agent_name)]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Directive not found' });
+    }
+
+    // Emit socket event
+    const io = getIo();
+    if (io) {
+      io.to('council').emit('directive:acknowledged', { id, agent_name });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[AI API] /directive/:id/acknowledge error:', err.message);
+    res.status(500).json({ error: 'Failed to acknowledge directive' });
+  }
+});
+
+// 21. PATCH /api/ai/directive/:id — Update directive (admin only via JWT)
+directivesRouter.patch('/directive/:id', requireJwtAdmin, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const { status, body, priority } = req.body;
+
+    const updates = [];
+    const params = [];
+    let idx = 1;
+
+    if (status) {
+      const validStatuses = ['active', 'superseded', 'archived'];
+      if (!validStatuses.includes(status)) {
+        return res.status(400).json({ error: `Invalid status. Must be: ${validStatuses.join(', ')}` });
+      }
+      updates.push(`status = $${idx}`);
+      params.push(status);
+      idx++;
+    }
+    if (body !== undefined) {
+      updates.push(`body = $${idx}`);
+      params.push(body);
+      idx++;
+    }
+    if (priority) {
+      updates.push(`priority = $${idx}`);
+      params.push(priority);
+      idx++;
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No valid fields to update' });
+    }
+
+    updates.push('updated_at = NOW()');
+    params.push(id);
+
+    const result = await pool.query(
+      `UPDATE directives SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Directive not found' });
+    }
+
+    // Emit socket event
+    const io = getIo();
+    if (io) {
+      io.to('council').emit('directive:updated', result.rows[0]);
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[AI API] PATCH /directive/:id error:', err.message);
+    res.status(500).json({ error: 'Failed to update directive' });
+  }
+});
+
+// ============================================================
 // MOUNT FUNCTION — called from server/index.js
 // ============================================================
 
@@ -970,7 +1255,8 @@ function mountAiRoutes(app, deps) {
     getCouncilResponder = deps.getCouncilResponder;
   }
   app.use('/api/ai', router);
-  console.log('[server] AI Master System API mounted at /api/ai');
+  app.use('/api/ai', directivesRouter);
+  console.log('[server] AI Master System API mounted at /api/ai (+ directives)');
 }
 
 module.exports = { mountAiRoutes };

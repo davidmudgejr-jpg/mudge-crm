@@ -206,6 +206,160 @@ function LogEntry({ log }) {
 }
 
 // ============================================================
+// PRIORITY BADGE (for Directives)
+// ============================================================
+function PriorityBadge({ priority }) {
+  const colors = {
+    critical: 'bg-red-500/20 text-red-300 border-red-500/30',
+    high: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+    normal: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
+    low: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  };
+  return (
+    <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border ${colors[priority] || colors.normal}`}>
+      {priority}
+    </span>
+  );
+}
+
+// ============================================================
+// DIRECTIVE CARD
+// ============================================================
+function DirectiveCard({ directive, isAdmin, onArchive }) {
+  const [expanded, setExpanded] = useState(false);
+  const acked = Array.isArray(directive.acknowledged_by) ? directive.acknowledged_by : [];
+
+  return (
+    <div className="px-4 py-3 border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
+      <div className="flex items-start gap-2 mb-1">
+        <PriorityBadge priority={directive.priority} />
+        <span className="text-sm font-medium text-[var(--crm-text)] flex-1">{directive.title}</span>
+        <span className="text-[10px] text-[var(--crm-muted)] flex-shrink-0">
+          {timeAgo(directive.created_at)}
+        </span>
+      </div>
+
+      <div
+        className={`text-xs text-[var(--crm-text)]/70 leading-relaxed mb-2 ${expanded ? '' : 'line-clamp-2'}`}
+        onClick={() => setExpanded(!expanded)}
+        style={{ cursor: 'pointer' }}
+      >
+        {directive.body}
+      </div>
+
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-[10px] text-[var(--crm-muted)]">
+          Scope: <span className="text-indigo-400">{directive.scope}</span>
+        </span>
+        <span className="text-[10px] text-[var(--crm-muted)]">
+          Source: {directive.source}
+        </span>
+        {acked.length > 0 && (
+          <span className="text-[10px] text-emerald-400">
+            ACK: {acked.join(', ')}
+          </span>
+        )}
+        {isAdmin && directive.status === 'active' && (
+          <button
+            onClick={() => onArchive(directive.id)}
+            className="ml-auto text-[10px] text-[var(--crm-muted)] hover:text-red-400 transition-colors"
+          >
+            Archive
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ============================================================
+// NEW DIRECTIVE FORM
+// ============================================================
+function NewDirectiveForm({ onSubmit, onCancel }) {
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [priority, setPriority] = useState('normal');
+  const [scope, setScope] = useState('all');
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!title.trim() || !body.trim()) return;
+    setSubmitting(true);
+    try {
+      await onSubmit({ title: title.trim(), body: body.trim(), priority, scope });
+      setTitle('');
+      setBody('');
+      setPriority('normal');
+      setScope('all');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="p-3 border-b border-[var(--crm-border)] bg-white/[0.02]">
+      <input
+        type="text"
+        value={title}
+        onChange={e => setTitle(e.target.value)}
+        placeholder="Directive title..."
+        className="w-full bg-white/[0.04] border border-[var(--crm-border)] rounded-lg px-3 py-1.5 text-sm text-[var(--crm-text)] placeholder-[var(--crm-muted)] focus:outline-none focus:border-indigo-500/50 mb-2"
+      />
+      <textarea
+        value={body}
+        onChange={e => setBody(e.target.value)}
+        placeholder="Directive body / instructions..."
+        rows={3}
+        className="w-full bg-white/[0.04] border border-[var(--crm-border)] rounded-lg px-3 py-1.5 text-sm text-[var(--crm-text)] placeholder-[var(--crm-muted)] focus:outline-none focus:border-indigo-500/50 mb-2 resize-none"
+      />
+      <div className="flex gap-2 mb-2">
+        <select
+          value={priority}
+          onChange={e => setPriority(e.target.value)}
+          className="text-xs bg-white/[0.04] border border-[var(--crm-border)] rounded-md px-2 py-1.5 text-[var(--crm-text)] focus:outline-none focus:border-indigo-500/50"
+        >
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="normal">Normal</option>
+          <option value="low">Low</option>
+        </select>
+        <select
+          value={scope}
+          onChange={e => setScope(e.target.value)}
+          className="text-xs bg-white/[0.04] border border-[var(--crm-border)] rounded-md px-2 py-1.5 text-[var(--crm-text)] focus:outline-none focus:border-indigo-500/50"
+        >
+          <option value="all">All Agents</option>
+          <option value="command">Houston Command</option>
+          <option value="sonnet">Houston Sonnet</option>
+          <option value="enricher">Enricher</option>
+          <option value="ralph">Ralph</option>
+          <option value="matcher">Matcher</option>
+          <option value="scout">Scout</option>
+          <option value="researcher">Researcher</option>
+        </select>
+      </div>
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={!title.trim() || !body.trim() || submitting}
+          className="px-3 py-1.5 text-xs font-medium rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 text-white hover:from-indigo-500 hover:to-purple-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+        >
+          {submitting ? 'Creating...' : 'Issue Directive'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="px-3 py-1.5 text-xs text-[var(--crm-muted)] hover:text-[var(--crm-text)] transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// ============================================================
 // COUNCIL CHAT — Detail View for War Room
 // ============================================================
 export default function CouncilChat() {
@@ -216,11 +370,19 @@ export default function CouncilChat() {
   const [agents, setAgents] = useState([]);
   const [messages, setMessages] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [directives, setDirectives] = useState([]);
   const [loading, setLoading] = useState(true);
   const [connected, setConnected] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [sending, setSending] = useState(false);
   const [logFilter, setLogFilter] = useState('all');
+
+  // Fullscreen state
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Directives panel state
+  const [showDirectives, setShowDirectives] = useState(false);
+  const [showNewDirective, setShowNewDirective] = useState(false);
 
   // Refs
   const messagesEndRef = useRef(null);
@@ -230,23 +392,15 @@ export default function CouncilChat() {
 
   const token = localStorage.getItem('crm-auth-token');
 
-  // -- Fetch initial data --
-  const fetchData = useCallback(async () => {
+  // -- Fetch heartbeats separately (for manual refresh) --
+  const fetchHeartbeats = useCallback(async () => {
     try {
       const headers = token ? { Authorization: `Bearer ${token}` } : {};
-      const [msgsRes, dashRes, logsRes, heartbeatsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/council/messages?limit=100`, { headers }),
+      const [dashRes, heartbeatsRes] = await Promise.all([
         fetch(`${API_BASE}/api/ai/dashboard/summary`, { headers }),
-        fetch(`${API_BASE}/api/ai/logs?limit=100`, { headers }),
         fetch(`${API_BASE}/api/ai/heartbeats`, { headers }),
       ]);
 
-      if (msgsRes.ok) {
-        const msgs = await msgsRes.json();
-        setMessages(msgs);
-      }
-
-      // Merge dashboard agents with heartbeat data for real online status
       let dashAgents = [];
       if (dashRes.ok) {
         const dash = await dashRes.json();
@@ -281,7 +435,6 @@ export default function CouncilChat() {
           }
           return agent;
         });
-        // Add any heartbeat agents not in dashboard
         for (const [name, hb] of Object.entries(heartbeatMap)) {
           if (!mergedAgents.some(a => a.agent_name === name)) {
             mergedAgents.push({ agent_name: name, ...hb });
@@ -289,22 +442,56 @@ export default function CouncilChat() {
         }
         setAgents(mergedAgents);
       } else if (heartbeats.length > 0) {
-        // No dashboard agents, use heartbeats directly
         setAgents(Object.entries(heartbeatMap).map(([name, hb]) => ({
           agent_name: name, ...hb,
         })));
+      }
+    } catch (err) {
+      console.error('[CouncilChat] Heartbeat fetch error:', err.message);
+    }
+  }, [token]);
+
+  // -- Fetch directives --
+  const fetchDirectives = useCallback(async () => {
+    try {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const res = await fetch(`${API_BASE}/api/ai/directives?status=active`, { headers });
+      if (res.ok) {
+        const data = await res.json();
+        setDirectives(data);
+      }
+    } catch (err) {
+      console.error('[CouncilChat] Directives fetch error:', err.message);
+    }
+  }, [token]);
+
+  // -- Fetch initial data --
+  const fetchData = useCallback(async () => {
+    try {
+      const headers = token ? { Authorization: `Bearer ${token}` } : {};
+      const [msgsRes, logsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/council/messages?limit=100`, { headers }),
+        fetch(`${API_BASE}/api/ai/logs?limit=100`, { headers }),
+      ]);
+
+      if (msgsRes.ok) {
+        const msgs = await msgsRes.json();
+        setMessages(msgs);
       }
 
       if (logsRes.ok) {
         const logData = await logsRes.json();
         setLogs(logData);
       }
+
+      // Also fetch heartbeats and directives
+      await Promise.all([fetchHeartbeats(), fetchDirectives()]);
     } catch (err) {
       console.error('[CouncilChat] Fetch error:', err.message);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, fetchHeartbeats, fetchDirectives]);
 
   useEffect(() => {
     fetchData();
@@ -351,6 +538,30 @@ export default function CouncilChat() {
       }));
     });
 
+    // Directive socket events
+    sock.on('directive:new', (directive) => {
+      setDirectives(prev => {
+        if (prev.some(d => d.id === directive.id)) return prev;
+        return [directive, ...prev];
+      });
+    });
+
+    sock.on('directive:updated', (directive) => {
+      setDirectives(prev => prev.map(d => d.id === directive.id ? directive : d));
+    });
+
+    sock.on('directive:acknowledged', ({ id, agent_name }) => {
+      setDirectives(prev => prev.map(d => {
+        if (d.id === id) {
+          const acked = Array.isArray(d.acknowledged_by) ? d.acknowledged_by : [];
+          if (!acked.includes(agent_name)) {
+            return { ...d, acknowledged_by: [...acked, agent_name] };
+          }
+        }
+        return d;
+      }));
+    });
+
     sock.connect();
 
     return () => {
@@ -359,6 +570,28 @@ export default function CouncilChat() {
       socketRef.current = null;
     };
   }, [user?.user_id, token]);
+
+  // -- Fullscreen keyboard shortcuts --
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Escape exits fullscreen (but does NOT close the detail view)
+      if (e.key === 'Escape' && isFullscreen) {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsFullscreen(false);
+        return;
+      }
+      // F key or F11 toggles fullscreen (only when not typing in an input)
+      const tag = e.target.tagName.toLowerCase();
+      if ((e.key === 'f' || e.key === 'F11') && tag !== 'input' && tag !== 'textarea' && tag !== 'select') {
+        e.preventDefault();
+        setIsFullscreen(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isFullscreen]);
 
   // -- Auto-scroll --
   useEffect(() => {
@@ -427,6 +660,52 @@ export default function CouncilChat() {
     }
   };
 
+  // -- Create directive --
+  const handleCreateDirective = async ({ title, body, priority, scope }) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/directive`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ title, body, priority, scope }),
+      });
+      if (res.ok) {
+        setShowNewDirective(false);
+        // Refresh directives
+        fetchDirectives();
+      }
+    } catch (err) {
+      console.error('[CouncilChat] Create directive error:', err.message);
+    }
+  };
+
+  // -- Archive directive --
+  const handleArchiveDirective = async (directiveId) => {
+    try {
+      await fetch(`${API_BASE}/api/ai/directive/${directiveId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status: 'archived' }),
+      });
+      setDirectives(prev => prev.filter(d => d.id !== directiveId));
+    } catch (err) {
+      console.error('[CouncilChat] Archive directive error:', err.message);
+    }
+  };
+
+  // -- Manual refresh heartbeats --
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefreshHeartbeats = async () => {
+    setRefreshing(true);
+    await fetchHeartbeats();
+    setTimeout(() => setRefreshing(false), 500);
+  };
+
   // -- Filtered logs --
   const filteredLogs = logFilter === 'all'
     ? logs
@@ -449,8 +728,13 @@ export default function CouncilChat() {
     );
   }
 
+  // Fullscreen wrapper classes
+  const containerClasses = isFullscreen
+    ? 'fixed inset-0 z-50 flex flex-col overflow-hidden bg-[var(--crm-bg)]'
+    : 'h-full flex flex-col overflow-hidden bg-[var(--crm-bg)]';
+
   return (
-    <div className="h-full flex flex-col overflow-hidden bg-[var(--crm-bg)]">
+    <div className={containerClasses}>
       {/* Agent Dashboard (top bar) */}
       <div className="flex-shrink-0 border-b border-[var(--crm-border)] px-5 py-4">
         <div className="flex items-center justify-between mb-3">
@@ -465,9 +749,52 @@ export default function CouncilChat() {
               <p className="text-xs text-[var(--crm-muted)]">AI Operations Center</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
-            <span className="text-xs text-[var(--crm-muted)]">{connected ? 'Live' : 'Disconnected'}</span>
+          <div className="flex items-center gap-3">
+            {/* Directives toggle */}
+            <button
+              onClick={() => setShowDirectives(prev => !prev)}
+              className={`p-1.5 rounded-lg transition-colors ${showDirectives ? 'bg-indigo-500/20 text-indigo-300' : 'text-[var(--crm-muted)] hover:text-[var(--crm-text)] hover:bg-white/5'}`}
+              title="Toggle Directives"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z" />
+              </svg>
+            </button>
+
+            {/* Refresh heartbeats */}
+            <button
+              onClick={handleRefreshHeartbeats}
+              disabled={refreshing}
+              className="p-1.5 rounded-lg text-[var(--crm-muted)] hover:text-[var(--crm-text)] hover:bg-white/5 transition-colors disabled:opacity-40"
+              title="Refresh agent status"
+            >
+              <svg className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182" />
+              </svg>
+            </button>
+
+            {/* Fullscreen toggle */}
+            <button
+              onClick={() => setIsFullscreen(prev => !prev)}
+              className="p-1.5 rounded-lg text-[var(--crm-muted)] hover:text-[var(--crm-text)] hover:bg-white/5 transition-colors"
+              title={isFullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen (F)'}
+            >
+              {isFullscreen ? (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 9V4.5M9 9H4.5M9 9 3.75 3.75M9 15v4.5M9 15H4.5M9 15l-5.25 5.25M15 9h4.5M15 9V4.5M15 9l5.25-5.25M15 15h4.5M15 15v4.5m0-4.5 5.25 5.25" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                </svg>
+              )}
+            </button>
+
+            {/* Connection status */}
+            <div className="flex items-center gap-2">
+              <div className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'}`} />
+              <span className="text-xs text-[var(--crm-muted)]">{connected ? 'Live' : 'Disconnected'}</span>
+            </div>
           </div>
         </div>
 
@@ -479,10 +806,10 @@ export default function CouncilChat() {
         </div>
       </div>
 
-      {/* Council Chat + Activity Log */}
+      {/* Council Chat + Activity Log / Directives */}
       <div className="flex-1 flex overflow-hidden min-h-0">
 
-        {/* Council Chat (left 2/3) */}
+        {/* Council Chat (left section) */}
         <div className="flex-1 flex flex-col min-w-0 border-r border-[var(--crm-border)]">
           {/* Messages area */}
           <div
@@ -542,45 +869,98 @@ export default function CouncilChat() {
           </div>
         </div>
 
-        {/* Activity Log (right 1/3 sidebar) */}
+        {/* Right sidebar: Activity Log or Directives */}
         <div className="w-80 xl:w-96 flex-shrink-0 flex flex-col overflow-hidden">
-          {/* Log header with filter */}
-          <div className="flex-shrink-0 px-3 py-3 border-b border-[var(--crm-border)]">
-            <div className="flex items-center justify-between mb-2">
-              <h2 className="text-sm font-semibold text-[var(--crm-text)]">Activity Log</h2>
-              <span className="text-[10px] text-[var(--crm-muted)]">{filteredLogs.length} entries</span>
-            </div>
-            <select
-              value={logFilter}
-              onChange={e => setLogFilter(e.target.value)}
-              className="w-full text-xs bg-white/[0.04] border border-[var(--crm-border)] rounded-md px-2 py-1.5 text-[var(--crm-text)] focus:outline-none focus:border-indigo-500/50"
-            >
-              <option value="all">All Agents</option>
-              {uniqueAgentNames.map(name => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-              <option value="error">Errors Only</option>
-              <option value="success">Successes Only</option>
-            </select>
-          </div>
+          {showDirectives ? (
+            <>
+              {/* Directives header */}
+              <div className="flex-shrink-0 px-3 py-3 border-b border-[var(--crm-border)]">
+                <div className="flex items-center justify-between mb-1">
+                  <h2 className="text-sm font-semibold text-[var(--crm-text)]">Directives</h2>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-[var(--crm-muted)]">{directives.length} active</span>
+                    {isAdmin && (
+                      <button
+                        onClick={() => setShowNewDirective(prev => !prev)}
+                        className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 hover:bg-indigo-500/30 transition-colors"
+                      >
+                        + New
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
 
-          {/* Log entries */}
-          <div
-            className="flex-1 overflow-y-auto"
-            style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--crm-scroll-thumb) var(--crm-scroll-track)' }}
-          >
-            {filteredLogs.length === 0 ? (
-              <div className="p-4 text-center text-xs text-[var(--crm-muted)]">
-                No activity logs yet. Agents will report actions here.
+              {/* New directive form */}
+              {showNewDirective && isAdmin && (
+                <NewDirectiveForm
+                  onSubmit={handleCreateDirective}
+                  onCancel={() => setShowNewDirective(false)}
+                />
+              )}
+
+              {/* Directive list */}
+              <div
+                className="flex-1 overflow-y-auto"
+                style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--crm-scroll-thumb) var(--crm-scroll-track)' }}
+              >
+                {directives.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-[var(--crm-muted)]">
+                    No active directives. Issue orders to the agent fleet from here.
+                  </div>
+                ) : (
+                  directives.map(d => (
+                    <DirectiveCard
+                      key={d.id}
+                      directive={d}
+                      isAdmin={isAdmin}
+                      onArchive={handleArchiveDirective}
+                    />
+                  ))
+                )}
               </div>
-            ) : (
-              <div className="divide-y divide-white/[0.03]">
-                {filteredLogs.map(log => (
-                  <LogEntry key={log.id} log={log} />
-                ))}
+            </>
+          ) : (
+            <>
+              {/* Log header with filter */}
+              <div className="flex-shrink-0 px-3 py-3 border-b border-[var(--crm-border)]">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-sm font-semibold text-[var(--crm-text)]">Activity Log</h2>
+                  <span className="text-[10px] text-[var(--crm-muted)]">{filteredLogs.length} entries</span>
+                </div>
+                <select
+                  value={logFilter}
+                  onChange={e => setLogFilter(e.target.value)}
+                  className="w-full text-xs bg-white/[0.04] border border-[var(--crm-border)] rounded-md px-2 py-1.5 text-[var(--crm-text)] focus:outline-none focus:border-indigo-500/50"
+                >
+                  <option value="all">All Agents</option>
+                  {uniqueAgentNames.map(name => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                  <option value="error">Errors Only</option>
+                  <option value="success">Successes Only</option>
+                </select>
               </div>
-            )}
-          </div>
+
+              {/* Log entries */}
+              <div
+                className="flex-1 overflow-y-auto"
+                style={{ scrollbarWidth: 'thin', scrollbarColor: 'var(--crm-scroll-thumb) var(--crm-scroll-track)' }}
+              >
+                {filteredLogs.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-[var(--crm-muted)]">
+                    No activity logs yet. Agents will report actions here.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-white/[0.03]">
+                    {filteredLogs.map(log => (
+                      <LogEntry key={log.id} log={log} />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </div>
