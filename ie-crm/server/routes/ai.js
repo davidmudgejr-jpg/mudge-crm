@@ -44,9 +44,46 @@ const agentLimiter = rateLimit({
   message: { error: 'Agent rate limit exceeded (200/min)' },
 });
 
+// Auth: accept EITHER X-Agent-Key (for external agents) OR JWT Bearer token (for CRM dashboard)
+function requireAgentKeyOrJwt(req, res, next) {
+  // Try agent key first
+  const agentKey = req.headers['x-agent-key'];
+  const validKey = process.env.AGENT_API_KEY;
+  if (validKey && agentKey === validKey) {
+    req.agentName = req.headers['x-agent-name'] || 'unknown';
+    req.authType = 'agent';
+    return next();
+  }
+
+  // Try JWT Bearer token (for admin dashboard access)
+  const header = req.headers.authorization;
+  if (header && header.startsWith('Bearer ')) {
+    try {
+      const jwt = require('jsonwebtoken');
+      const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+      const token = header.slice(7);
+      const payload = jwt.verify(token, JWT_SECRET);
+      req.user = {
+        user_id: payload.user_id,
+        email: payload.email,
+        display_name: payload.display_name,
+        role: payload.role || 'broker',
+      };
+      req.agentName = 'dashboard-user';
+      req.authType = 'jwt';
+      return next();
+    } catch { /* fall through */ }
+  }
+
+  if (!validKey) {
+    return res.status(503).json({ error: 'Agent API not configured — set AGENT_API_KEY env var' });
+  }
+  return res.status(401).json({ error: 'Invalid or missing X-Agent-Key or JWT' });
+}
+
 // Apply to all AI routes
 router.use(agentLimiter);
-router.use(requireAgentKey);
+router.use(requireAgentKeyOrJwt);
 
 // Logging middleware
 router.use((req, _res, next) => {
