@@ -14,11 +14,37 @@ function getAuthHeaders() {
   return headers;
 }
 
-function handle401(res) {
-  if (res.status === 401) {
-    localStorage.removeItem('crm-auth-token');
-    window.location.hash = '#/';
-    window.location.reload();
+// Track if we're already trying to refresh to prevent loops
+let isRefreshing = false;
+
+async function handle401(res) {
+  if (res.status === 401 && !isRefreshing) {
+    isRefreshing = true;
+    try {
+      // Try to refresh the token first
+      const token = localStorage.getItem('crm-auth-token');
+      if (token) {
+        const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        });
+        if (refreshRes.ok) {
+          const data = await refreshRes.json();
+          localStorage.setItem('crm-auth-token', data.token);
+          isRefreshing = false;
+          return; // Token refreshed — caller can retry
+        }
+      }
+      // Refresh failed — actually logged out
+      localStorage.removeItem('crm-auth-token');
+      window.location.hash = '#/';
+      window.location.reload();
+    } catch {
+      // Network error — don't log out, server might be down
+      console.warn('[bridge] 401 refresh failed — keeping token, server may be restarting');
+    } finally {
+      isRefreshing = false;
+    }
   }
 }
 

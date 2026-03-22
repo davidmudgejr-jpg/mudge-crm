@@ -62,7 +62,7 @@ function signToken(user) {
       role: user.role || 'broker',
     },
     JWT_SECRET,
-    { expiresIn: '30d' }
+    { expiresIn: '90d' }
   );
 }
 
