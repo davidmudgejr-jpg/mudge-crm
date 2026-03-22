@@ -12,6 +12,7 @@ const Anthropic = require('@anthropic-ai/sdk');
 const { Server: SocketServer } = require('socket.io');
 const multer = require('multer');
 const { initChat, registerChatRoutes } = require('./services/chat');
+const { mountAiRoutes } = require('./routes/ai');
 
 // Load env
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
@@ -232,6 +233,13 @@ app.post('/api/auth/change-password', authLimiter, requireAuth, async (req, res)
     console.error('[auth/change-password] Error:', err.message);
     res.status(500).json({ error: 'Password change failed' });
   }
+});
+
+// Mount AI Master System API (uses X-Agent-Key auth, not JWT)
+// Must be mounted BEFORE requireAuth so agent routes bypass JWT check
+mountAiRoutes(app, {
+  getPool: () => pool,
+  getIo: () => io,
 });
 
 // Protect all API routes below this line (except Houston completions which use optionalAuth)

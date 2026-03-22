@@ -1,0 +1,892 @@
+// AI Master System API — Endpoints for external AI agents (OpenClaw fleet)
+// Auth: X-Agent-Key header (checked against AGENT_API_KEY env var)
+// Mounted BEFORE the general requireAuth middleware in index.js
+
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+
+const router = express.Router();
+
+// These get injected via the mount function (getters for lazy access —
+// pool and io are created after route registration, so we use getters)
+let getPool = () => null;
+let getIo = () => null;
+
+// ============================================================
+// AUTH MIDDLEWARE — X-Agent-Key
+// ============================================================
+
+function requireAgentKey(req, res, next) {
+  const agentKey = req.headers['x-agent-key'];
+  const validKey = process.env.AGENT_API_KEY;
+
+  if (!validKey) {
+    return res.status(503).json({ error: 'Agent API not configured — set AGENT_API_KEY env var' });
+  }
+  if (!agentKey || agentKey !== validKey) {
+    return res.status(401).json({ error: 'Invalid or missing X-Agent-Key' });
+  }
+
+  // Extract agent name from X-Agent-Name header (optional, for logging)
+  req.agentName = req.headers['x-agent-name'] || 'unknown';
+  next();
+}
+
+// Rate limit: 60 requests/minute per key
+const agentLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => req.headers['x-agent-key'] || req.ip,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Agent rate limit exceeded (60/min)' },
+});
+
+// Apply to all AI routes
+router.use(agentLimiter);
+router.use(requireAgentKey);
+
+// Logging middleware
+router.use((req, _res, next) => {
+  console.log(`[AI API] ${req.method} ${req.originalUrl} from agent: ${req.agentName}`);
+  next();
+});
+
+// Helper: get pool or send 503
+function dbPool(res) {
+  const pool = getPool();
+  if (!pool) {
+    res.status(503).json({ error: 'Database not configured' });
+    return null;
+  }
+  return pool;
+}
+
+// Helper: clamp limit parameter
+function clampLimit(val, defaultVal = 20, maxVal = 100) {
+  const n = parseInt(val, 10);
+  if (isNaN(n) || n < 1) return defaultVal;
+  return Math.min(n, maxVal);
+}
+
+// ============================================================
+// 1. GET /api/ai/contacts — Search contacts
+// ============================================================
+router.get('/contacts', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { search, city, type, company, limit } = req.query;
+    const conditions = [];
+    const params = [];
+    let idx = 1;
+
+    if (search) {
+      conditions.push(`(full_name ILIKE $${idx} OR first_name ILIKE $${idx})`);
+      params.push(`%${search}%`);
+      idx++;
+    }
+    if (city) {
+      conditions.push(`work_city ILIKE $${idx}`);
+      params.push(`%${city}%`);
+      idx++;
+    }
+    if (type) {
+      conditions.push(`type = $${idx}`);
+      params.push(type);
+      idx++;
+    }
+    if (company) {
+      conditions.push(`contact_id IN (
+        SELECT cc.contact_id FROM contact_companies cc
+        JOIN companies c ON c.company_id = cc.company_id
+        WHERE c.company_name ILIKE $${idx}
+      )`);
+      params.push(`%${company}%`);
+      idx++;
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const lim = clampLimit(limit);
+    params.push(lim);
+
+    const result = await pool.query(
+      `SELECT contact_id AS id, full_name, first_name, email, phone_1, title, type, work_city AS city
+       FROM contacts ${where}
+       ORDER BY modified DESC NULLS LAST
+       LIMIT $${idx}`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[AI API] /contacts error:', err.message);
+    res.status(500).json({ error: 'Failed to query contacts' });
+  }
+});
+
+// ============================================================
+// 2. GET /api/ai/properties — Search properties
+// ============================================================
+router.get('/properties', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { search, city, type, min_sf, max_sf, min_price, max_price, limit } = req.query;
+    const conditions = [];
+    const params = [];
+    let idx = 1;
+
+    if (search) {
+      conditions.push(`property_address ILIKE $${idx}`);
+      params.push(`%${search}%`);
+      idx++;
+    }
+    if (city) {
+      conditions.push(`city ILIKE $${idx}`);
+      params.push(`%${city}%`);
+      idx++;
+    }
+    if (type) {
+      conditions.push(`property_type = $${idx}`);
+      params.push(type);
+      idx++;
+    }
+    if (min_sf) {
+      conditions.push(`rba >= $${idx}`);
+      params.push(parseFloat(min_sf));
+      idx++;
+    }
+    if (max_sf) {
+      conditions.push(`rba <= $${idx}`);
+      params.push(parseFloat(max_sf));
+      idx++;
+    }
+    if (min_price) {
+      conditions.push(`last_sale_price >= $${idx}`);
+      params.push(parseFloat(min_price));
+      idx++;
+    }
+    if (max_price) {
+      conditions.push(`last_sale_price <= $${idx}`);
+      params.push(parseFloat(max_price));
+      idx++;
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const lim = clampLimit(limit);
+    params.push(lim);
+
+    const result = await pool.query(
+      `SELECT property_id AS id, property_address AS street_address, city, county,
+              property_type AS type, rba AS building_sf, land_sf AS lot_sf,
+              last_sale_price AS price, true_owner_name AS entity_name, zoning
+       FROM properties ${where}
+       ORDER BY last_modified DESC NULLS LAST
+       LIMIT $${idx}`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[AI API] /properties error:', err.message);
+    res.status(500).json({ error: 'Failed to query properties' });
+  }
+});
+
+// ============================================================
+// 3. GET /api/ai/companies — Search companies
+// ============================================================
+router.get('/companies', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { search, city, type, limit } = req.query;
+    const conditions = [];
+    const params = [];
+    let idx = 1;
+
+    if (search) {
+      conditions.push(`company_name ILIKE $${idx}`);
+      params.push(`%${search}%`);
+      idx++;
+    }
+    if (city) {
+      conditions.push(`city ILIKE $${idx}`);
+      params.push(`%${city}%`);
+      idx++;
+    }
+    if (type) {
+      conditions.push(`company_type = $${idx}`);
+      params.push(type);
+      idx++;
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const lim = clampLimit(limit);
+    params.push(lim);
+
+    const result = await pool.query(
+      `SELECT company_id AS id, company_name, city, 'CA' AS state, company_type AS type, lease_exp
+       FROM companies ${where}
+       ORDER BY modified DESC NULLS LAST
+       LIMIT $${idx}`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[AI API] /companies error:', err.message);
+    res.status(500).json({ error: 'Failed to query companies' });
+  }
+});
+
+// ============================================================
+// 4. GET /api/ai/comps — Lease and sale comps
+// ============================================================
+router.get('/comps', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { city, type, min_sf, max_sf, limit } = req.query;
+    const lim = clampLimit(limit);
+    const isSale = type === 'sale';
+
+    const conditions = [];
+    const params = [];
+    let idx = 1;
+    const sfAlias = isSale ? 'sc' : 'lc';
+
+    if (city) {
+      conditions.push(`p.city ILIKE $${idx}`);
+      params.push(`%${city}%`);
+      idx++;
+    }
+    if (min_sf) {
+      conditions.push(`${sfAlias}.sf >= $${idx}`);
+      params.push(parseFloat(min_sf));
+      idx++;
+    }
+    if (max_sf) {
+      conditions.push(`${sfAlias}.sf <= $${idx}`);
+      params.push(parseFloat(max_sf));
+      idx++;
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(lim);
+
+    if (isSale) {
+      const result = await pool.query(
+        `SELECT sc.id, sc.sale_date, sc.sale_price, sc.price_psf, sc.cap_rate,
+                sc.sf, sc.buyer_name, sc.seller_name, sc.property_type,
+                p.property_address, p.city
+         FROM sale_comps sc
+         LEFT JOIN properties p ON p.property_id = sc.property_id
+         ${where}
+         ORDER BY sc.sale_date DESC NULLS LAST
+         LIMIT $${idx}`,
+        params
+      );
+      res.json(result.rows);
+    } else {
+      const result = await pool.query(
+        `SELECT lc.id, lc.tenant_name, lc.property_type, lc.sf, lc.rate,
+                lc.lease_type, lc.sign_date, lc.expiration_date, lc.term_months,
+                p.property_address, p.city
+         FROM lease_comps lc
+         LEFT JOIN properties p ON p.property_id = lc.property_id
+         ${where}
+         ORDER BY lc.sign_date DESC NULLS LAST
+         LIMIT $${idx}`,
+        params
+      );
+      res.json(result.rows);
+    }
+  } catch (err) {
+    console.error('[AI API] /comps error:', err.message);
+    res.status(500).json({ error: 'Failed to query comps' });
+  }
+});
+
+// ============================================================
+// 5. GET /api/ai/deals — Deals with linked info
+// ============================================================
+router.get('/deals', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { status, deal_type, limit } = req.query;
+    const conditions = [];
+    const params = [];
+    let idx = 1;
+
+    if (status) {
+      conditions.push(`d.status = $${idx}`);
+      params.push(status);
+      idx++;
+    }
+    if (deal_type) {
+      conditions.push(`d.deal_type = $${idx}`);
+      params.push(deal_type);
+      idx++;
+    }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const lim = clampLimit(limit, 20, 100);
+    params.push(lim);
+
+    const result = await pool.query(
+      `SELECT d.deal_id AS id, d.deal_name, d.deal_type, d.status, d.sf, d.rate, d.price,
+              d.close_date, d.priority_deal,
+              (SELECT string_agg(p.property_address, ', ')
+               FROM property_deals pd JOIN properties p ON p.property_id = pd.property_id
+               WHERE pd.deal_id = d.deal_id) AS properties,
+              (SELECT string_agg(c.full_name, ', ')
+               FROM deal_contacts dc JOIN contacts c ON c.contact_id = dc.contact_id
+               WHERE dc.deal_id = d.deal_id) AS contacts
+       FROM deals d ${where}
+       ORDER BY d.modified DESC NULLS LAST
+       LIMIT $${idx}`,
+      params
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[AI API] /deals error:', err.message);
+    res.status(500).json({ error: 'Failed to query deals' });
+  }
+});
+
+// ============================================================
+// 6. GET /api/ai/stats — CRM entity counts and summary
+// ============================================================
+router.get('/stats', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const counts = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM contacts)::int AS contacts,
+        (SELECT COUNT(*) FROM properties)::int AS properties,
+        (SELECT COUNT(*) FROM companies)::int AS companies,
+        (SELECT COUNT(*) FROM deals)::int AS deals,
+        (SELECT COUNT(*) FROM deals WHERE status = 'Active')::int AS active_deals,
+        (SELECT COUNT(*) FROM interactions)::int AS interactions,
+        (SELECT COUNT(*) FROM action_items WHERE status != 'Done')::int AS open_tasks,
+        (SELECT COUNT(*) FROM lease_comps)::int AS lease_comps,
+        (SELECT COUNT(*) FROM sale_comps)::int AS sale_comps,
+        (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'pending')::int AS pending_sandbox_contacts,
+        (SELECT COUNT(*) FROM sandbox_enrichments WHERE status = 'pending')::int AS pending_sandbox_enrichments,
+        (SELECT COUNT(*) FROM sandbox_signals WHERE status = 'pending')::int AS pending_sandbox_signals,
+        (SELECT COUNT(*) FROM sandbox_outreach WHERE status = 'pending')::int AS pending_sandbox_outreach
+    `);
+
+    const recent = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM interactions WHERE created_at > NOW() - INTERVAL '7 days')::int AS interactions_7d,
+        (SELECT COUNT(*) FROM contacts WHERE created_at > NOW() - INTERVAL '7 days')::int AS new_contacts_7d,
+        (SELECT COUNT(*) FROM deals WHERE modified > NOW() - INTERVAL '7 days')::int AS deals_updated_7d
+    `);
+
+    res.json({
+      counts: counts.rows[0],
+      recent_activity: recent.rows[0],
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error('[AI API] /stats error:', err.message);
+    res.status(500).json({ error: 'Failed to query stats' });
+  }
+});
+
+// ============================================================
+// 7. POST /api/ai/sandbox/contact — Create sandbox contact
+// ============================================================
+router.post('/sandbox/contact', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      full_name, first_name, email, phone_1, company_name, title, type,
+      city, state, sources, source_urls, confidence_score, agent_name, notes,
+    } = req.body;
+
+    if (!agent_name) {
+      return res.status(400).json({ error: 'agent_name is required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO sandbox_contacts
+         (full_name, first_name, email, phone_1, company_name, title, type,
+          work_city, work_state, sources, source_urls, confidence_score, agent_name, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING id, status`,
+      [
+        full_name || null, first_name || null, email || null, phone_1 || null,
+        company_name || null, title || null, type || null, city || null, state || null,
+        sources || null, source_urls ? JSON.stringify(source_urls) : '{}',
+        confidence_score || 0, agent_name, notes || null,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[AI API] /sandbox/contact error:', err.message);
+    res.status(500).json({ error: 'Failed to create sandbox contact' });
+  }
+});
+
+// ============================================================
+// 8. POST /api/ai/sandbox/enrichment — Create enrichment proposal
+// ============================================================
+router.post('/sandbox/enrichment', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      contact_id, field_name, old_value, new_value,
+      source, source_url, confidence_score, agent_name, notes,
+    } = req.body;
+
+    if (!agent_name || !field_name || !new_value) {
+      return res.status(400).json({ error: 'agent_name, field_name, and new_value are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO sandbox_enrichments
+         (contact_id, field_name, old_value, new_value, source, source_url,
+          confidence_score, agent_name, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING id, status`,
+      [
+        contact_id || null, field_name, old_value || null, new_value,
+        source || null, source_url || null, confidence_score || 0,
+        agent_name, notes || null,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[AI API] /sandbox/enrichment error:', err.message);
+    res.status(500).json({ error: 'Failed to create sandbox enrichment' });
+  }
+});
+
+// ============================================================
+// 9. POST /api/ai/sandbox/signal — Create market signal
+// ============================================================
+router.post('/sandbox/signal', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      headline, description, signal_type, source_url, source_name,
+      confidence_score, crm_match, crm_entity_type, crm_entity_id, agent_name, notes,
+    } = req.body;
+
+    if (!agent_name || !headline || !signal_type) {
+      return res.status(400).json({ error: 'agent_name, headline, and signal_type are required' });
+    }
+
+    const crm_company_ids = crm_entity_type === 'company' && crm_entity_id ? [crm_entity_id] : null;
+    const crm_property_ids = crm_entity_type === 'property' && crm_entity_id ? [crm_entity_id] : null;
+
+    const result = await pool.query(
+      `INSERT INTO sandbox_signals
+         (headline, details, signal_type, source_url, source_name,
+          confidence_score, crm_match, crm_company_ids, crm_property_ids,
+          agent_name, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, status`,
+      [
+        headline, description || null, signal_type, source_url || null, source_name || null,
+        confidence_score || 0, crm_match || false,
+        crm_company_ids, crm_property_ids,
+        agent_name, notes || null,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[AI API] /sandbox/signal error:', err.message);
+    res.status(500).json({ error: 'Failed to create sandbox signal' });
+  }
+});
+
+// ============================================================
+// 10. POST /api/ai/sandbox/outreach — Create draft outreach
+// ============================================================
+router.post('/sandbox/outreach', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      contact_id, email, subject, body, match_reason,
+      property_id, confidence_score, agent_name, dedup_key, notes,
+    } = req.body;
+
+    if (!agent_name || !email || !subject || !body) {
+      return res.status(400).json({ error: 'agent_name, email, subject, and body are required' });
+    }
+
+    let property_address = null;
+    if (property_id) {
+      const prop = await pool.query(
+        'SELECT property_address FROM properties WHERE property_id = $1', [property_id]
+      );
+      if (prop.rows[0]) property_address = prop.rows[0].property_address;
+    }
+
+    let contact_name = null;
+    if (contact_id) {
+      const ct = await pool.query(
+        'SELECT full_name FROM contacts WHERE contact_id = $1', [contact_id]
+      );
+      if (ct.rows[0]) contact_name = ct.rows[0].full_name;
+    }
+
+    const result = await pool.query(
+      `INSERT INTO sandbox_outreach
+         (contact_id, contact_name, email, subject, body, match_reason,
+          property_address, confidence_score, agent_name, dedup_key, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, status`,
+      [
+        contact_id || null, contact_name, email, subject, body,
+        match_reason || null, property_address,
+        confidence_score || 0, agent_name, dedup_key || null, notes || null,
+      ]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    console.error('[AI API] /sandbox/outreach error:', err.message);
+    res.status(500).json({ error: 'Failed to create sandbox outreach' });
+  }
+});
+
+// ============================================================
+// 11. POST /api/ai/agent/heartbeat — Upsert agent status
+// ============================================================
+router.post('/agent/heartbeat', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      agent_name, tier, status, current_task,
+      items_processed_today, items_in_queue, metadata,
+    } = req.body;
+
+    if (!agent_name || !tier) {
+      return res.status(400).json({ error: 'agent_name and tier are required' });
+    }
+
+    await pool.query(
+      `INSERT INTO agent_heartbeats
+         (agent_name, tier, status, current_task, items_processed_today, items_in_queue, metadata, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+       ON CONFLICT (agent_name) DO UPDATE SET
+         tier = EXCLUDED.tier,
+         status = EXCLUDED.status,
+         current_task = EXCLUDED.current_task,
+         items_processed_today = EXCLUDED.items_processed_today,
+         items_in_queue = EXCLUDED.items_in_queue,
+         metadata = EXCLUDED.metadata,
+         updated_at = NOW()`,
+      [
+        agent_name, tier, status || 'idle', current_task || null,
+        items_processed_today || 0, items_in_queue || 0,
+        metadata ? JSON.stringify(metadata) : '{}',
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[AI API] /agent/heartbeat error:', err.message);
+    res.status(500).json({ error: 'Failed to upsert heartbeat' });
+  }
+});
+
+// ============================================================
+// 12. POST /api/ai/agent/log — Insert agent log entry
+// ============================================================
+router.post('/agent/log', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { agent_name, log_type, message, details, level } = req.body;
+
+    if (!agent_name || !message) {
+      return res.status(400).json({ error: 'agent_name and message are required' });
+    }
+
+    const resolvedType = log_type || (level === 'error' ? 'error' : 'activity');
+
+    await pool.query(
+      `INSERT INTO agent_logs (agent_name, log_type, content, metrics)
+       VALUES ($1, $2, $3, $4)`,
+      [
+        agent_name, resolvedType, message,
+        details ? JSON.stringify(details) : '{}',
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[AI API] /agent/log error:', err.message);
+    res.status(500).json({ error: 'Failed to insert agent log' });
+  }
+});
+
+// ============================================================
+// 13. GET /api/ai/queue/pending — All pending sandbox items
+// ============================================================
+router.get('/queue/pending', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const [contacts, enrichments, signals, outreach] = await Promise.all([
+      pool.query(
+        `SELECT id, 'contacts' AS table_name, full_name AS preview,
+                confidence_score, agent_name, created_at
+         FROM sandbox_contacts WHERE status = 'pending'
+         ORDER BY created_at DESC`
+      ),
+      pool.query(
+        `SELECT id, 'enrichments' AS table_name,
+                field_name || ': ' || COALESCE(old_value, '(empty)') || ' -> ' || new_value AS preview,
+                confidence_score, agent_name, created_at
+         FROM sandbox_enrichments WHERE status = 'pending'
+         ORDER BY created_at DESC`
+      ),
+      pool.query(
+        `SELECT id, 'signals' AS table_name, headline AS preview,
+                confidence_score, agent_name, created_at
+         FROM sandbox_signals WHERE status = 'pending'
+         ORDER BY created_at DESC`
+      ),
+      pool.query(
+        `SELECT id, 'outreach' AS table_name,
+                email || ' — ' || subject AS preview,
+                confidence_score, agent_name, created_at
+         FROM sandbox_outreach WHERE status = 'pending'
+         ORDER BY created_at DESC`
+      ),
+    ]);
+
+    const all = [
+      ...contacts.rows,
+      ...enrichments.rows,
+      ...signals.rows,
+      ...outreach.rows,
+    ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    res.json(all);
+  } catch (err) {
+    console.error('[AI API] /queue/pending error:', err.message);
+    res.status(500).json({ error: 'Failed to query pending queue' });
+  }
+});
+
+// ============================================================
+// 14. POST /api/ai/queue/approve/:table/:id — Approve + promote
+// ============================================================
+const VALID_SANDBOX_TABLES = ['contacts', 'enrichments', 'signals', 'outreach'];
+
+router.post('/queue/approve/:table/:id', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { table, id } = req.params;
+    if (!VALID_SANDBOX_TABLES.includes(table)) {
+      return res.status(400).json({ error: `Invalid table. Must be one of: ${VALID_SANDBOX_TABLES.join(', ')}` });
+    }
+
+    const sandboxTable = `sandbox_${table}`;
+    let promoted = false;
+
+    const updateResult = await pool.query(
+      `UPDATE ${sandboxTable} SET status = 'approved', reviewed_at = NOW()
+       WHERE id = $1 AND status = 'pending'
+       RETURNING *`,
+      [id]
+    );
+
+    if (updateResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Item not found or already processed' });
+    }
+
+    const item = updateResult.rows[0];
+
+    if (table === 'contacts') {
+      const insertResult = await pool.query(
+        `INSERT INTO contacts
+           (full_name, first_name, email, phone_1, title, type,
+            work_city, work_state, data_source, notes)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         RETURNING contact_id`,
+        [
+          item.full_name, item.first_name, item.email, item.phone_1,
+          item.title, item.type, item.work_city, item.work_state,
+          item.data_source || `ai-agent:${item.agent_name}`,
+          item.notes,
+        ]
+      );
+      await pool.query(
+        `UPDATE ${sandboxTable} SET status = 'promoted', promoted_at = NOW(), promoted_to_id = $1
+         WHERE id = $2`,
+        [insertResult.rows[0].contact_id, id]
+      );
+      promoted = true;
+    } else if (table === 'enrichments') {
+      if (item.contact_id && item.field_name && item.new_value) {
+        const allowedFields = [
+          'email', 'email_2', 'email_3', 'phone_1', 'phone_2', 'phone_3',
+          'home_address', 'work_address', 'work_city', 'work_state', 'work_zip',
+          'title', 'linkedin', 'type', 'full_name', 'first_name', 'company_name',
+        ];
+        if (allowedFields.includes(item.field_name)) {
+          await pool.query(
+            `UPDATE contacts SET ${item.field_name} = $1, modified = NOW() WHERE contact_id = $2`,
+            [item.new_value, item.contact_id]
+          );
+          await pool.query(
+            `UPDATE ${sandboxTable} SET status = 'promoted', promoted_at = NOW() WHERE id = $1`,
+            [id]
+          );
+          promoted = true;
+        }
+      }
+    } else if (table === 'signals') {
+      const insertResult = await pool.query(
+        `INSERT INTO action_items (name, notes, source, status)
+         VALUES ($1, $2, 'ai-signal', 'Todo')
+         RETURNING action_item_id`,
+        [
+          item.headline,
+          `Signal type: ${item.signal_type}\n${item.details || ''}\nSource: ${item.source_url || 'N/A'}`,
+        ]
+      );
+      await pool.query(
+        `UPDATE ${sandboxTable} SET status = 'promoted', promoted_at = NOW(),
+                promoted_action_item_id = $1 WHERE id = $2`,
+        [insertResult.rows[0].action_item_id, id]
+      );
+      promoted = true;
+    } else if (table === 'outreach') {
+      // Already marked approved above — separate email sending step
+      promoted = false;
+    }
+
+    res.json({ ok: true, promoted });
+  } catch (err) {
+    console.error('[AI API] /queue/approve error:', err.message);
+    res.status(500).json({ error: 'Failed to approve item' });
+  }
+});
+
+// ============================================================
+// 15. POST /api/ai/queue/reject/:table/:id — Reject with feedback
+// ============================================================
+router.post('/queue/reject/:table/:id', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { table, id } = req.params;
+    const { reason, feedback } = req.body;
+
+    if (!VALID_SANDBOX_TABLES.includes(table)) {
+      return res.status(400).json({ error: `Invalid table. Must be one of: ${VALID_SANDBOX_TABLES.join(', ')}` });
+    }
+
+    const sandboxTable = `sandbox_${table}`;
+    const result = await pool.query(
+      `UPDATE ${sandboxTable} SET
+         status = 'rejected',
+         reviewed_at = NOW(),
+         review_notes = $1
+       WHERE id = $2 AND status = 'pending'
+       RETURNING id`,
+      [`${reason || 'Rejected'}${feedback ? ` — ${feedback}` : ''}`, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Item not found or already processed' });
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[AI API] /queue/reject error:', err.message);
+    res.status(500).json({ error: 'Failed to reject item' });
+  }
+});
+
+// ============================================================
+// 16. POST /api/ai/chat/post — Houston posts to Team Chat
+// ============================================================
+router.post('/chat/post', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { channel_id, message, sender_name } = req.body;
+
+    if (!message) {
+      return res.status(400).json({ error: 'message is required' });
+    }
+
+    let targetChannelId = channel_id;
+    if (!targetChannelId) {
+      const ch = await pool.query(
+        "SELECT id FROM chat_channels WHERE name = 'General' AND channel_type = 'group' LIMIT 1"
+      );
+      if (ch.rows.length === 0) {
+        return res.status(404).json({ error: 'No General channel found' });
+      }
+      targetChannelId = ch.rows[0].id;
+    }
+
+    const displayName = sender_name || 'Houston';
+    const result = await pool.query(
+      `INSERT INTO chat_messages
+         (channel_id, sender_id, sender_type, body, message_type, houston_meta)
+       VALUES ($1, NULL, 'houston', $2, 'houston_insight', $3)
+       RETURNING *`,
+      [
+        targetChannelId,
+        message,
+        JSON.stringify({
+          trigger: 'external_agent',
+          sender_name: displayName,
+          agent: req.agentName,
+        }),
+      ]
+    );
+
+    const newMessage = result.rows[0];
+
+    // Emit via Socket.io for real-time delivery
+    const io = getIo();
+    if (io) {
+      io.to(`channel:${targetChannelId}`).emit('chat:message:new', newMessage);
+    }
+
+    res.json({ ok: true, message_id: newMessage.id });
+  } catch (err) {
+    console.error('[AI API] /chat/post error:', err.message);
+    res.status(500).json({ error: 'Failed to post chat message' });
+  }
+});
+
+// ============================================================
+// MOUNT FUNCTION — called from server/index.js
+// ============================================================
+
+/**
+ * Mount the AI API routes onto the Express app.
+ * Must be called BEFORE app.use('/api', requireAuth) so these routes
+ * use their own X-Agent-Key auth instead of JWT.
+ *
+ * Uses getter functions so pool/io can be initialized after mounting.
+ *
+ * @param {express.Application} app - Express app
+ * @param {object} deps - { getPool: () => pool, getIo: () => io }
+ */
+function mountAiRoutes(app, deps) {
+  getPool = deps.getPool;
+  getIo = deps.getIo;
+  app.use('/api/ai', router);
+  console.log('[server] AI Master System API mounted at /api/ai');
+}
+
+module.exports = { mountAiRoutes };
