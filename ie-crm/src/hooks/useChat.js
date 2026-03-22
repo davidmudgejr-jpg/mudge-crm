@@ -5,7 +5,13 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
-const SOCKET_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// Socket.io needs direct connection (can't go through Vercel rewrite proxy)
+// VITE_SOCKET_URL for explicit override, else VITE_API_URL, else Railway production, else localhost
+const SOCKET_URL = import.meta.env.VITE_SOCKET_URL
+  || import.meta.env.VITE_API_URL
+  || (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+    ? 'https://mudge-crm-production.up.railway.app'
+    : 'http://localhost:3001');
 
 let socket = null;
 
@@ -273,7 +279,11 @@ function authHeaders() {
   return h;
 }
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+// REST calls can go through Vercel rewrite proxy (empty string = same origin)
+const API_BASE = import.meta.env.VITE_API_URL
+  || (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
+    ? ''
+    : 'http://localhost:3001');
 
 async function fetchMessages(channelId, userId, { before = null, limit = 50 } = {}) {
   let url = `${API_BASE}/api/chat/messages/${channelId}?userId=${userId}&limit=${limit}`;
