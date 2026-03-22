@@ -882,7 +882,7 @@ router.post('/council/post', async (req, res) => {
       return res.status(400).json({ error: 'message is required' });
     }
 
-    const validTypes = ['analysis', 'strategy', 'action_request', 'insight', 'status'];
+    const validTypes = ['analysis', 'strategy', 'action_request', 'recommendation', 'insight', 'status'];
     const resolvedType = validTypes.includes(message_type) ? message_type : 'insight';
     const dbMessageType = `council_${resolvedType}`;
     const displayName = sender_name || 'Houston Command';
@@ -896,6 +896,22 @@ router.post('/council/post', async (req, res) => {
     }
     const councilChannelId = ch.rows[0].id;
 
+    // Build houston_meta — recommendations get special metadata
+    const houstonMeta = {
+      trigger: 'council_post',
+      sender_name: displayName,
+      message_type: resolvedType,
+      agent: req.agentName,
+    };
+    if (resolvedType === 'recommendation') {
+      houstonMeta.recommendation = {
+        type: 'recommendation',
+        status: 'pending',
+        approved_by: null,
+        approved_at: null,
+      };
+    }
+
     // Insert the message
     const result = await pool.query(
       `INSERT INTO chat_messages
@@ -906,21 +922,18 @@ router.post('/council/post', async (req, res) => {
         councilChannelId,
         message,
         dbMessageType,
-        JSON.stringify({
-          trigger: 'council_post',
-          sender_name: displayName,
-          message_type: resolvedType,
-          agent: req.agentName,
-        }),
+        JSON.stringify(houstonMeta),
       ]
     );
 
     const newMessage = result.rows[0];
     newMessage.sender_name = displayName;
-    newMessage.sender_color = resolvedType === 'action_request' ? '#AF52DE' : '#818cf8'; // purple for requests, indigo for others
+    newMessage.sender_color = resolvedType === 'recommendation' ? '#AF52DE'
+      : resolvedType === 'action_request' ? '#AF52DE'
+      : '#818cf8';
 
-    // If action_request, create a council proposal
-    if (resolvedType === 'action_request') {
+    // If action_request or recommendation, create a council proposal
+    if (resolvedType === 'action_request' || resolvedType === 'recommendation') {
       await pool.query(
         `INSERT INTO council_proposals (message_id, channel_id, proposal_text, sender_name)
          VALUES ($1, $2, $3, $4)`,
@@ -1231,6 +1244,201 @@ directivesRouter.patch('/directive/:id', requireJwtAdmin, async (req, res) => {
   } catch (err) {
     console.error('[AI API] PATCH /directive/:id error:', err.message);
     res.status(500).json({ error: 'Failed to update directive' });
+  }
+});
+
+// ============================================================
+// 22. PUT /api/ai/council/recommendation/:messageId — Approve/Reject/Discuss a recommendation
+// ============================================================
+directivesRouter.put('/council/recommendation/:messageId', requireJwtAdmin, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { messageId } = req.params;
+    const { status, reviewer } = req.body;
+
+    const validStatuses = ['approved', 'rejected', 'discuss'];
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({ error: `Invalid status. Must be: ${validStatuses.join(', ')}` });
+    }
+
+    const reviewerName = reviewer || req.user.display_name || 'Admin';
+
+    // Update the council_proposals table
+    const proposalResult = await pool.query(
+      `UPDATE council_proposals
+       SET status = $1, approved_by = $2, approval_notes = $3, reviewed_at = NOW()
+       WHERE message_id = $4 AND status = 'pending'
+       RETURNING *`,
+      [
+        status === 'discuss' ? 'pending' : status,
+        req.user.user_id,
+        status === 'discuss' ? 'Marked for discussion' : null,
+        messageId,
+      ]
+    );
+
+    if (proposalResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Recommendation not found or already reviewed' });
+    }
+
+    const proposal = proposalResult.rows[0];
+
+    // Update houston_meta on the original message with recommendation status
+    await pool.query(
+      `UPDATE chat_messages
+       SET houston_meta = houston_meta || $1::jsonb
+       WHERE id = $2`,
+      [
+        JSON.stringify({
+          recommendation: {
+            type: 'recommendation',
+            status,
+            approved_by: reviewerName,
+            approved_at: new Date().toISOString(),
+          },
+        }),
+        messageId,
+      ]
+    );
+
+    // Find council channel
+    const ch = await pool.query(
+      "SELECT id FROM chat_channels WHERE channel_type = 'council' LIMIT 1"
+    );
+    const councilChannelId = ch.rows.length > 0 ? ch.rows[0].id : null;
+
+    const io = getIo();
+
+    if (status === 'approved') {
+      // Post confirmation to Council
+      if (councilChannelId) {
+        const confirmMsg = await pool.query(
+          `INSERT INTO chat_messages
+             (channel_id, sender_id, sender_type, body, message_type)
+           VALUES ($1, $2, 'user', $3, 'system')
+           RETURNING *`,
+          [
+            councilChannelId,
+            req.user.user_id,
+            `✅ Recommendation approved by ${reviewerName}. Executing now...`,
+          ]
+        );
+        if (io) {
+          const msg = confirmMsg.rows[0];
+          msg.sender_name = reviewerName;
+          io.to('council').emit('council:message:new', msg);
+        }
+      }
+
+      // Trigger Houston Sonnet to execute the recommendation
+      const councilResponder = getCouncilResponder();
+      if (councilResponder) {
+        // Create a synthetic message that tells Houston to execute the recommendation
+        const executionMessage = {
+          id: messageId + '-exec',
+          channel_id: councilChannelId,
+          sender_type: 'user',
+          sender_name: reviewerName,
+          body: `Houston Command recommended: ${proposal.proposal_text}\n\n${reviewerName} approved this recommendation. Execute it now. Take the recommended action and report back what you did.`,
+          message_type: 'text',
+          created_at: new Date().toISOString(),
+        };
+        councilResponder(executionMessage).catch(err =>
+          console.error('[AI API] Recommendation execution error:', err.message)
+        );
+      }
+
+      // Post summary to Team Chat (General channel)
+      try {
+        const generalCh = await pool.query(
+          "SELECT id FROM chat_channels WHERE name = 'General' AND channel_type = 'group' LIMIT 1"
+        );
+        if (generalCh.rows.length > 0) {
+          const summary = proposal.proposal_text.length > 150
+            ? proposal.proposal_text.slice(0, 150) + '...'
+            : proposal.proposal_text;
+          const relayMsg = await pool.query(
+            `INSERT INTO chat_messages
+               (channel_id, sender_id, sender_type, body, message_type, houston_meta)
+             VALUES ($1, NULL, 'houston', $2, 'houston_insight', $3)
+             RETURNING *`,
+            [
+              generalCh.rows[0].id,
+              `Hey team — Houston Command identified a recommendation: ${summary}\n\n${reviewerName} approved it and I'm executing it now. I'll report back when complete.`,
+              JSON.stringify({
+                trigger: 'recommendation_approved',
+                sender_name: 'Houston',
+                recommendation_message_id: messageId,
+              }),
+            ]
+          );
+          if (io) {
+            const relayed = relayMsg.rows[0];
+            relayed.sender_name = 'Houston';
+            relayed.sender_color = '#10b981';
+            io.to(`channel:${generalCh.rows[0].id}`).emit('chat:message:new', relayed);
+          }
+        }
+      } catch (relayErr) {
+        console.error('[AI API] Failed to relay recommendation to team chat:', relayErr.message);
+      }
+    } else if (status === 'rejected') {
+      // Post rejection to Council
+      if (councilChannelId) {
+        const rejectMsg = await pool.query(
+          `INSERT INTO chat_messages
+             (channel_id, sender_id, sender_type, body, message_type)
+           VALUES ($1, $2, 'user', $3, 'system')
+           RETURNING *`,
+          [councilChannelId, req.user.user_id, `❌ Recommendation rejected by ${reviewerName}.`]
+        );
+        if (io) {
+          const msg = rejectMsg.rows[0];
+          msg.sender_name = reviewerName;
+          io.to('council').emit('council:message:new', msg);
+        }
+      }
+    } else if (status === 'discuss') {
+      // Trigger Houston Sonnet to discuss the recommendation
+      const councilResponder = getCouncilResponder();
+      if (councilResponder) {
+        const discussMessage = {
+          id: messageId + '-discuss',
+          channel_id: councilChannelId,
+          sender_type: 'user',
+          sender_name: reviewerName,
+          body: `${reviewerName} wants to discuss this recommendation: ${proposal.proposal_text}\n\nWhat are the pros, cons, and alternatives? Help me think through this.`,
+          message_type: 'text',
+          created_at: new Date().toISOString(),
+        };
+        councilResponder(discussMessage).catch(err =>
+          console.error('[AI API] Recommendation discuss error:', err.message)
+        );
+      }
+    }
+
+    // Emit proposal update via socket
+    if (io) {
+      io.to('council').emit('council:proposal:updated', {
+        messageId,
+        status: status === 'discuss' ? 'pending' : status,
+        reviewedBy: reviewerName,
+        notes: status === 'discuss' ? 'Marked for discussion' : null,
+      });
+      // Also emit recommendation-specific event
+      io.to('council').emit('council:recommendation:updated', {
+        messageId,
+        status,
+        reviewedBy: reviewerName,
+        reviewedAt: new Date().toISOString(),
+      });
+    }
+
+    res.json({ ok: true, status, proposal: proposalResult.rows[0] });
+  } catch (err) {
+    console.error('[AI API] PUT /council/recommendation error:', err.message);
+    res.status(500).json({ error: 'Failed to update recommendation' });
   }
 });
 

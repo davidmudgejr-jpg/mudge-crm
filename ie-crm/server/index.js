@@ -1944,6 +1944,7 @@ app.get('/api/council/messages', async (req, res) => {
              END AS sender_name,
              CASE
                WHEN m.sender_type = 'houston' AND m.message_type = 'council_action_request' THEN '#AF52DE'
+               WHEN m.sender_type = 'houston' AND m.message_type = 'council_recommendation' THEN '#AF52DE'
                WHEN m.sender_type = 'houston' THEN '#818cf8'
                ELSE COALESCE(u.avatar_color, '#007AFF')
              END AS sender_color,

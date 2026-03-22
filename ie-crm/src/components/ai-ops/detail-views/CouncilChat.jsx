@@ -79,6 +79,7 @@ function MessageTypeBadge({ type }) {
     council_analysis: { label: 'Analysis', color: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
     council_strategy: { label: 'Strategy', color: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
     council_action_request: { label: 'Action Request', color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
+    council_recommendation: { label: 'Recommendation', color: 'bg-purple-500/20 text-purple-300 border-purple-500/30' },
     council_insight: { label: 'Insight', color: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30' },
     council_status: { label: 'Status', color: 'bg-gray-500/20 text-gray-300 border-gray-500/30' },
     houston_insight: { label: 'Insight', color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
@@ -91,6 +92,144 @@ function MessageTypeBadge({ type }) {
     <span className={`inline-block text-[10px] px-1.5 py-0.5 rounded border ${b.color}`}>
       {b.label}
     </span>
+  );
+}
+
+// ============================================================
+// RECOMMENDATION CARD — Special rendering for recommendations
+// ============================================================
+function RecommendationCard({ msg, isAdmin, onApproveRec, onRejectRec, onDiscussRec }) {
+  const senderName = msg.sender_name || 'Houston Command';
+  const meta = typeof msg.houston_meta === 'string'
+    ? (() => { try { return JSON.parse(msg.houston_meta); } catch { return {}; } })()
+    : (msg.houston_meta || {});
+  const recMeta = meta.recommendation || {};
+
+  // Determine status from either the recommendation metadata or the proposal status
+  const recStatus = recMeta.status || msg.proposal_status || 'pending';
+  const isPending = recStatus === 'pending';
+  const isApproved = recStatus === 'approved';
+  const isRejected = recStatus === 'rejected';
+  const isDiscuss = recStatus === 'discuss';
+
+  const reviewedBy = recMeta.approved_by || msg.proposal_reviewed_by;
+  const reviewedAt = recMeta.approved_at || msg.proposal_reviewed_at;
+
+  const statusConfig = {
+    pending: { label: 'Pending Review', classes: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
+    approved: { label: 'Approved', classes: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+    rejected: { label: 'Rejected', classes: 'bg-red-500/20 text-red-300 border-red-500/30' },
+    discuss: { label: 'Under Discussion', classes: 'bg-blue-500/20 text-blue-300 border-blue-500/30' },
+  };
+  const sc = statusConfig[recStatus] || statusConfig.pending;
+
+  return (
+    <div className="px-4 py-3 hover:bg-white/[0.02] transition-colors">
+      <div
+        className="rounded-xl border overflow-hidden transition-all duration-300"
+        style={{
+          borderImage: 'linear-gradient(135deg, rgba(99,102,241,0.4), rgba(168,85,247,0.4)) 1',
+          background: 'linear-gradient(135deg, rgba(99,102,241,0.05), rgba(168,85,247,0.05))',
+        }}
+      >
+        {/* Card border effect using pseudo-element approach with actual border */}
+        <div className="relative" style={{
+          border: '1px solid transparent',
+          borderRadius: '0.75rem',
+          backgroundClip: 'padding-box',
+        }}>
+          {/* Gradient border overlay */}
+          <div className="absolute inset-0 rounded-xl pointer-events-none" style={{
+            background: 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(168,85,247,0.3))',
+            mask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+            maskComposite: 'xor',
+            WebkitMaskComposite: 'xor',
+            padding: '1px',
+            borderRadius: '0.75rem',
+          }} />
+
+          {/* Header */}
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-white/[0.06]">
+            <span className="text-base">💡</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-purple-300">
+              Recommendation
+            </span>
+            <span className={`inline-block text-[10px] px-2 py-0.5 rounded-full border font-medium ${sc.classes}`}>
+              {sc.label}
+            </span>
+            <span className="text-[10px] text-[var(--crm-muted)] ml-auto">
+              {senderName} &middot; {new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+
+          {/* Body */}
+          <div className="px-4 py-3">
+            <div className="text-sm text-[var(--crm-text)]/90 leading-relaxed whitespace-pre-wrap">
+              {msg.body}
+            </div>
+          </div>
+
+          {/* Actions or Status footer */}
+          <div className="px-4 py-3 border-t border-white/[0.06]">
+            {isPending && isAdmin && (
+              <div className="flex gap-2">
+                <button
+                  onClick={() => onApproveRec(msg.id)}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/25 hover:bg-emerald-500/25 hover:border-emerald-500/40 transition-all duration-200"
+                >
+                  <span>✅</span> Approve
+                </button>
+                <button
+                  onClick={() => onRejectRec(msg.id)}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-red-500/15 text-red-300 border border-red-500/25 hover:bg-red-500/25 hover:border-red-500/40 transition-all duration-200"
+                >
+                  <span>❌</span> Reject
+                </button>
+                <button
+                  onClick={() => onDiscussRec(msg.id)}
+                  className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-lg bg-blue-500/15 text-blue-300 border border-blue-500/25 hover:bg-blue-500/25 hover:border-blue-500/40 transition-all duration-200"
+                >
+                  <span>💬</span> Discuss
+                </button>
+              </div>
+            )}
+
+            {isPending && !isAdmin && (
+              <div className="text-xs text-[var(--crm-muted)] italic">
+                Awaiting admin review...
+              </div>
+            )}
+
+            {isApproved && (
+              <div className="flex items-center gap-2 text-xs text-emerald-400">
+                <span>✅</span>
+                <span>
+                  Approved by {reviewedBy || 'Admin'}
+                  {reviewedAt && ` at ${new Date(reviewedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                </span>
+              </div>
+            )}
+
+            {isRejected && (
+              <div className="flex items-center gap-2 text-xs text-red-400">
+                <span>❌</span>
+                <span>
+                  Rejected by {reviewedBy || 'Admin'}
+                  {reviewedAt && ` at ${new Date(reviewedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+                </span>
+              </div>
+            )}
+
+            {isDiscuss && (
+              <div className="flex items-center gap-2 text-xs text-blue-400">
+                <span>💬</span>
+                <span>Under discussion — Houston is thinking...</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -538,6 +677,22 @@ export default function CouncilChat() {
       }));
     });
 
+    sock.on('council:recommendation:updated', ({ messageId, status, reviewedBy, reviewedAt }) => {
+      setMessages(prev => prev.map(m => {
+        if (m.id === messageId) {
+          return {
+            ...m,
+            proposal_status: status === 'discuss' ? 'pending' : status,
+            proposal_reviewed_by: reviewedBy,
+            rec_status: status,
+            rec_reviewed_by: reviewedBy,
+            rec_reviewed_at: reviewedAt,
+          };
+        }
+        return m;
+      }));
+    });
+
     // Directive socket events
     sock.on('directive:new', (directive) => {
       setDirectives(prev => {
@@ -659,6 +814,43 @@ export default function CouncilChat() {
       console.error('[CouncilChat] Reject error:', err.message);
     }
   };
+
+  // -- Recommendation approve/reject/discuss --
+  const handleRecommendation = async (messageId, status) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/ai/council/recommendation/${messageId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ status, reviewer: user?.display_name || 'David' }),
+      });
+      if (res.ok) {
+        // Update local message state optimistically
+        setMessages(prev => prev.map(m => {
+          if (m.id === messageId) {
+            return {
+              ...m,
+              proposal_status: status === 'discuss' ? 'pending' : status,
+              proposal_reviewed_by: user?.display_name,
+              proposal_reviewed_at: new Date().toISOString(),
+              rec_status: status,
+              rec_reviewed_by: user?.display_name,
+              rec_reviewed_at: new Date().toISOString(),
+            };
+          }
+          return m;
+        }));
+      }
+    } catch (err) {
+      console.error('[CouncilChat] Recommendation action error:', err.message);
+    }
+  };
+
+  const handleApproveRec = (messageId) => handleRecommendation(messageId, 'approved');
+  const handleRejectRec = (messageId) => handleRecommendation(messageId, 'rejected');
+  const handleDiscussRec = (messageId) => handleRecommendation(messageId, 'discuss');
 
   // -- Create directive --
   const handleCreateDirective = async ({ title, body, priority, scope }) => {
@@ -832,15 +1024,30 @@ export default function CouncilChat() {
               </div>
             ) : (
               <div className="divide-y divide-white/[0.03]">
-                {messages.map(msg => (
-                  <CouncilMessage
-                    key={msg.id}
-                    msg={msg}
-                    isAdmin={isAdmin}
-                    onApprove={handleApprove}
-                    onReject={handleReject}
-                  />
-                ))}
+                {messages.map(msg => {
+                  const isRecommendation = msg.message_type === 'council_recommendation';
+                  if (isRecommendation) {
+                    return (
+                      <RecommendationCard
+                        key={msg.id}
+                        msg={msg}
+                        isAdmin={isAdmin}
+                        onApproveRec={handleApproveRec}
+                        onRejectRec={handleRejectRec}
+                        onDiscussRec={handleDiscussRec}
+                      />
+                    );
+                  }
+                  return (
+                    <CouncilMessage
+                      key={msg.id}
+                      msg={msg}
+                      isAdmin={isAdmin}
+                      onApprove={handleApprove}
+                      onReject={handleReject}
+                    />
+                  );
+                })}
                 <div ref={messagesEndRef} />
               </div>
             )}
