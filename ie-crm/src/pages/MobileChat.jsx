@@ -204,9 +204,35 @@ export default function MobileChat() {
   // Mark as read
   useEffect(() => { if (activeChannelId) markRead(); }, [activeChannelId, messages.length]);
 
-  // Send
-  const handleSend = () => {
+  // Image preview state
+  const [pendingImage, setPendingImage] = useState(null); // { file, previewUrl }
+  const [uploading, setUploading] = useState(false);
+
+  // Send — handles text and pending images
+  const handleSend = async () => {
     const trimmed = text.trim();
+
+    // If there's a pending image, upload and send it
+    if (pendingImage) {
+      setUploading(true);
+      try {
+        const att = await uploadFile(pendingImage.file);
+        sendMessage(trimmed || '', { messageType: 'image', attachments: [att] });
+      } catch (err) {
+        console.error('[MobileChat] Upload failed:', err);
+      } finally {
+        setUploading(false);
+        URL.revokeObjectURL(pendingImage.previewUrl);
+        setPendingImage(null);
+        setText('');
+        typingRef.current = false;
+        stopTyping();
+        clearTimeout(typingTimer.current);
+        inputRef.current?.focus();
+      }
+      return;
+    }
+
     if (!trimmed) return;
     sendMessage(trimmed);
     setText('');
@@ -223,13 +249,49 @@ export default function MobileChat() {
     typingTimer.current = setTimeout(() => { typingRef.current = false; stopTyping(); }, 2000);
   };
 
-  const handleFileSelect = async (file) => {
-    try {
-      const att = await uploadFile(file);
-      const isImage = file.type.startsWith('image/');
-      sendMessage(isImage ? '' : file.name, { messageType: isImage ? 'image' : 'file', attachments: [att] });
-    } catch (err) {
-      console.error('[MobileChat] Upload failed:', err);
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    if (file.type.startsWith('image/')) {
+      const previewUrl = URL.createObjectURL(file);
+      setPendingImage({ file, previewUrl });
+      setTimeout(() => inputRef.current?.focus(), 100);
+    } else {
+      // Non-images upload immediately
+      (async () => {
+        try {
+          const att = await uploadFile(file);
+          sendMessage(file.name, { messageType: 'file', attachments: [att] });
+        } catch (err) {
+          console.error('[MobileChat] Upload failed:', err);
+        }
+      })();
+    }
+  };
+
+  const cancelImage = () => {
+    if (pendingImage) {
+      URL.revokeObjectURL(pendingImage.previewUrl);
+      setPendingImage(null);
+    }
+  };
+
+  // Handle paste for images
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          const previewUrl = URL.createObjectURL(file);
+          setPendingImage({ file, previewUrl });
+        }
+        return;
+      }
     }
   };
 
@@ -340,8 +402,35 @@ export default function MobileChat() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── Input bar — inline, no wrapper background ── */}
-      <div className="flex items-end gap-1.5 px-2 py-1 flex-shrink-0">
+      {/* ── Image preview strip ── */}
+      {pendingImage && (
+        <div className="px-3 pt-2 pb-1 flex-shrink-0">
+          <div className="relative inline-block">
+            <img
+              src={pendingImage.previewUrl}
+              alt="Preview"
+              className="h-24 rounded-2xl border border-crm-border/40 object-cover"
+            />
+            <button
+              onClick={cancelImage}
+              className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-sm font-bold hover:bg-red-400 transition-colors shadow-sm"
+            >
+              &times;
+            </button>
+            {uploading && (
+              <div className="absolute inset-0 bg-black/40 rounded-2xl flex items-center justify-center">
+                <svg className="w-6 h-6 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Input bar ── */}
+      <div className="flex items-end gap-1.5 px-2 py-1 flex-shrink-0" style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 4px)' }}>
         <button
           onClick={() => fileInputRef.current?.click()}
           className="w-9 h-9 flex items-center justify-center text-crm-accent rounded-full flex-shrink-0 mb-0.5"
@@ -356,7 +445,7 @@ export default function MobileChat() {
           type="file"
           className="hidden"
           accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-          onChange={(e) => { if (e.target.files?.[0]) handleFileSelect(e.target.files[0]); e.target.value = ''; }}
+          onChange={handleFileChange}
         />
         <div className="flex-1 min-h-[36px] rounded-full border border-crm-border/40 flex items-end overflow-hidden">
           <textarea
@@ -364,25 +453,31 @@ export default function MobileChat() {
             value={text}
             onChange={handleChange}
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            placeholder={mode === 'houston' ? 'Ask Houston...' : 'Message...'}
+            onPaste={handlePaste}
+            placeholder={pendingImage ? 'Add a caption...' : (mode === 'houston' ? 'Ask Houston...' : 'Message...')}
             rows={1}
             className="flex-1 bg-transparent text-[16px] text-crm-text placeholder-crm-muted/50 px-4 py-2 resize-none outline-none max-h-24 leading-[20px]"
             style={{ minHeight: '36px', WebkitAppearance: 'none' }}
           />
         </div>
-        {text.trim() ? (
+        {(text.trim() || pendingImage) ? (
           <button
             onClick={handleSend}
-            className="w-9 h-9 flex items-center justify-center bg-crm-accent text-white rounded-full flex-shrink-0 mb-0.5 active:scale-90 transition-transform"
+            disabled={uploading}
+            className={`w-9 h-9 flex items-center justify-center rounded-full flex-shrink-0 mb-0.5 active:scale-90 transition-transform ${uploading ? 'bg-crm-muted/30 text-crm-muted' : 'bg-crm-accent text-white'}`}
           >
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
               <path d="M3.105 2.289a.75.75 0 00-.826.95l1.414 4.925A1.5 1.5 0 005.135 9.25H13.5a.75.75 0 010 1.5H5.135a1.5 1.5 0 00-1.442 1.086l-1.414 4.926a.75.75 0 00.826.95 28.896 28.896 0 0015.293-7.154.75.75 0 000-1.115A28.897 28.897 0 003.105 2.289z" />
             </svg>
           </button>
         ) : (
-          <button className="w-9 h-9 flex items-center justify-center text-crm-muted/40 rounded-full flex-shrink-0 mb-0.5">
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="w-9 h-9 flex items-center justify-center text-crm-muted/40 rounded-full flex-shrink-0 mb-0.5"
+          >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           </button>
         )}

@@ -138,10 +138,12 @@ function TypingIndicator({ users }) {
 }
 
 // ============================================================
-// MESSAGE INPUT — text + file upload + send
+// MESSAGE INPUT — text + file upload + image preview + send
 // ============================================================
 function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayName, placeholder = 'Message the team...' }) {
   const [text, setText] = useState('');
+  const [pendingImage, setPendingImage] = useState(null); // { file, previewUrl }
+  const [uploading, setUploading] = useState(false);
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
   const typingRef = useRef(false);
@@ -160,8 +162,29 @@ function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayNam
     }, 2000);
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = text.trim();
+
+    // If there's a pending image, upload and send it
+    if (pendingImage) {
+      setUploading(true);
+      try {
+        await onFileSelect(pendingImage.file, trimmed);
+      } catch (err) {
+        console.error('[MessageInput] Upload failed:', err);
+      } finally {
+        setUploading(false);
+        URL.revokeObjectURL(pendingImage.previewUrl);
+        setPendingImage(null);
+        setText('');
+        typingRef.current = false;
+        onStopTyping();
+        clearTimeout(typingTimer.current);
+        inputRef.current?.focus();
+      }
+      return;
+    }
+
     if (!trimmed) return;
     onSend(trimmed);
     setText('');
@@ -178,57 +201,126 @@ function MessageInput({ onSend, onTyping, onStopTyping, onFileSelect, displayNam
     }
   };
 
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+
+    // Images get preview; non-images upload immediately
+    if (file.type.startsWith('image/')) {
+      const previewUrl = URL.createObjectURL(file);
+      setPendingImage({ file, previewUrl });
+      setTimeout(() => inputRef.current?.focus(), 100);
+    } else {
+      onFileSelect(file);
+    }
+  };
+
+  const cancelImage = () => {
+    if (pendingImage) {
+      URL.revokeObjectURL(pendingImage.previewUrl);
+      setPendingImage(null);
+    }
+  };
+
+  // Handle paste for images
+  const handlePaste = (e) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    for (const item of items) {
+      if (item.type.startsWith('image/')) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) {
+          const previewUrl = URL.createObjectURL(file);
+          setPendingImage({ file, previewUrl });
+        }
+        return;
+      }
+    }
+  };
+
+  const canSend = text.trim() || pendingImage;
+
   return (
-    <div className="flex items-end gap-2 px-3 py-2 border-t border-crm-border/30 bg-crm-bg/80 backdrop-blur-sm">
-      {/* File upload button */}
-      <button
-        onClick={() => fileInputRef.current?.click()}
-        className="p-2 text-crm-muted hover:text-crm-text transition-colors rounded-full hover:bg-crm-hover/50"
-        title="Upload image or file"
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
-        </svg>
-      </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        className="hidden"
-        accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
-        onChange={(e) => {
-          if (e.target.files?.[0]) onFileSelect(e.target.files[0]);
-          e.target.value = '';
-        }}
-      />
+    <div className="border-t border-crm-border/30 bg-crm-bg/80 backdrop-blur-sm">
+      {/* Image preview strip */}
+      {pendingImage && (
+        <div className="px-3 pt-2 pb-1">
+          <div className="relative inline-block">
+            <img
+              src={pendingImage.previewUrl}
+              alt="Preview"
+              className="h-20 rounded-lg border border-crm-border/40 object-cover"
+            />
+            <button
+              onClick={cancelImage}
+              className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-400 transition-colors shadow-sm"
+            >
+              &times;
+            </button>
+            {uploading && (
+              <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center">
+                <svg className="w-5 h-5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </div>
+            )}
+          </div>
+          <p className="text-[10px] text-crm-muted mt-0.5">Add a message or press Enter to send</p>
+        </div>
+      )}
 
-      {/* Text input */}
-      <div className="flex-1 bg-crm-card/60 rounded-2xl border border-crm-border/30 focus-within:border-crm-accent/40 transition-colors overflow-hidden">
-        <textarea
-          ref={inputRef}
-          value={text}
-          onChange={handleChange}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder}
-          rows={1}
-          className="w-full bg-transparent text-sm text-crm-text placeholder-crm-muted/50 px-4 py-2.5 resize-none outline-none max-h-32 rounded-2xl"
-          style={{ minHeight: '38px', WebkitAppearance: 'none' }}
+      <div className="flex items-end gap-2 px-3 py-2">
+        {/* File upload button */}
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          className="p-2 text-crm-muted hover:text-crm-text transition-colors rounded-full hover:bg-crm-hover/50"
+          title="Upload image or file"
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 4v16m8-8H4" />
+          </svg>
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.csv,.txt"
+          onChange={handleFileChange}
         />
-      </div>
 
-      {/* Send button */}
-      <button
-        onClick={handleSend}
-        disabled={!text.trim()}
-        className={`p-2 rounded-full transition-all ${
-          text.trim()
-            ? 'bg-blue-600 text-white hover:bg-blue-500 scale-100'
-            : 'bg-crm-card/40 text-crm-muted/30 scale-95'
-        }`}
-      >
-        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19V5m0 0l-7 7m7-7l7 7" />
-        </svg>
-      </button>
+        {/* Text input */}
+        <div className="flex-1 bg-crm-card/60 rounded-2xl border border-crm-border/30 focus-within:border-crm-accent/40 transition-colors overflow-hidden">
+          <textarea
+            ref={inputRef}
+            value={text}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder={pendingImage ? 'Add a caption...' : placeholder}
+            rows={1}
+            className="w-full bg-transparent text-sm text-crm-text placeholder-crm-muted/50 px-4 py-2.5 resize-none outline-none max-h-32 rounded-2xl"
+            style={{ minHeight: '38px', WebkitAppearance: 'none' }}
+          />
+        </div>
+
+        {/* Send button */}
+        <button
+          onClick={handleSend}
+          disabled={!canSend || uploading}
+          className={`p-2 rounded-full transition-all ${
+            canSend && !uploading
+              ? 'bg-blue-600 text-white hover:bg-blue-500 scale-100'
+              : 'bg-crm-card/40 text-crm-muted/30 scale-95'
+          }`}
+        >
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19V5m0 0l-7 7m7-7l7 7" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }
@@ -641,12 +733,12 @@ export default function TeamChat({ isOpen, onClose }) {
     return () => clearInterval(interval);
   }, [user?.user_id]);
 
-  // Handle file upload
-  const handleFileSelect = async (file) => {
+  // Handle file upload — accepts optional caption for images
+  const handleFileSelect = async (file, caption) => {
     try {
       const attachment = await uploadFile(file);
       const isImage = file.type.startsWith('image/');
-      sendMessage(isImage ? '' : `\uD83D\uDCCE ${file.name}`, {
+      sendMessage(isImage ? (caption || '') : `\uD83D\uDCCE ${file.name}`, {
         messageType: isImage ? 'image' : 'file',
         attachments: [attachment]
       });
