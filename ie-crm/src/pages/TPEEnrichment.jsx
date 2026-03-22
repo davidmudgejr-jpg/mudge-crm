@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import TierBadge from '../components/tpe/TierBadge';
 import { useSlideOver } from '../components/shared/SlideOverContext';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const GAP_TYPES = [
   { key: null, label: 'All Gaps' },

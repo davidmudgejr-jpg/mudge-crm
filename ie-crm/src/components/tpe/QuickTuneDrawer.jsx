@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import SlideOver, { SlideOverHeader } from '../shared/SlideOver';
 import { useToast } from '../shared/Toast';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 function authHeaders(extra = {}) {
   const token = localStorage.getItem('crm-auth-token');
   return { ...(token ? { 'Authorization': `Bearer ${token}` } : {}), ...extra };

@@ -14,39 +14,9 @@ function getAuthHeaders() {
   return headers;
 }
 
-// Track if we're already trying to refresh to prevent loops
-let isRefreshing = false;
-
-async function handle401(res) {
-  if (res.status === 401 && !isRefreshing) {
-    isRefreshing = true;
-    try {
-      // Try to refresh the token first
-      const token = localStorage.getItem('crm-auth-token');
-      if (token) {
-        const refreshRes = await fetch(`${API_BASE}/api/auth/refresh`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        });
-        if (refreshRes.ok) {
-          const data = await refreshRes.json();
-          localStorage.setItem('crm-auth-token', data.token);
-          isRefreshing = false;
-          return; // Token refreshed — caller can retry
-        }
-      }
-      // Refresh failed — actually logged out
-      localStorage.removeItem('crm-auth-token');
-      window.location.hash = '#/';
-      window.location.reload();
-    } catch {
-      // Network error — don't log out, server might be down
-      console.warn('[bridge] 401 refresh failed — keeping token, server may be restarting');
-    } finally {
-      isRefreshing = false;
-    }
-  }
-}
+// NOTE: 401 handling is done globally by AuthContext's fetch interceptor.
+// bridge.js should NOT independently handle 401s — that caused race conditions
+// where both bridge and AuthContext tried to refresh/clear the token simultaneously.
 
 async function httpPost(path, body = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -55,7 +25,6 @@ async function httpPost(path, body = {}) {
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    handle401(res);
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
@@ -67,7 +36,6 @@ async function httpGet(path) {
     headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    handle401(res);
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }

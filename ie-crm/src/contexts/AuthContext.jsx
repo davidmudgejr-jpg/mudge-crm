@@ -35,7 +35,7 @@ export function AuthProvider({ children }) {
           // Decode the JWT locally to get user info while server recovers
           try {
             const payload = JSON.parse(atob(token.split('.')[1]));
-            setUser({ user_id: payload.userId, email: payload.email, role: payload.role, first_name: payload.firstName });
+            setUser({ user_id: payload.user_id, email: payload.email, role: payload.role, display_name: payload.display_name });
           } catch { /* can't decode — just wait */ }
           return null;
         }
@@ -49,7 +49,7 @@ export function AuthProvider({ children }) {
         console.warn('[auth] Network error on startup — keeping token:', err.message);
         try {
           const payload = JSON.parse(atob(token.split('.')[1]));
-          setUser({ user_id: payload.userId, email: payload.email, role: payload.role, first_name: payload.firstName });
+          setUser({ user_id: payload.user_id, email: payload.email, role: payload.role, display_name: payload.display_name });
         } catch { /* can't decode */ }
       })
       .finally(() => setLoading(false));
@@ -136,10 +136,14 @@ export function AuthProvider({ children }) {
           const res = await fetch(`${API_BASE}/api/auth/me`, {
             headers: { Authorization: `Bearer ${token}` },
           });
-          if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            // Token is truly invalid/expired — log out
             console.warn('[auth] Token expired during session — logging out');
             localStorage.removeItem(TOKEN_KEY);
             setUser(null);
+          } else if (!res.ok) {
+            // Server error (500, 502, etc.) — keep the token, server is recovering
+            console.warn('[auth] Server returned', res.status, 'during refresh check — keeping token');
           }
         } catch {
           // Network error — don't log out, just wait for next check

@@ -10,7 +10,7 @@ import TierBadge from '../components/tpe/TierBadge';
 import TpeDetailPanel from '../components/tpe/TpeDetailPanel';
 import QuickTuneDrawer from '../components/tpe/QuickTuneDrawer';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 const CALL_STATUS_OPTIONS = [
   'Not Called', 'Called — No Answer', 'Called — Left VM',

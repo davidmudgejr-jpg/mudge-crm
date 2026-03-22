@@ -20,11 +20,13 @@ const messageCache = {};
 
 function getSocket() {
   if (!socket) {
-    const token = localStorage.getItem('crm-auth-token');
     socket = io(SOCKET_URL, {
       autoConnect: false,
       transports: ['websocket', 'polling'],
-      auth: { token },
+      // Use a function so the token is read fresh on every connection/reconnection
+      auth: (cb) => {
+        cb({ token: localStorage.getItem('crm-auth-token') });
+      },
     });
   }
   return socket;
