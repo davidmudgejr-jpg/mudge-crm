@@ -23,15 +23,34 @@ export function AuthProvider({ children }) {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => {
-        if (!res.ok) throw new Error('Invalid token');
+        if (res.status === 401 || res.status === 403) {
+          // Token is truly invalid — clear it
+          localStorage.removeItem(TOKEN_KEY);
+          setUser(null);
+          return null;
+        }
+        if (!res.ok) {
+          // Server error (500, 502, 503) — keep the token, assume server is recovering
+          console.warn('[auth] Server returned', res.status, '— keeping token, assuming cold start');
+          // Decode the JWT locally to get user info while server recovers
+          try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            setUser({ user_id: payload.userId, email: payload.email, role: payload.role, first_name: payload.firstName });
+          } catch { /* can't decode — just wait */ }
+          return null;
+        }
         return res.json();
       })
       .then((userData) => {
-        setUser(userData);
+        if (userData) setUser(userData);
       })
-      .catch(() => {
-        localStorage.removeItem(TOKEN_KEY);
-        setUser(null);
+      .catch((err) => {
+        // Network error (server down, no internet) — keep the token
+        console.warn('[auth] Network error on startup — keeping token:', err.message);
+        try {
+          const payload = JSON.parse(atob(token.split('.')[1]));
+          setUser({ user_id: payload.userId, email: payload.email, role: payload.role, first_name: payload.firstName });
+        } catch { /* can't decode */ }
       })
       .finally(() => setLoading(false));
   }, []);
@@ -138,7 +157,13 @@ export function AuthProvider({ children }) {
     let retryingUrls = new Set();
 
     window.fetch = async (...args) => {
-      const res = await originalFetch(...args);
+      let res;
+      try {
+        res = await originalFetch(...args);
+      } catch (networkErr) {
+        // Network failure — don't logout, just rethrow
+        throw networkErr;
+      }
 
       if (res.status === 401 && localStorage.getItem(TOKEN_KEY)) {
         const url = typeof args[0] === 'string' ? args[0] : args[0]?.url || '';
