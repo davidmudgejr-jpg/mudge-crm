@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-21 (Phase 5F: PWA mobile chat app + Houston CRM write actions)
-> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat app (iMessage-style, Team/Houston toggle, separate DM channels), Vercel Blob for uploads, React Error Boundary, JWT 401 handling, Houston CRM write actions (log interactions, create tasks, update contacts/properties from chat).
-> Next tasks: **Production smoke test** (run full testing protocol on Vercel), **Houston two-brain architecture brainstorm** (Sonnet + OpenClaw Opus), **Fireflies.ai integration**, **Location-aware Houston** (GPS + camera for field prospecting).
+> Updated: 2026-03-22 (Phase 6: Houston Two-Brain Architecture + Council + Directives + Auth Fix)
+> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system, nightly R&D + weekly self-review directives, OAuth auto-refresh (Railway + Mac Mini), auth logout bug root-caused and fixed (5 bugs), app icon update, Houston smart brain upgrade (fuzzy search, confirmation gates, NAV commands).
+> Next tasks: **Flesh out AI agent system architecture** (how agents work together, Ralph Loop, email campaigns), **Houston image analysis testing** (verify on production), **Fireflies.ai integration** (auto-log calls), **Location-aware Houston** (GPS + camera), **Native iOS app** (replace PWA for better keyboard handling).
 
 ---
 
@@ -281,6 +281,65 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **All 12 pages** now have colored SVG icons next to page titles, matching sidebar NAV_ITEMS icons
 - [x] **Unique colors per page** — Properties=blue, Contacts=violet, Companies=pink, Deals=emerald, Interactions=sky, Campaigns=rose, Action Items=teal, Comps=indigo, Import=cyan, Settings=zinc, TPE=yellow, Enrichment=orange
 - [x] **No color collisions** — verified all 12 pages have distinct icon colors
+
+### Houston Smart Brain Upgrade ✅ (2026-03-22)
+- [x] **Fuzzy address search** — strips numbers, searches word-by-word, handles typos and partial matches
+- [x] **Confirmation gates** — Houston never says "on it" then fails silently; verifies data exists before claiming success
+- [x] **Close match suggestions** — "I found 3 properties on Cajalco Rd. Did you mean 23447, 23332, or 23129?"
+- [x] **Honest failure responses** — "Couldn't find that address. Want me to add it as a new property?"
+- [x] **NAV commands** — Houston drives the CRM UI: navigates pages, opens detail panels, creates views, fills search bars
+- [x] **Smart intent detection** — "show me" = NAV (visual), "log/create/update" = just do it (no NAV needed)
+- [x] **Linked record context** — searches contacts, companies, interactions, TPE scores alongside properties
+
+### Houston Two-Brain Architecture ✅ (2026-03-22)
+- [x] **Houston (Sonnet)** — CRM-resident AI, handles team chat, executes commands, friendly team member
+- [x] **Houston Command (Opus)** — Mac Mini OpenClaw, strategic brain, 24/7 data analysis, chief of staff
+- [x] **Council Channel** — private chat between Houston + Houston Command in AI Ops page, visible to admins
+- [x] **Auto-response loop** — Houston Sonnet automatically responds to Houston Command's Council posts
+- [x] **Recommendation system** — Command posts recommendations with approve/reject/discuss buttons
+- [x] **Directive cascade** — decisions flow downhill: You → API → Houston Command → sub-agents. All agents poll `/api/ai/directives` for new orders
+- [x] **Standing directives deployed:**
+  - Nightly R&D Session (2 AM daily) — Command reviews CRM, posts 3 recommendations
+  - Weekly Strategic Self-Review (Sunday midnight) — Command reverse-prompts himself: "What should we build next?"
+- [x] **Agent heartbeat system** — agents report status to CRM, dashboard shows online/offline
+- [x] **Agent API endpoints** (`/api/ai/*`) — 15+ endpoints for stats, search, heartbeats, logs, council, directives
+
+### Houston Command — Mac Mini Setup ✅ (2026-03-22)
+- [x] **16GB Mac Mini online** — separate Apple ID, separate Claude account (Pro), separate Gmail
+- [x] **OpenClaw running** — Opus 4.6 via OAuth, connected to CRM API
+- [x] **Agent files transferred** — chief-of-staff.md, architecture docs, API connection details
+- [x] **OAuth auto-refresh** — cron job on Mac Mini refreshes token before expiry via keychain
+- [x] **Directive polling** — Houston Command checks for new directives every 5 minutes
+- [x] **Telegram notifications** — Houston Command alerts David via Telegram bot
+- [x] **Screen Sharing** — Mac Mini controllable from work Mac via VNC
+
+### OAuth & Auth System ✅ (2026-03-22)
+- [x] **OAuth fix** — `authToken` parameter (not `apiKey`) for Claude SDK. OAuth uses Bearer header, not X-Api-Key
+- [x] **Model name fix** — `claude-sonnet-4-20250514` (correct format, was using non-existent `claude-sonnet-4-6`)
+- [x] **Auto-refresh script** — `scripts/refresh-railway-oauth.sh` reads fresh token from macOS Keychain, pushes to Railway via CLI
+- [x] **Scheduled task** — runs every 8 hours to keep Railway token fresh
+- [x] **Railway CLI linked** — `railway` CLI authenticated and linked to mudge-crm project
+
+### Auth Logout Bug Fix ✅ (2026-03-22) — 5 Root Causes
+- [x] **ROOT CAUSE: AI Ops dashboard 401 cascade** — AI endpoints required X-Agent-Key but dashboard sent JWT. Every 15-30s poll returned 401, triggering global interceptor to clear session
+- [x] **FIX: AI routes accept dual auth** — `requireAgentKeyOrJwt` middleware accepts either X-Agent-Key (agents) or JWT Bearer (dashboard users)
+- [x] **JWT field name mismatch** — local decode used `payload.userId` instead of `payload.user_id`
+- [x] **Proactive refresh logged out on server errors** — 500/502/503 treated as expired token; now only 401/403
+- [x] **bridge.js + AuthContext racing** — both independently handled 401s; bridge.js no longer handles auth
+- [x] **Socket.io stale token** — auth callback now reads fresh token on every reconnect
+- [x] **Trust proxy** — `app.set('trust proxy', 1)` for Railway reverse proxy
+- [x] **JWT extended to 90 days** — users rarely need to re-login
+- [x] **Rate limiter validation disabled** — `validate: false` prevents IPv6/X-Forwarded-For errors
+
+### App Icon Update ✅ (2026-03-22)
+- [x] **HoloServerRocket V1** — all PWA icons (512, 192, 180, 32, 16) + favicon replaced
+- [x] **Sidebar logo** — CRM sidebar top-left updated to new icon
+
+### RAG Memory Separation ✅ (2026-03-22)
+- [x] **Team vs Personal pools** — `memory_scope` field on `houston_memories` table: 'personal' or 'team'
+- [x] **Houston DM** — stores/retrieves only personal memories for that user
+- [x] **Team Chat** — stores/retrieves from shared team pool (no user_id filter)
+- [x] **Entity linking** — memories reference specific CRM records via `entity_id`
 
 ### Lease Comp Import Wizard ⬜ (next priority)
 - [ ] **Receive Excel examples from David** — need actual lease comp spreadsheet structure before designing
