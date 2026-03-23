@@ -388,8 +388,24 @@ app.post('/api/users/:id/reset-password', requireRole('admin'), async (req, res)
 // ============================================================
 app.post('/api/db/query', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
+
+  // SECURITY: Admin-only — this endpoint executes raw SQL
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: 'Admin access required for raw SQL queries' });
+  }
+
+  // SECURITY: Block destructive DDL statements
+  const { sql, params } = req.body;
+  if (!sql || typeof sql !== 'string') {
+    return res.status(400).json({ error: 'sql string required' });
+  }
+  const upperSql = sql.trim().toUpperCase();
+  const blocked = ['DROP ', 'TRUNCATE ', 'ALTER ', 'CREATE ', 'GRANT ', 'REVOKE '];
+  if (blocked.some(keyword => upperSql.startsWith(keyword))) {
+    return res.status(403).json({ error: 'DDL statements are not allowed via this endpoint' });
+  }
+
   try {
-    const { sql, params } = req.body;
     const result = await pool.query(sql, params || []);
     res.json({ rows: result.rows, rowCount: result.rowCount });
   } catch (err) {
@@ -2476,7 +2492,30 @@ app.post('/api/houston/completions', houstonCompletions);
 
 // POST /v1/chat/completions — OpenAI-compatible alias that ElevenLabs calls
 // ElevenLabs appends /chat/completions to the Server URL automatically
-app.post('/v1/chat/completions', houstonCompletions);
+// SECURITY: Requires either Agent API key or valid JWT — this is NOT under /api so requireAuth doesn't cover it
+app.post('/v1/chat/completions', (req, res, next) => {
+  // Check for agent key (ElevenLabs / external integrations)
+  const agentKey = req.headers['x-agent-key'] || req.headers['authorization']?.replace('Bearer ', '');
+  const validAgentKey = process.env.AGENT_API_KEY;
+  if (validAgentKey && agentKey === validAgentKey) {
+    return next();
+  }
+
+  // Check for JWT (browser-based calls)
+  const header = req.headers.authorization;
+  if (header && header.startsWith('Bearer ')) {
+    try {
+      const jwt = require('jsonwebtoken');
+      const JWT_SECRET = process.env.JWT_SECRET;
+      if (JWT_SECRET) {
+        jwt.verify(header.slice(7), JWT_SECRET);
+        return next();
+      }
+    } catch { /* invalid JWT, fall through */ }
+  }
+
+  return res.status(401).json({ error: 'Authentication required — provide X-Agent-Key or Bearer JWT' });
+}, houstonCompletions);
 
 // ============================================================
 // TEAM CHAT — REST endpoints + file upload
