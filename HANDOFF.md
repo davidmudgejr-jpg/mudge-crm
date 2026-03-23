@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-23 (Phase 9: Security Audit + Codex Integration + Development Workflow)
-> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) Fleet operations: SSH access, directive pipeline via Telegram, health monitoring, agent fixes. (9) **Security + workflow session**: Connected OpenAI Codex to GitHub repo for automated PR reviews, ran full codebase security audit (Codex found 7 vulnerabilities), fixed all 7 (raw SQL lockdown, unauthenticated endpoint, socket impersonation, IDOR, JWT secret, input validation), established PR-based workflow (branch → PR → Codex reviews → merge), added Forum Debate protocol for Ralph disagreements (inspired by BettaFish), added Email Sentiment Analysis + Deal Prediction Simulator to roadmap (inspired by MiroFish), pushed directives to Houston Command for Forum Debate + agent auto-config.
-> Next tasks: **Fix Railway URL** (directives through API instead of direct Telegram), **Fix SSH key persistence** to 16GB Mini, **Run migration 024 on Neon**, **Agent instruction files** (Postmaster + Campaign Manager still need writing), **48GB Mac Mini arrives → deploy Tier 3 agents** (Enricher first), **Improvement Proposal UI in AI Ops**, **track_emails toggle on ContactDetail**, **Install `gh` CLI on work Mac**.
+> Updated: 2026-03-23 (Phase 10: Oracle Prediction Engine + Fleet Infrastructure Hardening)
+> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) Fleet operations: SSH access, directive pipeline via Telegram, health monitoring, agent fixes. (9) Security + workflow: Codex connected, 7 vulnerabilities fixed, PR workflow established, Forum Debate + roadmap additions. (10) **Oracle + Infrastructure session**: Designed complete Oracle prediction engine (Monte Carlo + knowledge graph + persona engine + scenario engine + report agent, 12 signal categories, market-wide calibration from AIR data), wrote Migration 025 (live on Neon — 6 new tables, 25 new columns, 48 initial signal weights seeded), expanded AGENT-SYSTEM.md to 1400+ lines, fixed SSH access + OAuth auto-refresh + token sync + Full Disk Access on both machines, persistent launchd health monitoring, pushed Oracle directive to Houston Command, reviewed all 9 agent instruction files, added Forum Debate to tier2-validator.
+> Next tasks: **48GB Mac Mini arrives → deploy Tier 3 agents** (Enricher first, then Postmaster), **Fireflies.ai integration** (call transcripts → activities + Oracle signals), **Native PWA app setup** (CRM + Houston messaging as separate installable apps), **Fix Railway URL** (directives through API), **Improvement proposal UI testing** (UI built, needs live data from agents), **Install `gh` CLI on work Mac**.
 
 ---
 
@@ -420,11 +420,53 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **Deal Prediction Simulator** — added to Phase 4 roadmap (128GB Mac Studio). Multi-agent simulation for predicting deal outcomes and campaign effectiveness. (Inspired by MiroFish swarm intelligence engine)
 - [x] **Standing directive pushed** — "Auto-Configure New Agents On Arrival" — Houston Command must immediately configure any new OpenClaw instance without being asked
 
-**Known Issues Identified:**
+**Known Issues Identified (Session 9):**
 - Railway URL returning 404 (possibly redeployed to new URL) — directives can't go through API, using direct Telegram as workaround
-- SSH key to 16GB Mini didn't persist across sessions — needs re-setup
+- ~~SSH key to 16GB Mini didn't persist across sessions — needs re-setup~~ ✅ FIXED in Session 10
 - `gh` CLI not installed on work Mac — can't create PRs from terminal
-- Migration 024 still needs to run on production Neon
+- ~~Migration 024 still needs to run on production Neon~~ ✅ RUN in Session 10
+
+### Oracle Prediction Engine + Fleet Hardening ✅ (2026-03-23, Phase 10)
+
+**Oracle Prediction Engine (Mac Studio 128GB — future deployment):**
+- [x] **Complete Oracle architecture designed** — Monte Carlo simulation engine (Python/NumPy) + 70B local model (Llama 3) + Neo4j knowledge graph + persona engine + scenario engine ("What If") + report agent (natural language Q&A). Inspired by MiroFish swarm intelligence engine.
+- [x] **12 signal categories defined** — property, engagement, transcript, negative, market, broker activity, tax/assessment, tenant health, life events, macro, seasonal, network cascade. 3x the original v2 design surface area.
+- [x] **Market-wide calibration system** — Oracle learns from ALL IE transactions (AIR hot sheets), not just David's deals. Failed listings (listed but never sold) provide negative calibration. Handles missing prices gracefully.
+- [x] **Owner behavioral personas** — 2000-word narrative profiles per owner built from CRM data + Fireflies transcripts. Longitudinal voice profiles track language evolution across conversations.
+- [x] **Knowledge graph as shared resource** — graph_entities + graph_edges tables queryable by all agents (Enricher, Matcher, Campaign Manager, Postmaster, Researcher). Maps: owners ↔ properties ↔ LLCs ↔ attorneys ↔ companies ↔ tenants.
+- [x] **AGENT-SYSTEM.md expanded to 1,400+ lines** — full Oracle section (~500 lines), all 12 signal categories with specific signals/weights/sources, Oracle output format, calibration system, persona profiles, scenario engine examples, build phases 5-6 added.
+
+**Migration 025 — Oracle Schema (LIVE on Neon):**
+- [x] **12 new columns on `properties`** — oracle_score, oracle_confidence, oracle_primary_driver, oracle_last_run, timing breakdowns (0-6mo, 6-12mo, 12-24mo, 24+), oracle_recommended_action, oracle_next_reassessment, oracle_score_history (JSONB), ownership_start_date, in_place_rent_psf, vacancy tracking
+- [x] **8 new columns on `sale_comps`** — transaction_outcome ('our_deal'/'lost_to_competitor'/'market_comp'), oracle_predicted_score, oracle_predicted_timing, oracle_calibration_complete, days_on_market, listing_broker, buying_broker
+- [x] **5 new columns on `lease_comps`** — transaction_outcome, oracle_predicted_score, oracle_calibration_complete, days_on_market
+- [x] **6 new tables:** `market_tracking` (AIR listings → prediction → outcome), `owner_personas` (behavioral profiles), `graph_entities` (knowledge graph nodes), `graph_edges` (relationships), `oracle_calibration_log` (prediction vs reality), `oracle_signal_weights` (configurable weights with version tracking)
+- [x] **48 initial signal weights seeded** — across all 12 categories, based on David's industry experience. Houston Command will calibrate monthly.
+
+**6 New Future Agents added to roadmap:**
+- BOV Generator — automated broker opinion of value PDFs
+- Ownership Change Detector — scrapes county assessor data nightly
+- Loan Maturity Monitor — watches loan dates, triggers outreach sequences
+- Mailer Agent — physical mail automation via Lob.com API
+- Social Media Manager — CRE content for X/Twitter, LinkedIn
+- Fireflies Agent — call transcript processing
+
+**Fleet Infrastructure Hardening:**
+- [x] **SSH access fixed** — `ssh mini16` alias works reliably with dedicated ED25519 key
+- [x] **OAuth auto-refresh rewritten** — `token-refresh.sh` with correct paths (/Users/houstonmudge/), keychain unlock, Telegram alerts on failure, OpenClaw auth sync
+- [x] **Full Disk Access configured on BOTH machines:**
+  - 16GB Mini: Terminal, Node 25.8, Node 22, sshd, /usr/sbin/cron, Claude.app
+  - Work Mac (24GB): Terminal, /bin/bash, /usr/sbin/cron, Node 25.8
+- [x] **Persistent launchd health monitoring** — `com.iecrm.fleet-health-check.plist` runs every 4 hours on work Mac even when Claude Code is closed. Checks: SSH connectivity, OpenClaw process, Claude CLI, token TTL, cron count. Telegram alerts on any failure.
+- [x] **Forum Debate added to tier2-validator.md** — 3-round structured debate protocol (opening arguments → rebuttals → final vote) when Ralph GPT and Gemini disagree, before escalating to Houston Command
+- [x] **Oracle directive pushed to Houston Command** — full architecture briefing via Telegram, action items for nightly R&D and weekly reviews
+- [x] **Email forwarding configured** — Outlook rule forwarding all inbound dmudgejr@lee-associates.com to houstonmudge@gmail.com
+- [x] **Migration 024 run on production Neon** — improvement_proposals, workflow_chains, agent_skills tables live
+- [x] **Migration 025 run on production Neon** — all Oracle tables live, signal weights seeded
+
+**Reference Materials Saved:**
+- [x] `reference/mirofish/` — Full MiroFish source code (persona generation, simulation engine, knowledge graph memory, report agent)
+- [x] `reference/bettafish/` — Full BettaFish source code (forum debate engine, sentiment analysis model)
 
 ### Lease Comp Import Wizard ⬜ (next priority)
 - [ ] **Receive Excel examples from David** — need actual lease comp spreadsheet structure before designing
