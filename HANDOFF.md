@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-22 (Phase 7: Complete AI Agent Architecture + Email Ecosystem + Self-Improvement System)
-> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) **Full AI agent system architecture designed and built**: AGENT-SYSTEM.md (450+ lines), 2 new agents (Postmaster + Campaign Manager), 16 new API endpoints, 4 new DB tables, self-improvement loop with reverse prompting, improvement proposals UI in AI Ops, track_emails toggle on contacts, all 9 agent instruction files updated with instruction reload + skills.
-> Next tasks: **Run migration 024** (new tables: improvement_proposals, workflow_chains, agent_skills, outbound_email_queue, track_emails on contacts), **Set up Ralph GPT + Gemini on 16GB Mac Mini** (OpenClaw instances), **48GB Mac Mini arrives → deploy Tier 3 agents** (Enricher first, then Postmaster), **Connect Instantly.ai API** for Campaign Manager, **Houston Gmail setup** (forwards + IMAP for Postmaster).
+> Updated: 2026-03-22 (Phase 8: Fleet Operations — SSH Access, Directive Pipeline, Health Monitoring, Agent Fixes)
+> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) **Fleet operations session**: SSH access to 16GB Mini from work Mac, diagnosed and fixed Houston Command (token desync, model wrong, keychain locking, directive execution), rewrote directive pipeline to use Telegram instead of claude --print, set up fleet health monitoring (external every 4h + Command nightly), fixed Deals API, cleaned mock data from agent_heartbeats, deployed agent display names in AI Ops, set up email forwarding to Houston Gmail, verified full directive pipeline end-to-end.
+> Next tasks: **Run migration 024 on production Neon**, **Fix AI Ops dashboard/Railway connection** (data in DB but Railway endpoint returns empty), **Agent instruction files** (Postmaster + Campaign Manager), **48GB Mac Mini arrives → deploy Tier 3 agents** (Enricher first), **Connect Instantly.ai API**.
 
 ---
 
@@ -312,6 +312,28 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **Directive polling** — Houston Command checks for new directives every 5 minutes
 - [x] **Telegram notifications** — Houston Command alerts David via Telegram bot
 - [x] **Screen Sharing** — Mac Mini controllable from work Mac via VNC
+
+### Fleet Operations & Debugging ✅ (2026-03-22, Phase 8)
+- [x] **SSH access from work Mac** — ED25519 key (`~/.ssh/houston_mini_16gb`) for passwordless SSH to 16GB Mini (192.168.1.229). Claude Code can now remotely restart processes, fix scripts, monitor health.
+- [x] **Houston Command model fixed** — was running Sonnet 4.6 by mistake, now correctly set to **Opus 4.6** in OpenClaw config
+- [x] **Token desync bug found and fixed** — macOS keychain and OpenClaw `auth-profiles.json` stored separate copies of OAuth token. Keychain refreshed but OpenClaw kept stale copy → 401 errors. Fix: `token-refresh.sh` now syncs to BOTH locations.
+- [x] **Keychain auto-lock disabled** — `security set-keychain-settings -t 0` prevents cron scripts from failing when keychain locks between commands
+- [x] **All 3 token refresh scripts patched** — Claude, Gemini, OpenAI scripts all now include keychain unlock + correct PATH (`/opt/homebrew/bin`)
+- [x] **Directive pipeline fully operational** — rewrote `directive-poll.sh` to send directives via Telegram Bot API instead of `claude --print` (which can't authenticate from cron). Flow: cron polls API → acknowledges → sends to Command via Telegram → OpenClaw/Opus processes → Command responds. Verified end-to-end.
+- [x] **Deals API fix** — junction table was `property_deals`, should be `deal_properties` (line 379 in ai.js)
+- [x] **Ralph GPT + Ralph Gemini** — OpenClaw instances configured on 16GB Mini by Houston Command, Telegram bots live (@RalphGPT_CRE_bot, @RalphGemini_CRE_bot)
+- [x] **Fleet health monitoring** — two-layer system:
+  - External: `scripts/fleet-health-check.sh` runs from work Mac via SSH every 4 hours (scheduled task). Checks: SSH, OpenClaw process, token TTL, token sync, cron count, Telegram bots.
+  - Internal: `nightly-health-check.sh` runs on Mini at 11 PM. Checks all tokens, sync status, cron logs, CRM API, reports to David via Telegram.
+- [x] **Agent heartbeat data cleaned** — removed old mock data (March 17), set correct statuses: 4 online (chief_of_staff, houston, ralph_gpt, ralph_gemini), 7 offline awaiting 48GB Mini
+- [x] **AI Ops display names** — `AGENT_DISPLAY` config maps heartbeat names to proper display names with model badges (e.g., chief_of_staff → "Houston Command" with "Opus 4.6" badge)
+- [x] **Email forwarding** — Outlook rule forwarding all inbound email from dmudgejr@lee-associates.com to houstonmudge@gmail.com
+- [x] **9-job cron schedule** on 16GB Mini: heartbeat (1m), directive poll (5m), Claude token refresh (30m), Gemini refresh (45m), OpenAI refresh (8h), nightly health (11PM), daily summary (11:59PM), daily memory (2AM), weekly review (Sun midnight)
+
+**Known issues identified this session:**
+- AI Ops dashboard endpoint (`/api/ai/dashboard/summary` in index.js) requires JWT auth — works from browser but not agent key. Data is in DB but Railway returns empty when tested via curl with agent key.
+- Migration 024 not yet run on production Neon (new tables: improvement_proposals, workflow_chains, agent_skills, outbound_email_queue)
+- Outbound email auto-BCC not possible via Outlook web rules — will solve with Microsoft Graph API or manual BCC habit
 
 ### OAuth & Auth System ✅ (2026-03-22)
 - [x] **OAuth fix** — `authToken` parameter (not `apiKey`) for Claude SDK. OAuth uses Bearer header, not X-Api-Key
