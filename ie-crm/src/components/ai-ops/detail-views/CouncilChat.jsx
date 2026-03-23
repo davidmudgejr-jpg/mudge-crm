@@ -25,17 +25,40 @@ function timeAgo(dateStr) {
 }
 
 // ============================================================
+// AGENT DISPLAY CONFIG — maps heartbeat names to display names + models
+// ============================================================
+const AGENT_DISPLAY = {
+  chief_of_staff: { name: 'Houston Command', model: 'Opus 4.6', tier: 1, color: '#f59e0b' },
+  houston:        { name: 'Houston Sonnet', model: 'Sonnet 4.6', tier: 1, color: '#10b981' },
+  ralph:          { name: 'Ralph GPT', model: 'GPT-4', tier: 2, color: '#ef4444' },
+  ralph_gpt:      { name: 'Ralph GPT', model: 'GPT-4', tier: 2, color: '#ef4444' },
+  gemini:         { name: 'Ralph Gemini', model: 'Gemini Pro', tier: 2, color: '#06b6d4' },
+  ralph_gemini:   { name: 'Ralph Gemini', model: 'Gemini Pro', tier: 2, color: '#06b6d4' },
+  enricher:       { name: 'Enricher', model: 'Qwen 3.5', tier: 3, color: '#10b981' },
+  researcher:     { name: 'Researcher', model: 'MiniMax 2.5', tier: 3, color: '#3b82f6' },
+  matcher:        { name: 'Matcher', model: 'Qwen 3.5', tier: 3, color: '#8b5cf6' },
+  scout:          { name: 'Scout', model: 'MiniMax 2.5', tier: 3, color: '#f59e0b' },
+  logger:         { name: 'Logger', model: 'Qwen 3.5', tier: 3, color: '#6b7280' },
+  postmaster:     { name: 'Postmaster', model: 'Qwen 3.5', tier: 3, color: '#ec4899' },
+  campaign_manager: { name: 'Campaign Manager', model: 'Qwen 3.5', tier: 3, color: '#f97316' },
+};
+
+// ============================================================
 // AGENT STATUS CARD
 // ============================================================
 function AgentCard({ agent }) {
   const statusColors = {
     active: { dot: 'bg-emerald-400', glow: 'shadow-emerald-500/30', label: 'Online' },
+    running: { dot: 'bg-emerald-400', glow: 'shadow-emerald-500/30', label: 'Online' },
     idle: { dot: 'bg-amber-400', glow: 'shadow-amber-500/20', label: 'Idle' },
     offline: { dot: 'bg-red-400', glow: '', label: 'Offline' },
     error: { dot: 'bg-red-500', glow: 'shadow-red-500/30', label: 'Error' },
   };
   const s = statusColors[agent.status] || statusColors.offline;
-  const isOnline = agent.status === 'active' || agent.status === 'idle';
+  const isOnline = agent.status === 'active' || agent.status === 'idle' || agent.status === 'running';
+  const display = AGENT_DISPLAY[agent.agent_name] || {};
+  const displayName = display.name || agent.agent_name;
+  const tierLabel = display.tier ? `T${display.tier}` : (agent.tier ? `T${agent.tier}` : '');
 
   return (
     <div className={`
@@ -44,16 +67,23 @@ function AgentCard({ agent }) {
         ? 'border-white/10 bg-white/[0.04] shadow-lg ' + s.glow
         : 'border-white/5 bg-white/[0.02] opacity-60'}
     `}
-    style={isOnline ? { boxShadow: `0 0 20px ${agent.status === 'active' ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.1)'}` } : {}}
+    style={isOnline ? { boxShadow: `0 0 20px ${isOnline ? 'rgba(16,185,129,0.15)' : 'rgba(245,158,11,0.1)'}` } : {}}
     >
       <div className="flex items-center gap-3 mb-2">
         <div className={`w-2.5 h-2.5 rounded-full ${s.dot} ${isOnline ? 'animate-pulse' : ''}`} />
-        <span className="text-sm font-semibold text-[var(--crm-text)]">{agent.agent_name}</span>
+        <span className="text-sm font-semibold text-[var(--crm-text)]">{displayName}</span>
         <span className="text-[10px] uppercase tracking-wider text-[var(--crm-muted)] ml-auto">
-          {agent.tier || 'T1'}
+          {tierLabel}
         </span>
       </div>
-      <div className="text-xs text-[var(--crm-muted)] mb-1">{s.label}</div>
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-xs text-[var(--crm-muted)]">{s.label}</span>
+        {display.model && (
+          <span className="text-[10px] text-[var(--crm-muted)]/60 border border-white/5 px-1.5 py-0.5 rounded">
+            {display.model}
+          </span>
+        )}
+      </div>
       {agent.current_task && (
         <div className="text-xs text-[var(--crm-text)]/60 truncate mb-1">
           {agent.current_task}
