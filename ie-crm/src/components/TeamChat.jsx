@@ -48,6 +48,7 @@ function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick, onActio
   const isExpired = meta.pending_actions_at
     ? (Date.now() - new Date(meta.pending_actions_at).getTime()) > 5 * 60 * 1000
     : false;
+  const hasClarifications = isHouston && meta.trigger === 'clarification_needed' && meta.clarifications?.length > 0;
   const attachments = Array.isArray(message.attachments)
     ? message.attachments
     : (typeof message.attachments === 'string' ? JSON.parse(message.attachments || '[]') : []);
@@ -138,6 +139,31 @@ function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick, onActio
         )}
         {meta.action_executed && isHouston && meta.pending_actions?.length > 0 && (
           <div className="text-[10px] text-emerald-500/60 mt-1 ml-1 italic">Action completed</div>
+        )}
+
+        {/* Clarification option buttons (Did you mean X or Y?) */}
+        {hasClarifications && (
+          <div className="mt-2 ml-1 space-y-2">
+            {meta.clarifications.map((clar, ci) => (
+              <div key={ci}>
+                <div className="text-[10px] text-crm-muted mb-1 uppercase tracking-wide">
+                  {clar.field.replace(/_/g, ' ')}
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {clar.options.map((opt, oi) => (
+                    <button
+                      key={oi}
+                      onClick={() => onActionConfirm?.(message.id, 'clarify:' + opt.label)}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-blue-600/15 text-blue-400 border border-blue-500/30 hover:bg-blue-600/25 transition-colors"
+                    >
+                      <span>{opt.label}</span>
+                      {opt.detail && <span className="text-crm-muted text-[10px]">{opt.detail}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
 
         {/* Reactions */}
@@ -940,12 +966,15 @@ export default function TeamChat({ isOpen, onClose }) {
                     onImageClick={setImagePreview}
                     onActionConfirm={(msgId, action) => {
                       if (action === 'yes') {
-                        // Send "yes" as a message — triggers text confirmation on backend
                         sendMessage('yes');
                       } else if (action === 'no') {
                         sendMessage("No, cancel that.");
                       } else if (action === 'edit') {
                         sendMessage("Hold on, let me adjust that. ");
+                      } else if (action.startsWith('clarify:')) {
+                        // User clicked a clarification option — send the selected name
+                        const selection = action.replace('clarify:', '');
+                        sendMessage(selection);
                       }
                     }}
                   />
