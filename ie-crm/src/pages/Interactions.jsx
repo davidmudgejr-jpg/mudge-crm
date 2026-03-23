@@ -12,6 +12,7 @@ import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import { todayPacific } from '../utils/timezone';
 import useDetailPanel from '../hooks/useDetailPanel';
+import useLiveUpdates from '../hooks/useLiveUpdates';
 
 const TYPES = INTERACTION_TYPES;
 
@@ -72,6 +73,7 @@ export default function Interactions({ onCountChange }) {
   }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useLiveUpdates('interaction', fetchData);
 
   // Timeline-style view
   return (

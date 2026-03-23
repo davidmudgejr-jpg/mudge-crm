@@ -20,6 +20,7 @@ import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import { bulkOps } from '../api/bridge';
+import useLiveUpdates from '../hooks/useLiveUpdates';
 
 const CONTACTED_OPTIONS = [
   'Contacted Owner', 'Not Contacted', 'Broker/Not worth it',
@@ -236,6 +237,7 @@ export default function Properties({ onCountChange }) {
   }, [search, filterType, filterPriority, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useLiveUpdates('property', fetchData);
 
   const toggleSelect = (id) => {
     setSelected((prev) => {

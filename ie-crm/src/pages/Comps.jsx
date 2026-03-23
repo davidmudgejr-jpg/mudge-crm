@@ -12,6 +12,7 @@ import EmptyState from '../components/shared/EmptyState';
 import { bulkOps } from '../api/bridge';
 import { useSlideOver } from '../components/shared/SlideOverContext';
 import useDetailPanel from '../hooks/useDetailPanel';
+import useLiveUpdates from '../hooks/useLiveUpdates';
 
 const PROPERTY_TYPES = ['Industrial', 'Office', 'Retail', 'Multifamily', 'Land', 'Mixed-Use'];
 const RENT_TYPES = ['NNN', 'GRS', 'MGR'];
@@ -183,6 +184,7 @@ export default function Comps({ onCountChange }) {
   }, [search, filterType, orderBy, order, activeTab, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useLiveUpdates(['lease_comp', 'sale_comp'], fetchData);
 
   const handleBulkDelete = useCallback(async () => {
     if (selected.size === 0) return;

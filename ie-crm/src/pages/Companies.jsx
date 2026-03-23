@@ -20,6 +20,7 @@ import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
+import useLiveUpdates from '../hooks/useLiveUpdates';
 
 function formatRevenue(val) {
   if (val == null || val === '') return <span className="text-crm-muted">--</span>;
@@ -142,6 +143,7 @@ export default function Companies({ onCountChange }) {
   }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useLiveUpdates('company', fetchData);
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });

@@ -2182,6 +2182,15 @@ async function executeHoustonWriteActions(responseText, userId) {
 }
 
 /**
+ * Emit a CRM record change event so frontend tables update in real-time
+ */
+function emitCrmChange(entityType, action, recordId, data) {
+  if (io) {
+    io.emit('crm:record:changed', { entityType, action, recordId, data, timestamp: Date.now() });
+  }
+}
+
+/**
  * Fuzzy match a name/address against a CRM table.
  * Returns: { match: row, ambiguous: false } for single match
  *          { matches: [rows], ambiguous: true } for multiple matches
@@ -2350,6 +2359,7 @@ async function executeSingleAction(action, userId) {
         }
 
         const linkMsg = linked.length > 0 ? ' Linked to: ' + linked.join(', ') + '.' : '';
+        emitCrmChange('interaction', 'created', interactionId, { type: p.interaction_type, linked });
         return { success: true, message: '\u2705 Logged ' + (p.interaction_type || 'Note') + '.' + linkMsg };
       }
 
@@ -2482,6 +2492,7 @@ async function executeSingleAction(action, userId) {
         }
 
         const linkMsg = linked.length > 0 ? ' Linked to: ' + linked.join(', ') + '.' : '';
+        emitCrmChange('action_item', 'created', taskId, { name: p.name, linked });
         return { success: true, message: '\u2705 Created task: "' + p.name + '"' + (p.due_date ? ' (due ' + p.due_date + ')' : '') + linkMsg };
       }
 
@@ -2507,6 +2518,7 @@ async function executeSingleAction(action, userId) {
         if (setClauses.length > 0) {
           await pool.query('UPDATE contacts SET ' + setClauses.join(', ') + ', updated_at = NOW() WHERE contact_id = $1', values);
         }
+        emitCrmChange('contact', 'updated', contactId, { name: p.contact_name, updates: p.updates });
         return { success: true, message: '\u2705 Updated ' + p.contact_name };
       }
 
@@ -2532,6 +2544,7 @@ async function executeSingleAction(action, userId) {
         if (setClauses2.length > 0) {
           await pool.query('UPDATE properties SET ' + setClauses2.join(', ') + ', updated_at = NOW() WHERE property_id = $1', values2);
         }
+        emitCrmChange('property', 'updated', propId, { address: p.address, updates: p.updates });
         return { success: true, message: '\u2705 Updated ' + p.address };
       }
 

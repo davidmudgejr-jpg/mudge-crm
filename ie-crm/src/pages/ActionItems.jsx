@@ -6,6 +6,7 @@ import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import { formatDatePacific } from '../utils/timezone';
 import useDetailPanel from '../hooks/useDetailPanel';
+import useLiveUpdates from '../hooks/useLiveUpdates';
 
 const CIRCLE_COLORS = {
   Todo: 'border-red-500/60',
@@ -166,6 +167,7 @@ export default function ActionItems({ onCountChange }) {
   }, [search, filterStatus, activeView, orderBy, order, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useLiveUpdates('action_item', fetchData);
 
   const handleToggleDone = async (task) => {
     const newStatus = task.status === 'Done' ? 'Todo' : 'Done';

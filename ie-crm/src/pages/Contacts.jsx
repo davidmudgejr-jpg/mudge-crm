@@ -21,6 +21,7 @@ import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import { bulkOps } from '../api/bridge';
+import useLiveUpdates from '../hooks/useLiveUpdates';
 
 const TYPE_COLORS = {
   Owner: 'bg-green-500/20 text-green-400',
@@ -196,6 +197,7 @@ export default function Contacts({ onCountChange }) {
   }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useLiveUpdates('contact', fetchData);
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });

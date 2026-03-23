@@ -21,6 +21,7 @@ import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import { playDealSound } from '../utils/dealSound';
+import useLiveUpdates from '../hooks/useLiveUpdates';
 
 const STATUS_COLORS = {
   Active: 'bg-gradient-to-r from-[#30D158] to-[#34C759] text-white shadow-[0_2px_6px_rgba(48,209,88,0.3)]',
@@ -194,6 +195,7 @@ export default function Deals({ onCountChange }) {
   }, [search, filterStatus, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
+  useLiveUpdates('deal', fetchData);
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
