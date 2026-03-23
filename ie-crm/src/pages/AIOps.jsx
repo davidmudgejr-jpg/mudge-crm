@@ -14,6 +14,7 @@ import CostBreakdown from '../components/ai-ops/detail-views/CostBreakdown';
 import TerritoryIntel from '../components/ai-ops/detail-views/TerritoryIntel';
 import SystemHealth from '../components/ai-ops/detail-views/SystemHealth';
 import CouncilChat from '../components/ai-ops/detail-views/CouncilChat';
+import ImprovementProposals from '../components/ai-ops/detail-views/ImprovementProposals';
 
 // ─────────────────────────────────────────────────────────────
 // Detail view registry — maps zone IDs from WarRoom3D clicks
@@ -27,6 +28,7 @@ const DETAIL_VIEWS = {
   territory:        TerritoryIntel,
   health:           SystemHealth,
   council:          CouncilChat,
+  proposals:        ImprovementProposals,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -113,9 +115,9 @@ export default function AIOps() {
         </div>
       </div>
 
-      {/* Council button overlay — top right */}
+      {/* Quick-access buttons — top right */}
       {!activeView && (
-        <div className="absolute top-14 right-4 z-20">
+        <div className="absolute top-14 right-4 z-20 flex flex-col gap-2">
           <button
             onClick={() => handleZoomIn('council')}
             className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/30 hover:border-indigo-500/50 text-indigo-300 text-xs font-medium transition-all backdrop-blur-sm"
@@ -124,6 +126,15 @@ export default function AIOps() {
               <path strokeLinecap="round" strokeLinejoin="round" d="M20.25 8.511c.884.284 1.5 1.128 1.5 2.097v4.286c0 1.136-.847 2.1-1.98 2.193-.34.027-.68.052-1.02.072v3.091l-3-3c-1.354 0-2.694-.055-4.02-.163a2.115 2.115 0 0 1-.825-.242m9.345-8.334a2.126 2.126 0 0 0-.476-.095 48.64 48.64 0 0 0-8.048 0c-1.131.094-1.976 1.057-1.976 2.192v4.286c0 .837.46 1.58 1.155 1.951m9.345-8.334V6.637c0-1.621-1.152-3.026-2.76-3.235A48.455 48.455 0 0 0 11.25 3c-2.115 0-4.198.137-6.24.402-1.608.209-2.76 1.614-2.76 3.235v6.226c0 1.621 1.152 3.026 2.76 3.235.577.075 1.157.14 1.74.194V21l4.155-4.155" />
             </svg>
             Council
+          </button>
+          <button
+            onClick={() => handleZoomIn('proposals')}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-600/20 hover:bg-amber-600/40 border border-amber-500/30 hover:border-amber-500/50 text-amber-300 text-xs font-medium transition-all backdrop-blur-sm"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 0 0 1.5-.189m-1.5.189a6.01 6.01 0 0 1-1.5-.189m3.75 7.478a12.06 12.06 0 0 1-4.5 0m3.75 2.383a14.406 14.406 0 0 1-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 1 0-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
+            </svg>
+            Proposals
           </button>
         </div>
       )}

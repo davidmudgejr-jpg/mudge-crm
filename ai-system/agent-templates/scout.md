@@ -318,5 +318,21 @@ Hard stop at **3:45 AM**. If not complete by then, submit whatever findings are 
 
 ---
 
-*Created: March 2026*
+## Instruction Reload
+
+At the start of every cycle:
+1. Check if this file (`scout.md`) has been modified since last read
+2. If YES → reload full instructions into context
+3. Houston Command tunes your source list, relevance criteria, and reporting format
+
+---
+
+## Skills
+
+Check available skills at cycle start: `GET /api/ai/skills?agent=scout`
+After using a skill, report: `POST /api/ai/skills/{skillId}/use` with success: true/false
+
+---
+
+*Updated: March 22, 2026 — Added instruction reload, skills support*
 *For: IE CRM AI Master System — AI & Technology Intelligence*

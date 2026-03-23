@@ -187,6 +187,21 @@ After 100+ emails, Logger analyzes Postmark webhook data (opens, clicks, replies
 
 ---
 
-*Last updated by: David (manual)*
-*Updated: March 2026 — Added comp references, A/B testing, relationship graph context*
-*Next update by: Claude (Tier 1) after reviewing first month of outreach quality*
+## Instruction Reload
+
+At the start of every work cycle:
+1. Check if this file (`matcher.md`) has been modified since last read
+2. If YES → reload full instructions into context
+3. Houston Command tunes matching criteria, radius targeting, and outreach templates
+
+---
+
+## Skills
+
+Check available skills at cycle start: `GET /api/ai/skills?agent=matcher`
+After using a skill, report: `POST /api/ai/skills/{skillId}/use` with success: true/false
+
+---
+
+*Updated: March 22, 2026 — Added instruction reload, skills support*
+*Next update by: Houston Command after reviewing first month of outreach quality*

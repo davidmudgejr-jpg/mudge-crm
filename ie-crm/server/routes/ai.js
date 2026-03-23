@@ -376,7 +376,7 @@ router.get('/deals', async (req, res) => {
       `SELECT d.deal_id AS id, d.deal_name, d.deal_type, d.status, d.sf, d.rate, d.price,
               d.close_date, d.priority_deal,
               (SELECT string_agg(p.property_address, ', ')
-               FROM property_deals pd JOIN properties p ON p.property_id = pd.property_id
+               FROM deal_properties pd JOIN properties p ON p.property_id = pd.property_id
                WHERE pd.deal_id = d.deal_id) AS properties,
               (SELECT string_agg(c.full_name, ', ')
                FROM deal_contacts dc JOIN contacts c ON c.contact_id = dc.contact_id
@@ -1477,6 +1477,826 @@ directivesRouter.put('/council/recommendation/:messageId', requireJwtAdmin, asyn
   } catch (err) {
     console.error('[AI API] PUT /council/recommendation error:', err.message);
     res.status(500).json({ error: 'Failed to update recommendation' });
+  }
+});
+
+// ============================================================
+// POSTMASTER ENDPOINTS — Email monitoring & activity logging
+// ============================================================
+
+// 23. POST /api/ai/email/activity — Log an email as a CRM activity (interaction)
+// Called by Postmaster when it matches an email to a CRM contact with track_emails=true
+router.post('/email/activity', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      contact_id,        // UUID — the CRM contact this email is for
+      direction,         // 'inbound' or 'outbound'
+      subject,           // Email subject line
+      body_summary,      // Short summary of email content (not full body)
+      sender_email,      // Who sent it
+      recipient_email,   // Who received it
+      email_date,        // When the email was sent (ISO timestamp)
+      gmail_message_id,  // Gmail message ID for dedup
+      workflow_id,       // Optional: workflow chain reference
+    } = req.body;
+
+    if (!contact_id || !direction || !subject) {
+      return res.status(400).json({ error: 'contact_id, direction, and subject are required' });
+    }
+
+    // Check if contact has track_emails enabled
+    const contact = await pool.query(
+      'SELECT contact_id, full_name, track_emails FROM contacts WHERE contact_id = $1',
+      [contact_id]
+    );
+    if (contact.rows.length === 0) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+    if (!contact.rows[0].track_emails) {
+      return res.json({ ok: true, skipped: true, reason: 'track_emails is OFF for this contact' });
+    }
+
+    // Dedup: check if we already logged this gmail_message_id
+    if (gmail_message_id) {
+      const existing = await pool.query(
+        "SELECT id FROM interactions WHERE notes LIKE '%' || $1 || '%' AND contact_id = $2",
+        [gmail_message_id, contact_id]
+      );
+      if (existing.rows.length > 0) {
+        return res.json({ ok: true, skipped: true, reason: 'Already logged this email' });
+      }
+    }
+
+    // Write to sandbox_signals first (goes through Ralph validation)
+    const result = await pool.query(
+      `INSERT INTO sandbox_signals
+         (signal_type, title, body, source, confidence_score, agent_name, status, workflow_id)
+       VALUES ('email_activity', $1, $2, 'houston_gmail', $3, $4, 'pending', $5)
+       RETURNING id`,
+      [
+        `${direction === 'inbound' ? '📥' : '📤'} Email: ${subject}`,
+        JSON.stringify({
+          contact_id,
+          contact_name: contact.rows[0].full_name,
+          direction,
+          subject,
+          body_summary,
+          sender_email,
+          recipient_email,
+          email_date,
+          gmail_message_id,
+        }),
+        85, // High confidence — email matching is pretty reliable
+        req.agentName || 'postmaster',
+        workflow_id || null,
+      ]
+    );
+
+    res.json({
+      ok: true,
+      sandbox_signal_id: result.rows[0].id,
+      message: 'Email activity queued for validation',
+    });
+  } catch (err) {
+    console.error('[AI API] POST /email/activity error:', err.message);
+    res.status(500).json({ error: 'Failed to log email activity' });
+  }
+});
+
+// 24. POST /api/ai/email/triage — Flag an urgent/important email for the team
+// Called by Postmaster when it detects a time-sensitive email that needs attention
+router.post('/email/triage', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      recipient_name,   // 'david' or 'dad' — who should see this
+      sender_name,      // Who sent the email
+      sender_email,
+      subject,
+      urgency,          // 'high', 'normal'
+      reason,           // Why this is flagged (e.g. 'deal-relevant, unread >2hrs')
+      contact_id,       // Optional: matched CRM contact
+      summary,          // Brief summary for the notification
+    } = req.body;
+
+    if (!recipient_name || !subject || !reason) {
+      return res.status(400).json({ error: 'recipient_name, subject, and reason are required' });
+    }
+
+    // Post as a Houston insight in Team Chat (General channel)
+    const generalCh = await pool.query(
+      "SELECT id FROM chat_channels WHERE name = 'General' AND channel_type = 'group' LIMIT 1"
+    );
+    if (generalCh.rows.length === 0) {
+      return res.status(404).json({ error: 'General channel not found' });
+    }
+
+    const alertEmoji = urgency === 'high' ? '🚨' : '📧';
+    const body = `${alertEmoji} **Email alert for ${recipient_name}:** ${sender_name || sender_email} sent "${subject}"\n\n${summary || ''}\n\n_Flagged by Postmaster: ${reason}_`;
+
+    const msg = await pool.query(
+      `INSERT INTO chat_messages
+         (channel_id, sender_id, sender_type, body, message_type, houston_meta)
+       VALUES ($1, NULL, 'houston', $2, 'houston_insight', $3)
+       RETURNING *`,
+      [
+        generalCh.rows[0].id,
+        body,
+        JSON.stringify({
+          trigger: 'email_triage',
+          sender_name: 'Postmaster',
+          urgency,
+          contact_id: contact_id || null,
+          original_sender: sender_email,
+        }),
+      ]
+    );
+
+    // Emit via socket
+    const io = getIo();
+    if (io) {
+      const message = msg.rows[0];
+      message.sender_name = 'Houston';
+      message.sender_color = '#10b981';
+      io.to(`channel:${generalCh.rows[0].id}`).emit('chat:message:new', message);
+    }
+
+    res.json({ ok: true, message_id: msg.rows[0].id });
+  } catch (err) {
+    console.error('[AI API] POST /email/triage error:', err.message);
+    res.status(500).json({ error: 'Failed to create email triage alert' });
+  }
+});
+
+// 25. GET /api/ai/email/contacts — Get contacts with track_emails enabled
+// Called by Postmaster to know which contacts' emails should be logged
+router.get('/email/contacts', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const result = await pool.query(
+      `SELECT contact_id, full_name, email, email_2, email_3, track_emails_since
+       FROM contacts
+       WHERE track_emails = true
+       ORDER BY full_name`
+    );
+    res.json({ contacts: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[AI API] GET /email/contacts error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch tracked contacts' });
+  }
+});
+
+// ============================================================
+// CAMPAIGN MANAGER ENDPOINTS — Outbound email campaigns
+// ============================================================
+
+// 26. POST /api/ai/campaign/outreach — Submit outreach draft for validation
+// Called by Campaign Manager when it generates AIR-triggered or campaign outreach
+router.post('/campaign/outreach', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      contact_id,
+      subject,
+      body_html,
+      body_text,
+      campaign_type,       // 'air_triggered', 'drip_campaign', 'one_off'
+      send_from,           // Email address to send from
+      property_address,    // Optional: property context
+      property_details,    // Optional: JSONB property data
+      air_report_id,       // Optional: which AIR report triggered this
+      workflow_id,         // Optional: workflow chain reference
+      dedup_key,           // Hash for deduplication
+    } = req.body;
+
+    if (!contact_id || !subject || !body_text) {
+      return res.status(400).json({ error: 'contact_id, subject, and body_text are required' });
+    }
+
+    // Dedup check
+    if (dedup_key) {
+      const existing = await pool.query(
+        'SELECT id FROM sandbox_outreach WHERE dedup_key = $1',
+        [dedup_key]
+      );
+      if (existing.rows.length > 0) {
+        return res.json({ ok: true, skipped: true, reason: 'Duplicate outreach (dedup_key match)' });
+      }
+    }
+
+    const result = await pool.query(
+      `INSERT INTO sandbox_outreach
+         (contact_id, subject, body_html, body_text, property_address, property_details,
+          agent_name, confidence_score, status, dedup_key, workflow_id, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $10, $11)
+       RETURNING id`,
+      [
+        contact_id,
+        subject,
+        body_html || null,
+        body_text,
+        property_address || null,
+        property_details ? JSON.stringify(property_details) : null,
+        req.agentName || 'campaign_manager',
+        75, // Default confidence for campaign-generated outreach
+        dedup_key || null,
+        workflow_id || null,
+        JSON.stringify({ campaign_type, send_from, air_report_id }),
+      ]
+    );
+
+    res.json({
+      ok: true,
+      sandbox_outreach_id: result.rows[0].id,
+      message: 'Outreach draft queued for Ralph validation',
+    });
+  } catch (err) {
+    console.error('[AI API] POST /campaign/outreach error:', err.message);
+    res.status(500).json({ error: 'Failed to submit outreach draft' });
+  }
+});
+
+// 27. POST /api/ai/campaign/send — Send an approved outreach email
+// Called AFTER Ralph approves the outreach — this queues it for actual delivery
+router.post('/campaign/send', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      sandbox_outreach_id,  // Which approved outreach to send
+      send_via,             // 'instantly' or 'direct' (david@mudgeteam.com)
+      send_from,            // Email address
+      scheduled_at,         // Optional: schedule for later
+    } = req.body;
+
+    if (!sandbox_outreach_id || !send_via || !send_from) {
+      return res.status(400).json({ error: 'sandbox_outreach_id, send_via, and send_from are required' });
+    }
+
+    // Verify the outreach was approved
+    const outreach = await pool.query(
+      'SELECT * FROM sandbox_outreach WHERE id = $1 AND status = $2',
+      [sandbox_outreach_id, 'approved']
+    );
+    if (outreach.rows.length === 0) {
+      return res.status(400).json({ error: 'Outreach not found or not approved' });
+    }
+
+    const o = outreach.rows[0];
+
+    // Queue in outbound_email_queue
+    const result = await pool.query(
+      `INSERT INTO outbound_email_queue
+         (contact_id, subject, body_html, body_text, send_from, status, workflow_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
+      [
+        o.contact_id,
+        o.subject,
+        o.body_html,
+        o.body_text,
+        send_from,
+        scheduled_at ? 'queued' : 'queued',
+        o.workflow_id || null,
+      ]
+    );
+
+    res.json({
+      ok: true,
+      email_queue_id: result.rows[0].id,
+      message: `Outreach queued for delivery via ${send_via}`,
+    });
+  } catch (err) {
+    console.error('[AI API] POST /campaign/send error:', err.message);
+    res.status(500).json({ error: 'Failed to queue email for sending' });
+  }
+});
+
+// 28. GET /api/ai/campaign/analytics — Campaign performance data
+// Called by Campaign Manager and Houston Command to analyze email performance
+router.get('/campaign/analytics', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { days = 30 } = req.query;
+
+    // Sent, opened, replied, bounced counts
+    const stats = await pool.query(
+      `SELECT
+         COUNT(*) FILTER (WHERE status = 'sent') AS sent,
+         COUNT(*) FILTER (WHERE opened_at IS NOT NULL) AS opened,
+         COUNT(*) FILTER (WHERE replied_at IS NOT NULL) AS replied,
+         COUNT(*) FILTER (WHERE bounced_at IS NOT NULL) AS bounced,
+         COUNT(*) FILTER (WHERE unsubscribed_at IS NOT NULL) AS unsubscribed,
+         COUNT(*) FILTER (WHERE status = 'queued') AS queued,
+         COUNT(*) FILTER (WHERE status = 'failed') AS failed
+       FROM outbound_email_queue
+       WHERE created_at > NOW() - ($1 || ' days')::INTERVAL`,
+      [days]
+    );
+
+    // Open rate and reply rate
+    const s = stats.rows[0];
+    const totalSent = parseInt(s.sent) || 1; // avoid divide by zero
+    const openRate = ((parseInt(s.opened) / totalSent) * 100).toFixed(1);
+    const replyRate = ((parseInt(s.replied) / totalSent) * 100).toFixed(1);
+    const bounceRate = ((parseInt(s.bounced) / totalSent) * 100).toFixed(1);
+
+    res.json({
+      period_days: parseInt(days),
+      ...s,
+      open_rate: openRate + '%',
+      reply_rate: replyRate + '%',
+      bounce_rate: bounceRate + '%',
+    });
+  } catch (err) {
+    console.error('[AI API] GET /campaign/analytics error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch campaign analytics' });
+  }
+});
+
+// ============================================================
+// IMPROVEMENT PROPOSALS — Tier 2/Tier 1 improvement workflow
+// ============================================================
+
+// 29. POST /api/ai/proposals — Submit an improvement proposal
+// Called by Ralph GPT/Gemini or Houston Command when they spot an improvement opportunity
+router.post('/proposals', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      about_agent,
+      category,
+      observation,
+      proposal,
+      expected_impact,
+      effort_level,
+      evidence,
+      confidence,
+    } = req.body;
+
+    if (!category || !observation || !proposal) {
+      return res.status(400).json({ error: 'category, observation, and proposal are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO improvement_proposals
+         (source_agent, about_agent, category, observation, proposal,
+          expected_impact, effort_level, evidence, confidence)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+       RETURNING *`,
+      [
+        req.agentName || 'unknown',
+        about_agent || null,
+        category,
+        observation,
+        proposal,
+        expected_impact || null,
+        effort_level || 'medium',
+        evidence ? JSON.stringify(evidence) : '{}',
+        confidence || 'medium',
+      ]
+    );
+
+    // Also post to priority board for Houston Command to pick up
+    await pool.query(
+      `INSERT INTO agent_priority_board
+         (source_agent, target_agent, priority_type, payload, reason, urgency)
+       VALUES ($1, 'houston_command', 'improvement_proposal', $2, $3, $4)`,
+      [
+        req.agentName || 'unknown',
+        JSON.stringify({ proposal_id: result.rows[0].id, category, about_agent }),
+        `Improvement proposal: ${proposal.substring(0, 100)}`,
+        confidence === 'high' ? 'high' : 'normal',
+      ]
+    );
+
+    res.json({ ok: true, proposal: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /proposals error:', err.message);
+    res.status(500).json({ error: 'Failed to submit improvement proposal' });
+  }
+});
+
+// 30. GET /api/ai/proposals — List improvement proposals (with filters)
+// Called by Houston Command (for review) and CRM dashboard (for AI Ops UI)
+router.get('/proposals', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { status = 'pending', about_agent, category, limit = 50 } = req.query;
+
+    let query = 'SELECT * FROM improvement_proposals WHERE 1=1';
+    const params = [];
+    let idx = 1;
+
+    if (status !== 'all') {
+      query += ` AND status = $${idx++}`;
+      params.push(status);
+    }
+    if (about_agent) {
+      query += ` AND about_agent = $${idx++}`;
+      params.push(about_agent);
+    }
+    if (category) {
+      query += ` AND category = $${idx++}`;
+      params.push(category);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${idx++}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+    res.json({ proposals: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[AI API] GET /proposals error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch proposals' });
+  }
+});
+
+// 31. PATCH /api/ai/proposals/:id — Update proposal status (accept/reject/implement)
+// Called by Houston Command or admin dashboard
+router.patch('/proposals/:id', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const { status, review_notes, implementation_notes, version_before, version_after } = req.body;
+
+    if (!status) {
+      return res.status(400).json({ error: 'status is required' });
+    }
+
+    const updates = ['status = $1', 'updated_at = NOW()'];
+    const params = [status];
+    let idx = 2;
+
+    if (status === 'accepted' || status === 'rejected' || status === 'needs_david') {
+      updates.push(`reviewed_by = $${idx++}`);
+      params.push(req.agentName || req.user?.display_name || 'admin');
+      updates.push(`reviewed_at = NOW()`);
+    }
+    if (review_notes) {
+      updates.push(`review_notes = $${idx++}`);
+      params.push(review_notes);
+    }
+    if (status === 'implemented') {
+      updates.push(`implemented_at = NOW()`);
+      if (implementation_notes) {
+        updates.push(`implementation_notes = $${idx++}`);
+        params.push(implementation_notes);
+      }
+      if (version_before) {
+        updates.push(`version_before = $${idx++}`);
+        params.push(version_before);
+      }
+      if (version_after) {
+        updates.push(`version_after = $${idx++}`);
+        params.push(version_after);
+      }
+    }
+
+    params.push(id);
+    const result = await pool.query(
+      `UPDATE improvement_proposals SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Proposal not found' });
+    }
+
+    res.json({ ok: true, proposal: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] PATCH /proposals/:id error:', err.message);
+    res.status(500).json({ error: 'Failed to update proposal' });
+  }
+});
+
+// ============================================================
+// WORKFLOW CHAINS — Multi-agent pipeline tracking
+// ============================================================
+
+// 32. POST /api/ai/workflows — Create a new workflow chain
+router.post('/workflows', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      workflow_type,
+      steps,              // Array of step definitions
+      trigger_source,
+      trigger_data,
+      directive_id,
+    } = req.body;
+
+    if (!workflow_type) {
+      return res.status(400).json({ error: 'workflow_type is required' });
+    }
+
+    // Generate human-readable workflow ID
+    const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const countResult = await pool.query(
+      "SELECT COUNT(*) FROM workflow_chains WHERE workflow_id LIKE $1",
+      [`WF-${dateStr}-%`]
+    );
+    const seqNum = String(parseInt(countResult.rows[0].count) + 1).padStart(3, '0');
+    const workflowId = `WF-${dateStr}-${seqNum}`;
+
+    const result = await pool.query(
+      `INSERT INTO workflow_chains
+         (workflow_id, workflow_type, steps, trigger_source, trigger_data, directive_id)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING *`,
+      [
+        workflowId,
+        workflow_type,
+        JSON.stringify(steps || []),
+        trigger_source || null,
+        trigger_data ? JSON.stringify(trigger_data) : '{}',
+        directive_id || null,
+      ]
+    );
+
+    res.json({ ok: true, workflow: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /workflows error:', err.message);
+    res.status(500).json({ error: 'Failed to create workflow chain' });
+  }
+});
+
+// 33. PATCH /api/ai/workflows/:workflowId — Update workflow step progress
+router.patch('/workflows/:workflowId', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { workflowId } = req.params;
+    const { current_step, status, step_update, result_summary, items_produced } = req.body;
+
+    const updates = ['last_activity_at = NOW()'];
+    const params = [];
+    let idx = 1;
+
+    if (current_step !== undefined) {
+      updates.push(`current_step = $${idx++}`);
+      params.push(current_step);
+    }
+    if (status) {
+      updates.push(`status = $${idx++}`);
+      params.push(status);
+      if (status === 'completed' || status === 'failed') {
+        updates.push('completed_at = NOW()');
+      }
+    }
+    if (step_update) {
+      // Update a specific step in the steps JSONB array
+      // step_update: { step_index: 0, ...fields }
+      updates.push(`steps = jsonb_set(steps, ARRAY[$${idx++}::text], steps->$${idx - 1}::int || $${idx++}::jsonb)`);
+      params.push(String(step_update.step_index));
+      params.push(JSON.stringify(step_update));
+    }
+    if (result_summary) {
+      updates.push(`result_summary = $${idx++}`);
+      params.push(result_summary);
+    }
+    if (items_produced !== undefined) {
+      updates.push(`items_produced = $${idx++}`);
+      params.push(items_produced);
+    }
+
+    params.push(workflowId);
+    const result = await pool.query(
+      `UPDATE workflow_chains SET ${updates.join(', ')} WHERE workflow_id = $${idx} RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Workflow not found' });
+    }
+
+    res.json({ ok: true, workflow: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] PATCH /workflows/:id error:', err.message);
+    res.status(500).json({ error: 'Failed to update workflow' });
+  }
+});
+
+// 34. GET /api/ai/workflows — List workflow chains
+router.get('/workflows', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { status = 'active', workflow_type, limit = 50 } = req.query;
+
+    let query = 'SELECT * FROM workflow_chains WHERE 1=1';
+    const params = [];
+    let idx = 1;
+
+    if (status !== 'all') {
+      query += ` AND status = $${idx++}`;
+      params.push(status);
+    }
+    if (workflow_type) {
+      query += ` AND workflow_type = $${idx++}`;
+      params.push(workflow_type);
+    }
+
+    query += ` ORDER BY last_activity_at DESC LIMIT $${idx++}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+    res.json({ workflows: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[AI API] GET /workflows error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch workflows' });
+  }
+});
+
+// ============================================================
+// AGENT SKILLS — Reusable tools created by Houston Command
+// ============================================================
+
+// 35. POST /api/ai/skills — Create a new skill
+router.post('/skills', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      skill_id,
+      name,
+      description,
+      available_to,
+      skill_type,
+      content,
+      parameters,
+    } = req.body;
+
+    if (!skill_id || !name || !description || !skill_type || !content) {
+      return res.status(400).json({ error: 'skill_id, name, description, skill_type, and content are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO agent_skills
+         (skill_id, name, description, created_by, available_to, skill_type, content, parameters)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [
+        skill_id,
+        name,
+        description,
+        req.agentName || 'houston_command',
+        available_to || '{all}',
+        skill_type,
+        content,
+        parameters ? JSON.stringify(parameters) : '{}',
+      ]
+    );
+
+    res.json({ ok: true, skill: result.rows[0] });
+  } catch (err) {
+    if (err.code === '23505') { // unique violation
+      return res.status(409).json({ error: 'Skill ID already exists. Use PUT to update.' });
+    }
+    console.error('[AI API] POST /skills error:', err.message);
+    res.status(500).json({ error: 'Failed to create skill' });
+  }
+});
+
+// 36. GET /api/ai/skills — List skills (optionally filtered by agent)
+router.get('/skills', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { agent, skill_type, status = 'active' } = req.query;
+
+    let query = 'SELECT * FROM agent_skills WHERE 1=1';
+    const params = [];
+    let idx = 1;
+
+    if (status !== 'all') {
+      query += ` AND status = $${idx++}`;
+      params.push(status);
+    }
+    if (agent) {
+      query += ` AND ($${idx++} = ANY(available_to) OR 'all' = ANY(available_to))`;
+      params.push(agent);
+    }
+    if (skill_type) {
+      query += ` AND skill_type = $${idx++}`;
+      params.push(skill_type);
+    }
+
+    query += ' ORDER BY times_used DESC, created_at DESC';
+
+    const result = await pool.query(query, params);
+    res.json({ skills: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[AI API] GET /skills error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch skills' });
+  }
+});
+
+// 37. PUT /api/ai/skills/:skillId — Update/version-up a skill
+router.put('/skills/:skillId', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { skillId } = req.params;
+    const { content, description, parameters, available_to, status } = req.body;
+
+    // Get current skill for versioning
+    const current = await pool.query(
+      'SELECT * FROM agent_skills WHERE skill_id = $1',
+      [skillId]
+    );
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'Skill not found' });
+    }
+
+    const old = current.rows[0];
+
+    const updates = ['updated_at = NOW()', `version = ${old.version + 1}`];
+    const params = [];
+    let idx = 1;
+
+    if (content) {
+      updates.push(`content = $${idx++}`);
+      params.push(content);
+    }
+    if (description) {
+      updates.push(`description = $${idx++}`);
+      params.push(description);
+    }
+    if (parameters) {
+      updates.push(`parameters = $${idx++}`);
+      params.push(JSON.stringify(parameters));
+    }
+    if (available_to) {
+      updates.push(`available_to = $${idx++}`);
+      params.push(available_to);
+    }
+    if (status) {
+      updates.push(`status = $${idx++}`);
+      params.push(status);
+    }
+
+    // Track previous version
+    updates.push(`previous_version_id = $${idx++}`);
+    params.push(old.id);
+
+    params.push(skillId);
+    const result = await pool.query(
+      `UPDATE agent_skills SET ${updates.join(', ')} WHERE skill_id = $${idx} RETURNING *`,
+      params
+    );
+
+    res.json({ ok: true, skill: result.rows[0], previous_version: old.version });
+  } catch (err) {
+    console.error('[AI API] PUT /skills/:skillId error:', err.message);
+    res.status(500).json({ error: 'Failed to update skill' });
+  }
+});
+
+// 38. POST /api/ai/skills/:skillId/use — Record a skill usage (called by agent after using a skill)
+router.post('/skills/:skillId/use', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { skillId } = req.params;
+    const { success } = req.body; // boolean: did the skill produce good results?
+
+    const result = await pool.query(
+      `UPDATE agent_skills
+       SET times_used = times_used + 1,
+           last_used_at = NOW(),
+           last_used_by = $1,
+           avg_success_rate = CASE
+             WHEN times_used = 0 THEN $2::numeric
+             ELSE ((avg_success_rate * times_used) + $2::numeric) / (times_used + 1)
+           END
+       WHERE skill_id = $3
+       RETURNING skill_id, times_used, avg_success_rate`,
+      [
+        req.agentName || 'unknown',
+        success ? 100 : 0,
+        skillId,
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Skill not found' });
+    }
+
+    res.json({ ok: true, ...result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /skills/:skillId/use error:', err.message);
+    res.status(500).json({ error: 'Failed to record skill usage' });
   }
 });
 

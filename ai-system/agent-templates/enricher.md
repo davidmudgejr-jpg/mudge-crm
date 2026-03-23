@@ -186,6 +186,23 @@ This agent processes paid API calls. Crashes mid-batch waste money and create du
 
 ---
 
-*Last updated by: David (manual)*
-*Updated: March 2026 — Added crash recovery protocol, idempotency keys*
-*Next update by: Claude (Tier 1) after reviewing first week of logs*
+## Instruction Reload
+
+At the start of every work cycle:
+1. Check if this file (`enricher.md`) has been modified since last read
+2. If YES → reload full instructions into context
+3. This allows Houston Command to tune pre-filter rules, scoring weights, and workflow steps without restarting you
+
+---
+
+## Skills
+
+Check available skills at cycle start: `GET /api/ai/skills?agent=enricher`
+Houston Command may create API workflow skills, data transform skills, or decision tree skills that improve your pipeline.
+After using a skill, report: `POST /api/ai/skills/{skillId}/use` with success: true/false
+
+---
+
+*Last updated by: David + Claude Code*
+*Updated: March 22, 2026 — Added instruction reload, skills support*
+*Next update by: Houston Command after reviewing first week of logs*

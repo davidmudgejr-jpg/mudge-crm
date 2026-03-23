@@ -157,6 +157,44 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
           <InlineField label="Phone Hot" value={contact.phone_hot} field="phone_hot" onSave={saveField} />
           <InlineField label="Email Hot" value={contact.email_hot} field="email_hot" onSave={saveField} />
           <InlineField label="LinkedIn" value={contact.linkedin} field="linkedin" type="url" onSave={saveField} />
+          {/* AI Email Tracking Toggle */}
+          <div className="col-span-2 mt-2 mb-1 px-1">
+            <div className="flex items-center justify-between rounded-lg bg-crm-hover/50 border border-crm-border/50 px-3 py-2.5">
+              <div className="flex items-center gap-2">
+                <span className="text-base">📧</span>
+                <div>
+                  <div className="text-xs font-medium text-crm-text">Email Tracking</div>
+                  <div className="text-[10px] text-crm-muted leading-tight">
+                    {contact.track_emails
+                      ? 'Postmaster auto-logs emails to/from this contact'
+                      : 'Emails from this contact are not tracked'}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  const newVal = !contact.track_emails;
+                  saveField('track_emails', newVal);
+                  // When turning ON, also set track_emails_since timestamp
+                  if (newVal) saveField('track_emails_since', new Date().toISOString());
+                }}
+                className={`
+                  relative w-9 h-5 rounded-full transition-colors duration-200 focus:outline-none
+                  ${contact.track_emails
+                    ? 'bg-crm-accent'
+                    : 'bg-crm-border'
+                  }
+                `}
+              >
+                <span
+                  className={`
+                    absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200
+                    ${contact.track_emails ? 'translate-x-4' : 'translate-x-0'}
+                  `}
+                />
+              </button>
+            </div>
+          </div>
           <InlineField label="Client Level" value={contact.client_level} field="client_level" type="select" options={CLIENT_LEVEL_OPTIONS} onSave={saveField} />
         </div>
       </Section>

@@ -213,6 +213,21 @@ When there are no priority board items and the normal monitoring cycle is comple
 
 ---
 
-*Version: 2.0*
-*Last updated by: David (manual) — Added proactive innovation mode*
-*Next update by: Claude (Tier 1) after reviewing first week of logs*
+## Instruction Reload
+
+At the start of every work cycle:
+1. Check if this file (`researcher.md`) has been modified since last read
+2. If YES → reload full instructions into context
+3. Houston Command tunes your source priorities, signal scoring, and research focus areas
+
+---
+
+## Skills
+
+Check available skills at cycle start: `GET /api/ai/skills?agent=researcher`
+After using a skill, report: `POST /api/ai/skills/{skillId}/use` with success: true/false
+
+---
+
+*Version: 2.1 — Updated March 22, 2026: Added instruction reload, skills support*
+*Next update by: Houston Command after reviewing first week of logs*

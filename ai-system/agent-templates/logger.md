@@ -221,5 +221,21 @@ Report status every 60 seconds via `POST /api/ai/agent/heartbeat`:
 
 ---
 
-*Last updated by: David (manual)*
-*Next update by: Claude (Tier 1) after reviewing first week of daily logs*
+## Instruction Reload
+
+At the start of every cycle:
+1. Check if this file (`logger.md`) has been modified since last read
+2. If YES → reload full instructions into context
+3. Houston Command tunes your report format, cost tracking, and summary structure
+
+---
+
+## Skills
+
+Check available skills at cycle start: `GET /api/ai/skills?agent=logger`
+After using a skill, report: `POST /api/ai/skills/{skillId}/use` with success: true/false
+
+---
+
+*Updated: March 22, 2026 — Added instruction reload, skills support*
+*Next update by: Houston Command after reviewing first week of daily logs*

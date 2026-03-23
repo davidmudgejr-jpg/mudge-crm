@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-22 (Phase 6: Houston Two-Brain Architecture + Council + Directives + Auth Fix)
-> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system, nightly R&D + weekly self-review directives, OAuth auto-refresh (Railway + Mac Mini), auth logout bug root-caused and fixed (5 bugs), app icon update, Houston smart brain upgrade (fuzzy search, confirmation gates, NAV commands).
-> Next tasks: **Flesh out AI agent system architecture** (how agents work together, Ralph Loop, email campaigns), **Houston image analysis testing** (verify on production), **Fireflies.ai integration** (auto-log calls), **Location-aware Houston** (GPS + camera), **Native iOS app** (replace PWA for better keyboard handling).
+> Updated: 2026-03-22 (Phase 7: Complete AI Agent Architecture + Email Ecosystem + Self-Improvement System)
+> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) **Full AI agent system architecture designed and built**: AGENT-SYSTEM.md (450+ lines), 2 new agents (Postmaster + Campaign Manager), 16 new API endpoints, 4 new DB tables, self-improvement loop with reverse prompting, improvement proposals UI in AI Ops, track_emails toggle on contacts, all 9 agent instruction files updated with instruction reload + skills.
+> Next tasks: **Run migration 024** (new tables: improvement_proposals, workflow_chains, agent_skills, outbound_email_queue, track_emails on contacts), **Set up Ralph GPT + Gemini on 16GB Mac Mini** (OpenClaw instances), **48GB Mac Mini arrives → deploy Tier 3 agents** (Enricher first, then Postmaster), **Connect Instantly.ai API** for Campaign Manager, **Houston Gmail setup** (forwards + IMAP for Postmaster).
 
 ---
 
@@ -334,6 +334,39 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 ### App Icon Update ✅ (2026-03-22)
 - [x] **HoloServerRocket V1** — all PWA icons (512, 192, 180, 32, 16) + favicon replaced
 - [x] **Sidebar logo** — CRM sidebar top-left updated to new icon
+
+### Complete AI Agent Architecture ✅ (2026-03-22, Phase 7)
+
+**Definitive Architecture Document:**
+- [x] **AGENT-SYSTEM.md created** — 450+ line master reference for the entire AI fleet. Covers: 10-agent roster with model assignments, 3-tier self-improvement loop, chain of command (David → Command → Ralph → Tier 3), Houston Sonnet ↔ Command relationship, email ecosystem (Postmaster + Campaign Manager), memory architecture by tier, reverse prompting self-improvement protocol, workflow chains, 4-phase build sequence.
+- [x] **Architecture directive pushed to Houston Command** — via `scripts/push-directive.js`, Houston Command now knows the full plan
+
+**Database Expansion (Migration 024):**
+- [x] **`improvement_proposals` table** — tracks Tier 2 improvement ideas with status workflow (pending → accepted → implemented), evidence JSONB, version tracking
+- [x] **`workflow_chains` table** — end-to-end multi-agent pipeline tracking with auto-generated `WF-YYYYMMDD-NNN` IDs, step progress JSONB
+- [x] **`agent_skills` table** — reusable tools created by Houston Command (prompt templates, API workflows, data transforms, decision trees), tracked by usage count and success rate
+- [x] **`outbound_email_queue` table** — email delivery tracking with open/reply/bounce timestamps, Instantly.ai integration fields
+- [x] **`track_emails` + `track_emails_since`** columns on contacts — controls Postmaster email activity logging per contact
+- [x] **`workflow_id`** column added to sandbox_signals, sandbox_outreach, agent_priority_board — links items to workflow chains
+
+**16 New API Endpoints (endpoints 23-38 in ai.js):**
+- [x] **Postmaster endpoints** — `POST /email/activity` (log email as CRM interaction, checks track_emails flag, dedup by gmail_message_id), `POST /email/triage` (alert team about urgent emails via Houston), `GET /email/contacts` (tracked contacts watch list)
+- [x] **Campaign Manager endpoints** — `POST /campaign/outreach` (submit draft with dedup_key), `POST /campaign/send` (queue approved outreach), `GET /campaign/analytics` (open/reply/bounce rates)
+- [x] **Improvement Proposals endpoints** — `POST /proposals` (submit + auto-post to Priority Board), `GET /proposals` (filter by status/agent/category), `PATCH /proposals/:id` (accept/reject/implement with version tracking)
+- [x] **Workflow Chains endpoints** — `POST /workflows` (create chain with auto-ID), `PATCH /workflows/:id` (update step progress), `GET /workflows` (list active/completed)
+- [x] **Agent Skills endpoints** — `POST /skills` (create), `GET /skills` (list by agent/type), `PUT /skills/:id` (version-up), `POST /skills/:id/use` (record usage + rolling success rate)
+
+**Agent Instruction Files (9 files, 2 new + 7 updated):**
+- [x] **NEW: `postmaster.md`** (245 lines) — Gmail monitoring, contact matching, activity logging, email triage for Dad, AIR report routing, crash recovery
+- [x] **NEW: `campaign-manager.md`** (275 lines) — Instantly.ai drip campaigns (12 addresses × 30/day), AIR-triggered outreach with radius targeting, A/B testing, dedup, send scheduling
+- [x] **UPDATED: `tier2-validator.md`** — Added consensus model (GPT + Gemini agree/disagree → approve/escalate), improvement proposal system, email activity + campaign outreach validation rules, memory architecture, skills support
+- [x] **UPDATED: enricher, researcher, matcher, scout, logger** — All now have instruction reload mechanism (file change detection) and skills support (check/use/report)
+
+**UI Components:**
+- [x] **ImprovementProposals.jsx** — New AI Ops detail view with expandable proposal cards, tab filtering (pending/accepted/implemented/rejected/needs_david), evidence grid display, accept/reject/needs-david action buttons, category badges, confidence/effort indicators
+- [x] **Proposals button** in AI Ops top-right (amber, alongside Council button)
+- [x] **track_emails toggle** on ContactDetail — iOS-style toggle with description text ("Postmaster auto-logs emails to/from this contact"), sets track_emails_since timestamp on enable
+- [x] **track_emails column** in Contacts table — hidden by default, toggleable via column menu
 
 ### RAG Memory Separation ✅ (2026-03-22)
 - [x] **Team vs Personal pools** — `memory_scope` field on `houston_memories` table: 'personal' or 'team'
@@ -1510,10 +1543,18 @@ These differences should be handled in the deals formula VIEW using a `CASE` on 
 19. ~~**Build formula computation (deals)**~~ ✅ DONE — `deal_formulas` VIEW with geometric series commission calc
 20. **Build dedicated Lease Comp Import Wizard** — David to provide Excel examples first. Need data fan-out mapping (one row → properties + companies + contacts + lease_comps + junctions).
 21. ~~**Build AI Ops Dashboard page**~~ ✅ DONE — Full Three.js 3D war room rebuilt from SVG. Polyhaven PBR textures, Bloom postprocessing, gyroscopic rings (OrbRings.jsx LOCKED), 5 roaming agents with collision avoidance, 4 data screens with RectAreaLight, tiered amphitheater platform, cinematic lighting, FogExp2 fog, dust particles. 12 new component files created. Dependencies added: three, @react-three/fiber, @react-three/drei, @react-three/postprocessing, gsap.
-21b. **Houston Voice Activation** — Click orb → GSAP camera swoop to floor level → ElevenLabs voice ("What do you need, David?") → Web Speech API mic → Claude API with CRM RAG context → orb pulses with voice amplitude. Clone from Elowen codebase. **NEXT PRIORITY**
+21b. **Houston Voice Activation** — Click orb → GSAP camera swoop to floor level → ElevenLabs voice ("What do you need, David?") → Web Speech API mic → Claude API with CRM RAG context → orb pulses with voice amplitude. Clone from Elowen codebase.
 22. **Smart Filters & Saved Lists (Phase 2A)** — filter pills, slide-in filter builder, auto-updating lists
 23. **Migrate data** — initial bulk load via Claude Code scripts (Airtable exports + TPE Excel), then ongoing imports via CRM CSV tool
 24. **Populate TPE input data** — date_of_birth on contacts, lease_exp on companies, loan_maturities, tenant_growth, property_distress records
+25. **Run migration 024** — deploy improvement_proposals, workflow_chains, agent_skills, outbound_email_queue tables + track_emails columns. **NEXT PRIORITY**
+26. **Set up Ralph GPT + Gemini on 16GB Mac Mini** — two OpenClaw instances for the Tier 2 validation loop (every 10 min)
+27. **48GB Mac Mini setup (Phase 1)** — Ollama + Qwen 3.5 + MiniMax 2.5, Enricher agent first (proves full pipeline: agent → sandbox → Ralph validates → promote to CRM)
+28. **48GB Mac Mini setup (Phase 2)** — Postmaster (Houston Gmail + IMAP), Researcher, Logger
+29. **48GB Mac Mini setup (Phase 3)** — Matcher + Campaign Manager (AIR → outreach pipeline), Scout
+30. **Houston Gmail setup** — create Houston Gmail, set up forwards from David + Dad, BCC rule on outgoing
+31. **Connect Instantly.ai API** — Campaign Manager integration, 12 send addresses, A/B testing
+32. **Social Media Manager agent** (future, 64GB machine) — CRE content generation for X/Twitter, LinkedIn
 
 ---
 
@@ -1771,8 +1812,10 @@ Add a trigger or computed column: whenever `property_address` changes, `normaliz
 
 - ~~**Houston Voice Agent**~~ → **PROMOTED TO NEXT PRIORITY (Step 21b)** — Click orb → GSAP camera swoop → ElevenLabs voice → Web Speech API mic → Claude API with CRM RAG → orb pulses with amplitude. Clone from Elowen codebase. Zoom integration (wake word, Recall.ai bridge) remains future.
 - Houston AI agent — auto-generate action items from TPE score changes, lease expiry alerts
-- IAR Hot Sheet automation (daily PDF → parse → update comps + property availability)
-- Email automation / webhook capture (auto-log emails as Interactions)
+- ~~IAR Hot Sheet automation (daily PDF → parse → update comps + property availability)~~ → **PROMOTED: Matcher + Campaign Manager agents handle this (AGENT-SYSTEM.md)**
+- ~~Email automation / webhook capture (auto-log emails as Interactions)~~ → **PROMOTED: Postmaster agent handles this (AGENT-SYSTEM.md)**
+- Fireflies.ai integration — auto-log call transcripts as CRM interactions (future agent on 64GB machine)
+- Social Media Manager agent — CRE content generation for X/Twitter, LinkedIn (future, 64GB+ machine)
 - TPE Dashboard view — heatmap, top 50 targets, score change alerts
 - Building image storage workflow (Costar PDF extraction → local file storage)
 - File attachment storage approach (local filesystem vs S3)

@@ -78,6 +78,7 @@ const ALL_COLUMNS = [
   { key: 'email_3', label: 'Email 3', defaultWidth: 180, format: 'email', defaultVisible: false },
   { key: 'phone_3', label: 'Phone 3', defaultWidth: 120, format: 'phone', defaultVisible: false },
   { key: 'email_kickback', label: 'Email Kickback', defaultWidth: 100, format: 'bool', editType: 'boolean', defaultVisible: false },
+  { key: 'track_emails', label: '📧 Track', defaultWidth: 70, format: 'bool', editType: 'boolean', defaultVisible: false },
   { key: 'born', label: 'Birthday', defaultWidth: 90, type: 'date', filterable: true, format: 'date', defaultVisible: false },
   { key: 'age', label: 'Age', defaultWidth: 50, format: 'number', editable: false, defaultVisible: false },
   // Research links
