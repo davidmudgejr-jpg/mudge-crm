@@ -138,17 +138,20 @@ function initChat(socketServer, dbPool) {
 
         // Check if this is a confirmation reply to Houston's action offer
         const confirmWords = /^(yes|yeah|yep|do it|log it|save it|go ahead|confirm|please|sure)\b/i;
-        if (confirmWords.test((message.body || '').trim())) {
+        const isConfirmation = confirmWords.test((message.body || '').trim());
+        if (isConfirmation) {
           handleTextConfirmation(message).catch(err =>
             console.error('[chat/houston] Text confirmation error:', err.message)
           );
         }
 
         // Houston listener — evaluate if Houston should respond
-        // Run async, don't block the message delivery
-        evaluateHoustonInterjection(message).catch(err =>
-          console.error('[chat/houston] Interjection eval error:', err.message)
-        );
+        // SKIP if this was a confirmation reply (otherwise Houston re-processes the action)
+        if (!isConfirmation) {
+          evaluateHoustonInterjection(message).catch(err =>
+            console.error('[chat/houston] Interjection eval error:', err.message)
+          );
+        }
       } catch (err) {
         console.error('[chat] Error sending message:', err.message);
         socket.emit('chat:error', { error: 'Failed to send message' });
@@ -2788,7 +2791,7 @@ async function executePendingActions(houstonMsg, userId) {
         senderType: 'houston',
         body: confirmBody,
         messageType: 'houston_insight',
-        houstonMeta: { trigger: 'action_confirmation', parent_message_id: houstonMsg.id }
+        houstonMeta: { trigger: 'action_confirmation', parent_message_id: houstonMsg.id, action_executed: true }
       });
       io.to(`channel:${houstonMsg.channel_id}`).emit('chat:message:new', confirmMessage);
     }
@@ -2895,7 +2898,7 @@ If no actionable offer was made, return:
         senderType: 'houston',
         body: confirmMsg,
         messageType: 'houston_insight',
-        houstonMeta: { trigger: 'action_confirmation', parent_message_id: houstonMsg.id }
+        houstonMeta: { trigger: 'action_confirmation', parent_message_id: houstonMsg.id, action_executed: true }
       });
       io.to(`channel:${houstonMsg.channel_id}`).emit('chat:message:new', confirmMessage);
     }
