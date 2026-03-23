@@ -1080,8 +1080,9 @@ Available actions:
    <!--ACTION:{"type":"log_interaction","params":{"contact_name":"Mike Thompson","property_address":"1234 Main St","interaction_type":"Door Knock","notes":"Interested in listing, waiting for lease expiry Sept 2026"}}-->
    Valid types: Phone Call, Cold Call, Voicemail, Outbound Email, Inbound Email, Text, Meeting, Tour, Door Knock, Drive By, Note
 
-2. Create a task:
-   <!--ACTION:{"type":"create_task","params":{"name":"Follow up with Mike Thompson","due_date":"2026-08-01","responsibility":"David Mudge Jr","high_priority":false,"notes":"Re: 1234 Main St listing interest"}}-->
+2. Create a task (with automatic linking):
+   <!--ACTION:{"type":"create_task","params":{"name":"Follow up with Mike Thompson","due_date":"2026-08-01","responsibility":"David Mudge Jr","high_priority":false,"notes":"Re: 1234 Main St listing interest","contact_name":"Mike Thompson","company_name":"ABC Logistics","property_address":"1234 Main St"}}-->
+   IMPORTANT: Always include contact_name, company_name, and/or property_address when the user mentions them. Houston will fuzzy-match and auto-link the task to the correct CRM records. You don't need exact spelling — fuzzy matching handles typos and partial names.
 
 3. Update a contact:
    <!--ACTION:{"type":"update_contact","params":{"contact_name":"Mike Thompson","updates":{"client_level":"A","type":"Owner"}}}-->
@@ -2233,9 +2234,9 @@ async function executeSingleAction(action, userId) {
 
       case 'create_task': {
         const p = action.params;
-        await pool.query(
+        const taskResult = await pool.query(
           `INSERT INTO action_items (name, notes, due_date, responsibility, high_priority, status, source)
-           VALUES ($1, $2, $3, $4, $5, 'Todo', 'houston')`,
+           VALUES ($1, $2, $3, $4, $5, 'Todo', 'houston') RETURNING action_item_id`,
           [
             p.name || 'Follow up',
             p.notes || '',
@@ -2244,7 +2245,80 @@ async function executeSingleAction(action, userId) {
             p.high_priority || false,
           ]
         );
-        return { success: true, message: '\u2705 Created task: "' + p.name + '"' + (p.due_date ? ' (due ' + p.due_date + ')' : '') };
+        const taskId = taskResult.rows[0].action_item_id;
+        const linked = [];
+
+        // Link contact(s) — fuzzy match by name
+        if (p.contact_name) {
+          const names = Array.isArray(p.contact_name) ? p.contact_name : [p.contact_name];
+          for (const name of names) {
+            const contactResult = await pool.query(
+              `SELECT contact_id, full_name FROM contacts WHERE full_name ILIKE $1 LIMIT 1`,
+              ['%' + name + '%']
+            );
+            if (contactResult.rows[0]) {
+              await pool.query(
+                `INSERT INTO action_item_contacts (action_item_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+                [taskId, contactResult.rows[0].contact_id]
+              );
+              linked.push(contactResult.rows[0].full_name);
+            }
+          }
+        }
+
+        // Link company — fuzzy match by name
+        if (p.company_name) {
+          const names = Array.isArray(p.company_name) ? p.company_name : [p.company_name];
+          for (const name of names) {
+            const compResult = await pool.query(
+              `SELECT company_id, company_name FROM companies WHERE company_name ILIKE $1 LIMIT 1`,
+              ['%' + name + '%']
+            );
+            if (compResult.rows[0]) {
+              await pool.query(
+                `INSERT INTO action_item_companies (action_item_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+                [taskId, compResult.rows[0].company_id]
+              );
+              linked.push(compResult.rows[0].company_name);
+            }
+          }
+        }
+
+        // Link property — fuzzy match by address
+        if (p.property_address) {
+          const addrs = Array.isArray(p.property_address) ? p.property_address : [p.property_address];
+          for (const addr of addrs) {
+            const propResult = await pool.query(
+              `SELECT property_id, property_address FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
+              ['%' + addr + '%']
+            );
+            if (propResult.rows[0]) {
+              await pool.query(
+                `INSERT INTO action_item_properties (action_item_id, property_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+                [taskId, propResult.rows[0].property_id]
+              );
+              linked.push(propResult.rows[0].property_address);
+            }
+          }
+        }
+
+        // Link deal — fuzzy match by name
+        if (p.deal_name) {
+          const dealResult = await pool.query(
+            `SELECT deal_id, name FROM deals WHERE name ILIKE $1 LIMIT 1`,
+            ['%' + p.deal_name + '%']
+          );
+          if (dealResult.rows[0]) {
+            await pool.query(
+              `INSERT INTO action_item_deals (action_item_id, deal_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+              [taskId, dealResult.rows[0].deal_id]
+            );
+            linked.push(dealResult.rows[0].name);
+          }
+        }
+
+        const linkMsg = linked.length > 0 ? ' Linked to: ' + linked.join(', ') + '.' : '';
+        return { success: true, message: '\u2705 Created task: "' + p.name + '"' + (p.due_date ? ' (due ' + p.due_date + ')' : '') + linkMsg };
       }
 
       case 'update_contact': {
