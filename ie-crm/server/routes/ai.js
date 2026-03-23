@@ -1488,6 +1488,280 @@ directivesRouter.put('/council/recommendation/:messageId', requireJwtAdmin, asyn
 });
 
 // ============================================================
+// FIREFLIES TRANSCRIPT ENDPOINTS — Call transcript ingestion
+// ============================================================
+
+// 39. POST /api/ai/transcripts/ingest — Receive a Fireflies transcript webhook
+// Called by Fireflies webhook OR by an agent polling the Fireflies API
+router.post('/transcripts/ingest', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      fireflies_meeting_id,
+      fireflies_title,
+      recording_url,
+      audio_url,
+      call_date,
+      duration_seconds,
+      call_type,
+      caller,
+      speakers,
+      transcript_text,
+      transcript_segments,
+      our_caller,        // 'david', 'dad', 'sister'
+      contact_id,        // Optional: pre-matched contact
+      contact_name,      // Optional: for auto-matching
+      contact_email,     // Optional: for auto-matching
+      property_id,       // Optional: if property-specific
+    } = req.body;
+
+    if (!fireflies_meeting_id || !transcript_text) {
+      return res.status(400).json({ error: 'fireflies_meeting_id and transcript_text are required' });
+    }
+
+    // Dedup check
+    const existing = await pool.query(
+      'SELECT id FROM call_transcripts WHERE fireflies_meeting_id = $1',
+      [fireflies_meeting_id]
+    );
+    if (existing.rows.length > 0) {
+      return res.json({ ok: true, skipped: true, reason: 'Already ingested this transcript', transcript_id: existing.rows[0].id });
+    }
+
+    // Auto-match contact if not provided
+    let resolvedContactId = contact_id || null;
+    if (!resolvedContactId && (contact_name || contact_email)) {
+      let matchQuery = 'SELECT contact_id, full_name FROM contacts WHERE ';
+      const matchParams = [];
+      if (contact_email) {
+        matchQuery += '(email = $1 OR email_2 = $1 OR email_3 = $1)';
+        matchParams.push(contact_email);
+      } else {
+        matchQuery += 'full_name ILIKE $1';
+        matchParams.push('%' + contact_name + '%');
+      }
+      matchQuery += ' LIMIT 1';
+      const match = await pool.query(matchQuery, matchParams);
+      if (match.rows.length > 0) {
+        resolvedContactId = match.rows[0].contact_id;
+      }
+    }
+
+    // Insert transcript
+    const result = await pool.query(
+      `INSERT INTO call_transcripts
+         (fireflies_meeting_id, fireflies_title, recording_url, audio_url,
+          call_date, duration_seconds, call_type, caller, speakers,
+          transcript_text, transcript_segments, our_caller,
+          contact_id, property_id, processing_status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'pending')
+       RETURNING id`,
+      [
+        fireflies_meeting_id,
+        fireflies_title || null,
+        recording_url || null,
+        audio_url || null,
+        call_date || new Date().toISOString(),
+        duration_seconds || null,
+        call_type || 'phone',
+        caller || null,
+        JSON.stringify(speakers || []),
+        transcript_text,
+        JSON.stringify(transcript_segments || []),
+        our_caller || 'unknown',
+        resolvedContactId,
+        property_id || null,
+      ]
+    );
+
+    const transcriptId = result.rows[0].id;
+
+    // Log to agent activity
+    console.log(`[AI API] Transcript ingested: ${fireflies_meeting_id} → ${transcriptId} (contact: ${resolvedContactId || 'unmatched'})`);
+
+    res.json({
+      ok: true,
+      transcript_id: transcriptId,
+      contact_matched: !!resolvedContactId,
+      contact_id: resolvedContactId,
+      processing_status: 'pending',
+      message: 'Transcript ingested. Pending AI processing (summary + signals).',
+    });
+  } catch (err) {
+    console.error('[AI API] POST /transcripts/ingest error:', err.message);
+    res.status(500).json({ error: 'Failed to ingest transcript' });
+  }
+});
+
+// 40. POST /api/ai/transcripts/:id/process — Process a transcript (generate summary + signals)
+// Called by Houston Sonnet, Postmaster, or Oracle after ingestion
+router.post('/transcripts/:id/process', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const {
+      ai_summary,
+      ai_key_points,
+      ai_action_items,
+      ai_topics,
+      oracle_signals,
+      sentiment_score,
+      sentiment_label,
+      sentiment_trajectory,
+      create_interaction,  // boolean: should we create an activity record?
+    } = req.body;
+
+    // Update transcript with AI analysis
+    const updates = ['processing_status = $1', 'processed_by = $2', 'processed_at = NOW()'];
+    const params = ['completed', req.agentName || 'unknown'];
+    let idx = 3;
+
+    if (ai_summary) { updates.push(`ai_summary = $${idx++}`); params.push(ai_summary); }
+    if (ai_key_points) { updates.push(`ai_key_points = $${idx++}`); params.push(JSON.stringify(ai_key_points)); }
+    if (ai_action_items) { updates.push(`ai_action_items = $${idx++}`); params.push(JSON.stringify(ai_action_items)); }
+    if (ai_topics) { updates.push(`ai_topics = $${idx++}`); params.push(JSON.stringify(ai_topics)); }
+    if (oracle_signals) {
+      updates.push(`oracle_signals = $${idx++}`);
+      params.push(JSON.stringify(oracle_signals));
+      updates.push(`oracle_signal_count = $${idx++}`);
+      params.push(oracle_signals.length);
+    }
+    if (sentiment_score !== undefined) { updates.push(`sentiment_score = $${idx++}`); params.push(sentiment_score); }
+    if (sentiment_label) { updates.push(`sentiment_label = $${idx++}`); params.push(sentiment_label); }
+    if (sentiment_trajectory) { updates.push(`sentiment_trajectory = $${idx++}`); params.push(sentiment_trajectory); }
+
+    params.push(id);
+    const transcript = await pool.query(
+      `UPDATE call_transcripts SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
+      params
+    );
+
+    if (transcript.rows.length === 0) {
+      return res.status(404).json({ error: 'Transcript not found' });
+    }
+
+    const t = transcript.rows[0];
+    let interactionId = null;
+
+    // Create interaction (activity) record with just the summary
+    if (create_interaction && t.contact_id && ai_summary) {
+      const interResult = await pool.query(
+        `INSERT INTO interactions
+           (contact_id, type, date, notes, transcript_id, has_transcript)
+         VALUES ($1, 'Phone Call', $2, $3, $4, true)
+         RETURNING interaction_id`,
+        [
+          t.contact_id,
+          t.call_date,
+          ai_summary,
+          id,
+        ]
+      );
+      interactionId = interResult.rows[0].interaction_id;
+
+      // Update transcript with interaction link
+      await pool.query(
+        'UPDATE call_transcripts SET interaction_id = $1 WHERE id = $2',
+        [interactionId, id]
+      );
+
+      // Link interaction to property if known
+      if (t.property_id) {
+        await pool.query(
+          `INSERT INTO interaction_properties (interaction_id, property_id)
+           VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [interactionId, t.property_id]
+        );
+      }
+    }
+
+    res.json({
+      ok: true,
+      transcript_id: id,
+      interaction_id: interactionId,
+      signal_count: oracle_signals ? oracle_signals.length : 0,
+      sentiment: sentiment_label || null,
+    });
+  } catch (err) {
+    console.error('[AI API] POST /transcripts/:id/process error:', err.message);
+    res.status(500).json({ error: 'Failed to process transcript' });
+  }
+});
+
+// 41. GET /api/ai/transcripts — List transcripts (with filters)
+router.get('/transcripts', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { contact_id, status, our_caller, limit = 50 } = req.query;
+
+    let query = 'SELECT id, fireflies_title, call_date, duration_seconds, call_type, our_caller, contact_id, ai_summary, oracle_signal_count, sentiment_label, processing_status, created_at FROM call_transcripts WHERE 1=1';
+    const params = [];
+    let idx = 1;
+
+    if (contact_id) { query += ` AND contact_id = $${idx++}`; params.push(contact_id); }
+    if (status) { query += ` AND processing_status = $${idx++}`; params.push(status); }
+    if (our_caller) { query += ` AND our_caller = $${idx++}`; params.push(our_caller); }
+
+    query += ` ORDER BY call_date DESC LIMIT $${idx++}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+    res.json({ transcripts: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[AI API] GET /transcripts error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch transcripts' });
+  }
+});
+
+// 42. GET /api/ai/transcripts/:id — Get full transcript with all analysis
+router.get('/transcripts/:id', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const result = await pool.query('SELECT * FROM call_transcripts WHERE id = $1', [id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Transcript not found' });
+    }
+    res.json({ transcript: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] GET /transcripts/:id error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch transcript' });
+  }
+});
+
+// 43. GET /api/ai/transcripts/contact/:contactId/signals — Get all Oracle signals for a contact
+// Used by Oracle to build voice profiles and sentiment trajectories
+router.get('/transcripts/contact/:contactId/signals', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { contactId } = req.params;
+    const result = await pool.query(
+      `SELECT id, call_date, oracle_signals, oracle_signal_count,
+              sentiment_score, sentiment_label, sentiment_trajectory,
+              duration_seconds, ai_summary
+       FROM call_transcripts
+       WHERE contact_id = $1 AND oracle_signal_count > 0
+       ORDER BY call_date DESC`,
+      [contactId]
+    );
+    res.json({
+      contact_id: contactId,
+      transcripts_with_signals: result.rows.length,
+      total_signals: result.rows.reduce((sum, r) => sum + (r.oracle_signal_count || 0), 0),
+      data: result.rows,
+    });
+  } catch (err) {
+    console.error('[AI API] GET /transcripts/contact/:id/signals error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch contact signals' });
+  }
+});
+
+// ============================================================
 // POSTMASTER ENDPOINTS — Email monitoring & activity logging
 // ============================================================
 
