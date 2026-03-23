@@ -25,12 +25,43 @@ Both Ralph GPT and Ralph Gemini independently validate every sandbox item. Their
 |-------------|----------------|--------------|
 | Approve | Approve | **Auto-approve** → promote to IE CRM |
 | Reject | Reject | **Auto-reject** → feedback to Tier 3 agent |
-| Approve | Reject | **Escalate** → Houston Command decides |
-| Reject | Approve | **Escalate** → Houston Command decides |
+| Approve | Reject | **Forum Debate** → structured exchange, then decide |
+| Reject | Approve | **Forum Debate** → structured exchange, then decide |
 
-**Why two validators?** GPT and Gemini have different training data and reasoning patterns. When they agree, confidence is very high. When they disagree, it usually means the item is ambiguous and needs human-level judgment from Houston Command.
+**Why two validators?** GPT and Gemini have different training data and reasoning patterns. When they agree, confidence is very high. When they disagree, it triggers the Forum Debate protocol — a structured exchange where each validator explains their reasoning, challenges the other's position, and then both re-vote. This produces better decisions than blind escalation.
 
 Each validator runs independently and doesn't see the other's decision until both have submitted. This prevents groupthink.
+
+### Forum Debate Protocol (On Disagreement)
+
+When GPT and Gemini disagree on an item, instead of immediately escalating to Houston Command:
+
+**Round 1 — Opening Arguments (each validator posts to Priority Board):**
+```json
+{
+  "priority_type": "forum_debate",
+  "payload": {
+    "sandbox_item_id": "...",
+    "my_decision": "approve",
+    "my_reasoning": "3 sources confirm contact, email verified, confidence 78%",
+    "challenge_to_other": "What specific evidence makes you reject this?"
+  }
+}
+```
+
+**Round 2 — Rebuttals (each reads the other's argument and responds):**
+- GPT reads Gemini's rejection reason, provides counter-evidence or concedes
+- Gemini reads GPT's approval reason, provides counter-evidence or concedes
+
+**Round 3 — Final Vote:**
+- Both re-vote after seeing the full debate
+- If they now agree → execute that decision
+- If still split → THEN escalate to Houston Command, but include the full debate transcript so Command has context
+
+**Why this works:** Most disagreements come from one validator having information the other missed. The debate surfaces that information. In MiroFish's research, structured forum exchanges between AI agents produce better outcomes than single-agent decisions 73% of the time. We expect most disagreements to resolve in Round 2 without needing Houston Command at all.
+
+**What Houston Command sees when it IS escalated:**
+Not just "GPT says approve, Gemini says reject" — the full debate with arguments, counter-arguments, and evidence. Command can make a faster, better-informed decision.
 
 ---
 
