@@ -1089,6 +1089,23 @@ Available actions:
 4. Update a property:
    <!--ACTION:{"type":"update_property","params":{"address":"1234 Main St","updates":{"priority":"High","contacted":["Contacted Owner"]}}}-->
 
+5. Log a call transcript:
+   When someone pastes a long call transcript or says "log this transcript" or "here's a transcript from my call with [name]", treat it as a call transcript to ingest.
+   <!--ACTION:{"type":"log_transcript","params":{"contact_name":"Mike Thompson","property_address":"14520 Jurupa Ave","call_type":"phone","our_caller":"david","transcript_text":"[THE FULL TRANSCRIPT TEXT]","summary":"[YOUR 3-5 SENTENCE SUMMARY]","key_points":["point 1","point 2"],"action_items":["Follow up in 2 weeks"]}}-->
+
+   TRANSCRIPT DETECTION — recognize these patterns:
+   - User pastes a large block of text (500+ words) that looks like a conversation with speakers
+   - User says "log this call", "here's the transcript", "transcribe this", "record this call"
+   - User says "I just talked to [name] about..." followed by detailed conversation text
+   - Text contains speaker labels like "David:", "Mike:", "Speaker 1:", etc.
+
+   When you detect a transcript:
+   - Identify who the call was with (match to CRM contact if possible)
+   - Write a 3-5 sentence summary of the key takeaways
+   - List key points as bullet items
+   - Note any action items mentioned
+   - Ask for confirmation before logging: "I'll log this as a phone call with Mike Thompson. Here's my summary: [summary]. Sound right?"
+
 SMART BEHAVIORS (CRITICAL — follow these exactly):
 
 1. NEVER say "on it" or "pulling it up" unless you VERIFIED the record exists in your CRM DATA context.
@@ -2278,6 +2295,99 @@ async function executeSingleAction(action, userId) {
           await pool.query('UPDATE properties SET ' + setClauses2.join(', ') + ', updated_at = NOW() WHERE property_id = $1', values2);
         }
         return { success: true, message: '\u2705 Updated ' + p.address };
+      }
+
+      case 'log_transcript': {
+        const p = action.params;
+        if (!p.transcript_text) return { success: false, message: 'No transcript text provided' };
+
+        // Match contact
+        let contactId = null;
+        let contactName = p.contact_name || 'Unknown';
+        if (p.contact_name) {
+          const contactResult = await pool.query(
+            `SELECT contact_id, full_name FROM contacts WHERE full_name ILIKE $1 LIMIT 1`,
+            ['%' + p.contact_name + '%']
+          );
+          if (contactResult.rows[0]) {
+            contactId = contactResult.rows[0].contact_id;
+            contactName = contactResult.rows[0].full_name;
+          }
+        }
+
+        // Match property (optional)
+        let propertyId = null;
+        if (p.property_address) {
+          const propResult = await pool.query(
+            `SELECT property_id FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
+            ['%' + p.property_address + '%']
+          );
+          if (propResult.rows[0]) propertyId = propResult.rows[0].property_id;
+        }
+
+        // Generate a simple meeting ID for dedup
+        const meetingId = 'manual-' + Date.now();
+
+        // Insert full transcript
+        const transcriptResult = await pool.query(
+          `INSERT INTO call_transcripts
+             (fireflies_meeting_id, fireflies_title, call_date, call_type,
+              our_caller, contact_id, property_id, transcript_text,
+              ai_summary, ai_key_points, ai_action_items,
+              processing_status, processed_by, processed_at)
+           VALUES ($1, $2, NOW(), $3, $4, $5, $6, $7, $8, $9, $10, 'completed', 'houston_sonnet', NOW())
+           RETURNING id`,
+          [
+            meetingId,
+            'Call with ' + contactName,
+            p.call_type || 'phone',
+            p.our_caller || 'david',
+            contactId,
+            propertyId,
+            p.transcript_text,
+            p.summary || null,
+            JSON.stringify(p.key_points || []),
+            JSON.stringify(p.action_items || []),
+          ]
+        );
+        const transcriptId = transcriptResult.rows[0].id;
+
+        // Create interaction record with just the summary
+        const summary = p.summary || 'Call transcript logged (see full transcript for details)';
+        const interResult = await pool.query(
+          `INSERT INTO interactions (type, date, notes, team_member, transcript_id, has_transcript)
+           VALUES ('Phone Call', NOW(), $1, $2, $3, true) RETURNING interaction_id`,
+          [summary, userId, transcriptId]
+        );
+        const interactionId = interResult.rows[0].interaction_id;
+
+        // Link interaction to contact and property
+        if (contactId) {
+          await pool.query(
+            `INSERT INTO interaction_contacts (interaction_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [interactionId, contactId]
+          );
+        }
+        if (propertyId) {
+          await pool.query(
+            `INSERT INTO interaction_properties (interaction_id, property_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [interactionId, propertyId]
+          );
+        }
+
+        // Update transcript with interaction link
+        await pool.query(
+          'UPDATE call_transcripts SET interaction_id = $1 WHERE id = $2',
+          [interactionId, transcriptId]
+        );
+
+        const linkedTo = [contactName, p.property_address].filter(Boolean).join(' @ ');
+        return {
+          success: true,
+          message: '\u2705 Logged call transcript with ' + linkedTo + ' — summary saved as activity, full transcript stored for Oracle.'
+            + (p.key_points?.length ? '\n📋 ' + p.key_points.length + ' key points captured.' : '')
+            + (p.action_items?.length ? '\n📌 ' + p.action_items.length + ' action items detected.' : '')
+        };
       }
 
       default:
