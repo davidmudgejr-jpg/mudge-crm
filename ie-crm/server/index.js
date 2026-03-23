@@ -2561,4 +2561,25 @@ server.listen(PORT, () => {
   console.log(`[server] Database: ${pool ? 'connected' : 'not configured'}`);
   console.log(`[server] Claude: ${anthropic ? 'ready' : 'not configured'}`);
   console.log(`[server] Airtable: ${process.env.AIRTABLE_API_KEY ? 'configured' : 'not configured'}`);
+
+  // ── Houston Sonnet Self-Heartbeat ──
+  // Reports Houston Sonnet as online in AI Ops dashboard.
+  // Sonnet is the CRM server itself — no external heartbeat cron needed.
+  if (pool) {
+    const sendSonnetHeartbeat = async () => {
+      try {
+        await pool.query(
+          `INSERT INTO agent_heartbeats (agent_name, tier, status, current_task, items_processed_today, items_in_queue, metadata, updated_at)
+           VALUES ('houston', 1, 'running', 'Overseeing daily CRM operations', 0, 0, '{}', NOW())
+           ON CONFLICT (agent_name) DO UPDATE SET
+             status = 'running', current_task = 'Overseeing daily CRM operations', updated_at = NOW()`
+        );
+      } catch (err) {
+        // Silent — heartbeat failures shouldn't crash the server
+      }
+    };
+    sendSonnetHeartbeat(); // Send immediately on startup
+    setInterval(sendSonnetHeartbeat, 60000); // Then every 60 seconds
+    console.log('[server] Houston Sonnet heartbeat: active (60s interval)');
+  }
 });
