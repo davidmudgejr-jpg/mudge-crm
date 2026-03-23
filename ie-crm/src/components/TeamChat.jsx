@@ -576,10 +576,11 @@ export default function TeamChat({ isOpen, onClose }) {
       const wasLoadingOlder = addedCount > 1 && firstNewMsg?.created_at < (messages[addedCount]?.created_at || '');
 
       if (!wasLoadingOlder) {
-        const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120;
-        if (isNearBottom) {
+        // Always scroll to bottom for new messages (yours or Houston's)
+        // Use requestAnimationFrame to ensure DOM has rendered the new message
+        requestAnimationFrame(() => {
           container.scrollTop = container.scrollHeight;
-        }
+        });
       }
     }
     prevMsgCountRef.current = messages.length;
