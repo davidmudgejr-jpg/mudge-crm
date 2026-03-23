@@ -53,8 +53,22 @@ FUTURE:
 └──────────────────────────────────────────────────────────┘
 
 ┌─── 128GB Mac Studio "The Beast" ────────────────────────┐
-│  Houston Command migrates here. 70B+ local models.       │
-│  Massive headroom for experimentation.                    │
+│  ORACLE — The Prediction Engine:                         │
+│                                                          │
+│  11. Oracle          — Llama 3 70B+ (local)              │
+│      + Monte Carlo simulation engine (Python/NumPy)      │
+│      + Knowledge graph (Neo4j local)                     │
+│      + Persona engine + Report agent                     │
+│                                                          │
+│  RAM allocation:                                         │
+│    70B model:         ~45 GB                             │
+│    Neo4j graph DB:    ~15 GB                             │
+│    Monte Carlo engine:~20 GB                             │
+│    Persona/transcript:~15 GB                             │
+│    macOS + headroom:  ~33 GB                             │
+│                                                          │
+│  Also: Houston Command migrates here from 16GB.          │
+│  Massive headroom for experimentation.                   │
 └──────────────────────────────────────────────────────────┘
 
 ALL machines connect to:
@@ -914,11 +928,391 @@ Toggle available in ContactDetail panel UI.
 | 8 | Logger | Qwen 3.5 (local) | 3 | 48GB | Daily logs, cost reports | Follows instructions, logs everything |
 | 9 | Postmaster | Qwen 3.5 (local) | 3 | 48GB | Email monitoring, activity logging | Follows instructions, logs everything |
 | 10 | Campaign Mgr | Qwen 3.5 (local) | 3 | 48GB | Instantly.ai, outbound campaigns | Follows instructions, logs everything |
+| 11 | **Oracle** | **Llama 3 70B+ (local)** | **3b** | **128GB** | **Prediction engine, Monte Carlo, personas, graph** | **Self-calibrating against market outcomes** |
 
 **Future agents (64GB+ machines):**
 - Social Media Manager — generates CRE content for X/Twitter, LinkedIn
 - Fireflies Agent — watches call transcripts, auto-logs summaries
-- Underwriter — automated property valuation and deal analysis
+- BOV Generator — automated broker opinion of value PDFs
+- Ownership Change Detector — scrapes county assessor data nightly
+- Loan Maturity Monitor — watches loan dates, triggers outreach sequences
+- Mailer Agent — physical mail automation via Lob.com API
+
+---
+
+## ORACLE — THE PREDICTION ENGINE (Mac Studio 128GB)
+
+**Model:** Llama 3 70B+ (or best available at time of setup, local)
+**Machine:** 128GB Mac Studio
+**Mode:** Truly continuous — reruns simulations the moment new data arrives
+**Identity:** The intelligence layer. Predicts who will transact and when.
+
+### Oracle's Mission
+
+Predict which owners are most likely to transact, and when. Oracle does not send emails. It does not scrape. It does not write outreach. It **predicts**. Everything else in the system exists to either feed Oracle data or act on Oracle's output.
+
+### Architecture (Inspired by MiroFish Swarm Intelligence Engine)
+
+```
+ORACLE (Mac Studio 128GB)
+│
+├── 70B LOCAL MODEL (Llama 3 or best available)
+│   └── Reads transcripts, builds personas, interprets context
+│   └── Signal interpretation requires deep reasoning (why 70B matters)
+│
+├── KNOWLEDGE GRAPH (Neo4j, stored locally)
+│   └── Owners ↔ Properties ↔ LLCs ↔ Attorneys ↔ Companies
+│   └── Updated dynamically on every new signal
+│   └── Exposed via API: GET /api/ai/graph/connections
+│   └── All agents can query the graph for relationship intelligence
+│   └── (Inspired by MiroFish Zep knowledge graph + dynamic memory updates)
+│
+├── MONTE CARLO ENGINE (Python/NumPy, runs on CPU)
+│   └── 1M simulations per property using signal probability distributions
+│   └── Produces: transaction probability + timing distribution + confidence
+│   └── LLM does understanding, NumPy does math — different tools for different jobs
+│
+├── PERSONA ENGINE
+│   └── Builds/updates owner behavioral profiles from CRM + transcripts
+│   └── 2000-word behavioral persona per owner (evolves over time)
+│   └── Includes communication style, decision patterns, motivations
+│   └── (Inspired by MiroFish OASIS persona generation system)
+│
+├── SCENARIO ENGINE ("What If")
+│   └── David injects hypothetical variables via Houston
+│   └── "What if rates drop 50bps?" → Monte Carlo reruns with adjusted params
+│   └── Shows which properties shift and why
+│   └── (Inspired by MiroFish "God's Eye View" event injection)
+│
+├── REPORT AGENT
+│   └── Natural language Q&A about the market
+│   └── David asks Houston → Houston relays to Oracle → structured report back
+│   └── Uses ReACT pattern to autonomously query graph + simulation data
+│   └── (Inspired by MiroFish Report Agent with deep interaction)
+│
+└── CALIBRATION LOOP (expanded — uses ALL market data)
+    └── See "Calibration System" below
+```
+
+### The 12 Signal Categories
+
+Oracle scores every property using signals from 12 categories. Each signal has a weight that Oracle calibrates over time based on real outcomes.
+
+#### Category 1: Property Signals (static-ish, from CRM)
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Loan maturity within 18 months | Very High | Single strongest predictor |
+| Ownership duration 7-12 years | High | Peak transaction zone |
+| Vacancy duration 6+ months | High | Rising seller pressure |
+| Market rent vs. in-place rent gap | Medium-High | Financial motivation |
+| Owner entity type | Medium | LLC > Trust > Individual historically |
+| Building age/condition | Low-Medium | Deferred maintenance = sell motivation |
+| Zoning constraints | Low | Limits buyer pool, affects timing |
+
+#### Category 2: Engagement Signals (dynamic, from CRM Activity Log)
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| First answered call after dormancy | Very High | Behavioral shift signal |
+| Owner initiates callback | Extremely High | Near-term intent |
+| Call duration increasing over time | High | Warming pattern |
+| Email reply (not just open) | Very High | Major engagement signal |
+| Agreed to property tour | Extremely High | Late stage |
+| Asked for comps | Very High | Actively evaluating |
+| Introduced broker to partner/attorney | Near-certain | Serious intent |
+
+#### Category 3: Transcript Signals (from Fireflies via Oracle 70B)
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| "We've been thinking about our options" | High | Exploratory but active |
+| Unprompted mention of debt/retirement | Very High | Personal motivation revealed |
+| "My partner and I were just talking about this" | High | Multi-stakeholder activation |
+| Asking pricing/market questions on call | Very High | Active evaluation |
+| "How long does a sale usually take?" | Very High | Process-oriented = serious |
+| Sentiment trajectory over multiple calls | High | Arc matters more than snapshot |
+
+#### Category 4: Negative Signals (suppressors)
+| Signal | Effect | Notes |
+|--------|--------|-------|
+| "Don't call me again" | Remove from model | Respect the boundary |
+| 12+ months zero engagement | Significant reduction | Despite outreach attempts |
+| Recently refinanced | Extend timeline 24+ months | Locked in |
+| "Just not interested" (cold tone) | Medium reduction | But may warm later |
+
+#### Category 5: Market Signals (from AIR + internal comps)
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Nearby comp sold recently | High | Validates value, creates urgency |
+| Submarket velocity (90-day comp count) | Medium-High | Rising velocity = hot market |
+| Asking price vs. market on nearby listings | Medium | Market positioning signal |
+| Days on market for comparable listings | Medium | Absorption rate indicator |
+
+#### Category 6: Broker Activity Signals
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Competing broker pursuing same owner | Medium-High | Someone else thinks it's ready |
+| Property appears as exclusive with another firm | High | Owner is already in the market |
+| Owner mentions "another broker called" | Medium | Market is working on them |
+
+#### Category 7: Tax & Assessment Signals (from county assessor)
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Property tax increase >15% YoY | Medium | Financial pressure increases |
+| Supplemental tax bill (nearby ownership change) | Low-Medium | Neighborhood activity |
+| Assessment significantly below market | Low | Potential reassessment risk on sale |
+
+#### Category 8: Tenant Health Signals
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Tenant lease expiring within 18 months | Very High | Major decision point for owner |
+| Tenant company layoffs / downsizing | High | Vacancy risk increases sell pressure |
+| Tenant company expansion | Medium | Stable = less motivation to sell, but higher value |
+| Tenant credit deterioration | Medium-High | Owner worried about future income |
+
+#### Category 9: Owner Life Event Signals (from public records)
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Owner approaching retirement age (65+) | High | Estate planning, simplification |
+| Ownership entity restructuring | Medium-High | Legal changes precede sales |
+| Owner obituary / death record | Very High | Estate sale within 12-24 months |
+| Divorce filing | Very High | Asset liquidation follows |
+| Owner purchased new personal residence | Low-Medium | Life changes in progress |
+
+#### Category 10: Macro Market Signals
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Interest rate direction | High | Affects both buyer demand and seller urgency |
+| IE industrial vacancy rate trend | Medium | Rising vacancy = more seller pressure |
+| Construction pipeline (new industrial starts) | Medium | New supply threatens existing values |
+| Cap rate compression/expansion trend | Medium-High | Affects asset values market-wide |
+
+#### Category 11: Seasonal Patterns
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Q1 (Jan-Mar) | Baseline | Slow start, "thinking about it" |
+| Q2 (Apr-Jun) | +10-15% | Peak listing season |
+| Q3 (Jul-Sep) | +15-20% | Peak transaction season |
+| Q4 (Oct-Dec) | -10-15% | Holiday slowdown |
+| Tax year end timing | Medium | 1031 exchange deadlines, depreciation capture |
+
+#### Category 12: Network Cascade Effects (from Knowledge Graph)
+| Signal | Weight | Notes |
+|--------|--------|-------|
+| Connected owner just sold | High | Social proof + anchor pricing |
+| Shared attorney facilitated a deal | Medium-High | Attorney may proactively suggest options |
+| Portfolio domino effect (owner sold another) | High | Portfolio wind-down pattern |
+| Partner/co-investor activity | Medium-High | Joint decision-making dynamics |
+
+### Oracle Output Format
+
+For each property, Oracle produces:
+
+```
+Property: 14520 Jurupa Ave, Fontana
+─────────────────────────────────────────────────────
+Transaction Probability (12 mo):  71%
+Confidence Level:                  HIGH (tight distribution)
+─────────────────────────────────────────────────────
+Timing Breakdown:
+  0-6 months:    28%
+  6-12 months:   43%
+  12-24 months:  22%
+  24+ months:     7%
+─────────────────────────────────────────────────────
+Primary Drivers:
+  → Loan matures in 9 months (+18%)
+  → 11-year ownership hold (+12%)
+  → Owner answered call last week — first in 8 months (+9%)
+  → Opened BOV email 3x in past 2 weeks (+7%)
+  → Nearby comp sold last month at $185/SF (+6%)
+  → Shared attorney just closed deal for another client (+4%)
+─────────────────────────────────────────────────────
+Recommended Action:  CALL THIS WEEK
+Next Reassessment:   7 days
+─────────────────────────────────────────────────────
+Owner Persona Summary:
+  Communication: Slow responder, prefers phone
+  Decision Pattern: Needs attorney validation first
+  Motivation: Approaching retirement, kids not in business
+  Arc: dormant → warming (behavioral shift detected 3/14)
+─────────────────────────────────────────────────────
+Oracle Note: Owner language in 3/14 call transcript shows
+"thinking about options" phrasing. In 9 of 12 historical
+closed deals, this phrase preceded a meeting within 45 days.
+```
+
+### Calibration System (Market-Wide Learning)
+
+Oracle doesn't just learn from David's closed deals. It learns from the entire IE industrial market.
+
+```
+CALIBRATION DATA SOURCES (by value):
+
+1. YOUR DEALS — richest data
+   Deal closes → Oracle compares prediction vs reality
+   David adds context: "Owner sold because of divorce"
+   Includes full engagement history, transcripts, emails
+
+2. MARKET TRANSACTIONS — volume data (most important for speed)
+   AIR shows "Property X — For Sale"
+   → Oracle logs listing, generates prediction
+   → Months later: AIR comp shows it sold
+   → Oracle compares: Was my timing right? Price range?
+   → Calibration event even WITHOUT knowing the seller personally
+
+3. FAILED LISTINGS — negative calibration (equally valuable)
+   AIR shows property for sale → 12+ months → no comp
+   → Oracle learns: these signal combinations DON'T predict
+   → Prevents model from being overly optimistic
+
+4. LEASE MARKET — parallel calibration
+   AIR shows "Suite 200 — For Lease"
+   → Later: lease comp appears → Oracle calibrates
+   → Lease velocity feeds into owner sell pressure signals
+
+HANDLING MISSING PRICES:
+   Most valuable signal = DID IT TRANSACT (yes/no/pending)
+   Price is secondary. Oracle calibrates timing and probability
+   even without knowing exact sale price.
+
+   If AIR says "sold" but no price:
+   → Oracle still calibrates timing prediction ✅
+   → Marks price as PENDING
+   → If internal comp appears later → backfill price
+   → If price never appears → still valuable data point
+```
+
+**Calibration Loop:**
+```
+Transaction occurs (comp logged, deal closes, or listing expires)
+          ↓
+Oracle retrieves its prediction from listing date
+          ↓
+Calculates error per signal:
+  → Was loan maturity weighted correctly?
+  → Did transcript signals add predictive value?
+  → Which submarket behaved differently than expected?
+  → Did network effects predict cascade correctly?
+          ↓
+Writes detailed error report:
+  oracle/logs/YYYY-MM-DD_calibration.md
+          ↓
+Houston Command reads monthly
+          ↓
+Claude Opus rewrites: oracle/instructions/signal_weights.md
+          ↓
+Oracle loads new weights on next simulation cycle
+          ↓
+Repeat forever — model gets smarter every month
+```
+
+**Learning Timeline:**
+- Month 1-3: Basic signal relationships confirmed from market volume
+- Month 6: Submarket-specific patterns emerge (Perris ≠ Fontana ≠ Ontario)
+- Month 12: Owner-profile clusters form (serial sellers vs. long-holders vs. estates)
+- Month 18: Transcript linguistic patterns become reliable predictors
+- Month 24: Timing precision sharpens — knows not just IF but WHEN
+- Year 3+: Fully proprietary model no competitor can replicate
+
+### Owner Persona Profiles (Inspired by MiroFish Persona Generation)
+
+Oracle builds a detailed behavioral persona for every property owner in the CRM. Not just data points — a narrative understanding of who they are and how to approach them.
+
+```
+OWNER PERSONA: Mike Thompson
+─────────────────────────────────────────────────────
+Entity Type:         Long-term Holder (11 years)
+Financial Profile:   Conservative, single-property LLC, no recent refinance
+Communication Style: Slow responder, prefers phone over email
+Engagement Arc:      Dormant → Warming (call 3/14 showed curiosity)
+Decision Pattern:    Needs validation from attorney before committing
+Personality Indicators: Risk-averse, values relationship over price
+Historical Context:  Bought during 2015 IE industrial boom, has seen value 3x
+Predicted Motivation: Approaching retirement, kids not interested in business
+Network:             Partner: Steve Chen | Attorney: James Park (ABC Law)
+─────────────────────────────────────────────────────
+Recommended Approach:
+  → Lead with relationship, not numbers
+  → Provide comps as "just so you know" rather than hard sell
+  → Mention that James Park just helped another client sell
+  → Frame as "securing your legacy" not "cashing out"
+```
+
+Personas evolve over time as new transcripts, emails, and engagement data arrive. Oracle tracks **longitudinal voice profiles** — how an owner's language changes across conversations over months or years.
+
+### Knowledge Graph (Shared Resource for All Agents)
+
+Oracle maintains a relationship graph that all agents can query:
+
+```
+GRAPH ENTITIES:
+  Owners ↔ Properties ↔ LLCs
+  Owners ↔ Partners ↔ Attorneys
+  Owners ↔ Other Owners (shared attorney, same portfolio)
+  Properties ↔ Comps (nearby, similar type/size)
+  Properties ↔ Submarkets ↔ Market Trends
+  Contacts ↔ Email Threads ↔ Call Transcripts
+  Tenants ↔ Properties ↔ Lease Terms
+
+HOW AGENTS USE THE GRAPH:
+  Enricher    → "John owns 3 LLCs — verify all of them together"
+  Matcher     → "Owner A and B share an attorney — don't send competing outreach"
+  Campaign Mgr → "A is the decision-maker, B is financial partner — personalize differently"
+  Postmaster  → "Email from attorney James Park — he represents 4 of our contacts"
+  Researcher  → "Company X expanding — they're tenants at 3 properties"
+
+API: GET /api/ai/graph/connections?entity=mike_thompson
+Returns: all connected entities with relationship types and strength scores
+```
+
+### Scenario Engine ("What If" Modeling)
+
+David can ask Oracle hypothetical questions through Houston:
+
+```
+David: "Houston, ask Oracle — what if rates drop 50bps next quarter?"
+
+Oracle reruns Monte Carlo with adjusted parameters:
+  → Loan maturity urgency decreases (refinance becomes attractive)
+  → But buyer demand increases (more competitive market)
+  → Net effect: 23 properties shift timing forward by 3-6 months
+  → 8 properties that were "unlikely" cross the 50% threshold
+  → Top emerging opportunities: [ranked list]
+
+David: "What about just the Fontana submarket?"
+
+Oracle filters and re-analyzes:
+  → 47 tracked properties in Fontana
+  → 8 have >50% transaction probability within 6 months
+  → Emerging cluster: 3 properties on Jurupa Ave all warming simultaneously
+  → Risk: 2 high-probability properties have slow-moving attorneys
+  → Recommendation: Focus outreach on Jurupa Ave cluster this month
+```
+
+### Oracle File Structure (Mac Studio)
+
+```
+/oracle/
+  instructions/
+    signal_weights.md          ← Claude Opus rewrites monthly after calibration
+    simulation_rules.md        ← Core Monte Carlo logic and parameters
+    submarket_profiles.md      ← IE-specific behavioral patterns by area
+    transcript_triggers.md     ← High/low intent phrase library
+    persona_templates.md       ← How to build owner personas
+  logs/
+    YYYY-MM-DD_run.md          ← Daily simulation summary
+    YYYY-MM-DD_calibration.md  ← Prediction vs. reality checks
+  output/
+    current_rankings.json      ← Live ranked list → pushed to IE CRM
+    weekly_report.md           ← Human-readable for David via Houston
+    scenario_results/          ← "What if" analysis outputs
+  memory/
+    closed_deals_truth.json    ← Ground truth dataset (grows forever)
+    false_positives.json       ← High scores that didn't transact
+    owner_voice_profiles.json  ← Per-owner language evolution over time
+    market_tracking.json       ← Every AIR listing + prediction + outcome
+  graph/
+    neo4j_data/                ← Knowledge graph database files
+```
 
 ---
 
@@ -969,9 +1363,38 @@ Toggle available in ContactDetail panel UI.
 
 ### Phase 4: 128GB Mac Studio Arrives
 - [ ] Houston Command migrates to 128GB
-- [ ] 70B+ local models for premium analysis
+- [ ] Install Llama 3 70B+ via Ollama
+- [ ] Install Neo4j locally for knowledge graph
+- [ ] Deploy Oracle with initial signal weights (from David's gut + experience)
+- [ ] First Monte Carlo simulation run across full property farm
+- [ ] Build knowledge graph from existing CRM data (owners, properties, LLCs, comps)
+- [ ] Connect Fireflies transcript pipeline to Oracle
+- [ ] Begin building owner persona profiles from historical data
+- [ ] Market tracking table populated from AIR history
+- [ ] First calibration events (market comps vs. Oracle's predictions)
+- [ ] Scenario Engine accessible via Houston ("What if" queries)
+- [ ] Report Agent accessible via Houston (natural language market Q&A)
 - [ ] Full fleet optimization across 4 machines
-- [ ] **Deal Prediction Simulator** — feed CRM data (properties, contacts, market conditions, historical deal outcomes) into a multi-agent simulation engine to predict "what happens if we target warehouse tenants in Ontario with campaign X?" or "what's the probability this deal closes if we do Y?" Requires months of real performance data to be useful. Could run as a weekly strategic tool for Houston Command's Sunday reviews. *(Inspired by MiroFish swarm intelligence prediction engine)*
+
+### Phase 5: Oracle Maturation (Month 3-6)
+- [ ] First real calibration — comps vs. 90-day-old predictions
+- [ ] Houston Command rewrites signal_weights.md for first time
+- [ ] Oracle v2 deployed with calibrated weights
+- [ ] Submarket-specific patterns emerging (Fontana ≠ Ontario ≠ Perris)
+- [ ] Owner persona profiles enriched with Fireflies transcript data
+- [ ] Network cascade effects detectable in knowledge graph
+- [ ] BOV Generator agent comes online (triggered by Oracle scores)
+- [ ] Loan Maturity Monitor agent comes online (feeds Oracle)
+- [ ] Ownership Change Detector agent comes online (feeds Oracle)
+
+### Phase 6: Full Intelligence System (Month 12+)
+- [ ] Oracle timing predictions becoming reliable
+- [ ] Transcript linguistic patterns contributing meaningfully to scores
+- [ ] Owner-profile clusters formed (serial sellers, long-holders, estates)
+- [ ] System is now a proprietary competitive asset
+- [ ] Mailer Agent comes online (physical mail via Lob.com)
+- [ ] Social Media Manager agent comes online
+- [ ] Full fleet: 4 machines, 15+ agents, self-improving 24/7
 
 ---
 
@@ -988,3 +1411,6 @@ Toggle available in ContactDetail panel UI.
 | `EMAIL-INFRASTRUCTURE.md` | Email sending setup (needs update for Postmaster/Campaign Mgr) |
 | `MAC-MINI-16GB-SETUP.md` | Setup guide for the 16GB command center |
 | `agent-templates/*.md` | Individual agent instruction files |
+| `IE_AI_System_Architecture_v2.md` | David's original Oracle/prediction vision (v2 brainstorm) |
+| `reference/mirofish/` | MiroFish source code reference (persona gen, simulation, graph memory) |
+| `reference/bettafish/` | BettaFish source code reference (forum debate, sentiment analysis) |
