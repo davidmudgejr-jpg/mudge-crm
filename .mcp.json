@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "youtube-transcript": {
-      "command": "npx",
-      "args": ["@fabriqa.ai/youtube-transcript-mcp@latest"]
-    }
-  }
-}
