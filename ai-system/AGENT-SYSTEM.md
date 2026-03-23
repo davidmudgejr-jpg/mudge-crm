@@ -261,6 +261,130 @@ Houston Command doesn't just tune agents — it builds new tools for the entire 
 
 **Skills for Itself:** Command can build analysis templates for its own reviews — frameworks for evaluating campaign performance, scoring deal probability, analyzing market trends, etc.
 
+### Continuous Learning: The Instinct System
+
+*Inspired by Everything Claude Code's instinct-based learning with confidence scoring.*
+
+Houston Command doesn't just improve agents on a weekly schedule — it **continuously extracts learning from every work cycle** across the entire fleet. These learnings are called "instincts" — observed patterns with confidence scores that evolve over time.
+
+**How Instincts Work:**
+
+```
+EVERY WORK CYCLE (across all agents):
+        ↓
+OBSERVE: What happened? What worked? What failed?
+  - Enricher verified 15 contacts, 12 approved by Ralph
+  - Campaign Manager sent 40 emails, 8 opened, 2 replied
+  - Matcher found 3 AIR matches but all were stale contacts
+        ↓
+EXTRACT: What's the pattern?
+  - "Contacts with .gmail emails get approved at 90% vs .yahoo at 40%"
+  - "Subject lines under 6 words get 2x open rate"
+  - "AIR matches older than 6 months usually have stale contact info"
+        ↓
+SCORE: How confident are we?
+  - New instinct starts at confidence: 0.3 (low)
+  - Each confirming observation: +0.1
+  - Each contradicting observation: -0.15
+  - Confidence range: 0.0 to 1.0
+        ↓
+STORE: Save to agent_skills table
+  - skill_type: 'instinct'
+  - confidence score tracked
+  - observation_count tracked
+  - first_seen / last_confirmed timestamps
+        ↓
+EVOLVE: What happens over time?
+  - confidence > 0.7 after 10+ observations → PROMOTE
+    Command rewrites relevant agent instructions to encode this
+  - confidence < 0.2 after 5+ observations → DEPRECATE
+    Instinct was wrong, archive it
+  - confidence 0.2-0.7 → KEEP OBSERVING
+    Not enough evidence yet, keep tracking
+```
+
+**Instinct Lifecycle:**
+
+| Stage | Confidence | Observations | Action |
+|-------|-----------|-------------|--------|
+| **New** | 0.3 | 1 | Created, watching |
+| **Emerging** | 0.3-0.5 | 2-5 | Accumulating evidence |
+| **Strengthening** | 0.5-0.7 | 5-10 | Strong pattern, not yet proven |
+| **Proven** | 0.7+ | 10+ | **Auto-promote**: Command rewrites agent instructions |
+| **Declining** | <0.2 | 5+ | **Auto-deprecate**: pattern was wrong |
+| **Promoted** | — | — | Instinct becomes a permanent instruction or skill |
+
+**Example Instinct Lifecycle:**
+
+```
+Week 1: Enricher submits contact with .edu email. Ralph rejects.
+  → Instinct created: "edu_emails_unreliable" (confidence: 0.3, obs: 1)
+
+Week 2: Two more .edu contacts rejected.
+  → Confidence: 0.5, obs: 3
+
+Week 3: One .edu contact approved (university property manager).
+  → Confidence: 0.45, obs: 4 (contradicting evidence)
+
+Week 4-6: Five more .edu rejections, one approval.
+  → Confidence: 0.65, obs: 10
+
+Week 7: Two more rejections push over threshold.
+  → Confidence: 0.72, obs: 12 → PROMOTED
+  → Command rewrites Enricher instructions: "Flag .edu emails for
+     manual review unless contact is confirmed property manager"
+```
+
+**What Gets Extracted Into Instincts:**
+
+From **Enricher**: email domain patterns, source reliability, confidence score correlations
+From **Researcher**: which news sources produce actionable signals, keyword patterns that indicate real deals
+From **Matcher**: which property types match best, optimal radius for AIR outreach, contact staleness thresholds
+From **Campaign Manager**: subject line patterns, send time optimization, template effectiveness
+From **Postmaster**: email categorization accuracy, triage priority patterns
+From **Ralph Loop**: validation pattern accuracy, debate outcomes, common disagreement types
+From **Scout**: which AI/tech sources produce useful intel, model release impact on fleet
+
+**Instinct Storage (in agent_skills table):**
+
+```json
+{
+  "skill_id": "instinct-edu-emails-unreliable",
+  "skill_type": "instinct",
+  "name": "EDU Emails Unreliable for CRE Contacts",
+  "description": "Contacts with .edu email addresses are rejected by Ralph 85% of the time",
+  "content": "Flag .edu emails for manual review unless contact role is university/institutional",
+  "created_by": "houston_command",
+  "available_to": ["enricher"],
+  "parameters": {
+    "confidence": 0.72,
+    "observation_count": 12,
+    "confirming": 10,
+    "contradicting": 2,
+    "first_seen": "2026-04-01",
+    "last_confirmed": "2026-04-15",
+    "lifecycle_stage": "promoted",
+    "promoted_at": "2026-04-16",
+    "promoted_action": "enricher_instruction_rewrite_v3"
+  },
+  "status": "promoted"
+}
+```
+
+**Cadence:**
+- **Real-time extraction**: After each Ralph validation cycle, Command checks for new patterns
+- **Nightly consolidation**: During 2 AM R&D session, Command reviews all instincts, updates confidence scores, checks for promotions/deprecations
+- **Weekly evolution**: Sunday review includes instinct health report — how many new, promoted, deprecated this week
+
+**Cost-Aware Model Routing (from Instincts):**
+
+As instincts accumulate, Command can also learn which tasks are simple enough for smaller/cheaper models:
+- "Enricher pre-filter checks are simple pattern matching → could run on Qwen 7B instead of 20B"
+- "Researcher signal scoring needs nuance → keep on MiniMax 2.5"
+- "Campaign Manager A/B test analysis is data-heavy → worth Qwen 20B"
+
+This feeds into future model routing decisions when larger machines arrive.
+
 ### Memory Architecture (Tier 1)
 
 Houston Command has persistent memory via OpenClaw markdown files:
@@ -833,6 +957,8 @@ Toggle available in ContactDetail panel UI.
 - [ ] Houston Command autonomously rewriting agent instructions
 - [ ] Ralph Forum Debate on disagreements (instead of blind escalation)
 - [ ] Ralph Loop proposing improvements
+- [ ] **Instinct System live** — Houston Command extracts patterns from every work cycle, scores confidence, auto-promotes proven instincts into agent instruction rewrites. *(Inspired by ECC continuous learning v2)*
+- [ ] **Cost-aware model routing** — instincts inform which tasks can run on smaller models
 
 ### Phase 3: 64GB Mac Mini Arrives
 - [ ] Redistribute agents for headroom

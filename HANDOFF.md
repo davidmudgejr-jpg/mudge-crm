@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-22 (Phase 8: Fleet Operations — SSH Access, Directive Pipeline, Health Monitoring, Agent Fixes)
-> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) **Fleet operations session**: SSH access to 16GB Mini from work Mac, diagnosed and fixed Houston Command (token desync, model wrong, keychain locking, directive execution), rewrote directive pipeline to use Telegram instead of claude --print, set up fleet health monitoring (external every 4h + Command nightly), fixed Deals API, cleaned mock data from agent_heartbeats, deployed agent display names in AI Ops, set up email forwarding to Houston Gmail, verified full directive pipeline end-to-end.
-> Next tasks: **Run migration 024 on production Neon**, **Fix AI Ops dashboard/Railway connection** (data in DB but Railway endpoint returns empty), **Agent instruction files** (Postmaster + Campaign Manager), **48GB Mac Mini arrives → deploy Tier 3 agents** (Enricher first), **Connect Instantly.ai API**.
+> Updated: 2026-03-23 (Phase 9: Security Audit + Codex Integration + Development Workflow)
+> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) Fleet operations: SSH access, directive pipeline via Telegram, health monitoring, agent fixes. (9) **Security + workflow session**: Connected OpenAI Codex to GitHub repo for automated PR reviews, ran full codebase security audit (Codex found 7 vulnerabilities), fixed all 7 (raw SQL lockdown, unauthenticated endpoint, socket impersonation, IDOR, JWT secret, input validation), established PR-based workflow (branch → PR → Codex reviews → merge), added Forum Debate protocol for Ralph disagreements (inspired by BettaFish), added Email Sentiment Analysis + Deal Prediction Simulator to roadmap (inspired by MiroFish), pushed directives to Houston Command for Forum Debate + agent auto-config.
+> Next tasks: **Fix Railway URL** (directives through API instead of direct Telegram), **Fix SSH key persistence** to 16GB Mini, **Run migration 024 on Neon**, **Agent instruction files** (Postmaster + Campaign Manager still need writing), **48GB Mac Mini arrives → deploy Tier 3 agents** (Enricher first), **Improvement Proposal UI in AI Ops**, **track_emails toggle on ContactDetail**, **Install `gh` CLI on work Mac**.
 
 ---
 
@@ -395,6 +395,36 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **Houston DM** — stores/retrieves only personal memories for that user
 - [x] **Team Chat** — stores/retrieves from shared team pool (no user_id filter)
 - [x] **Entity linking** — memories reference specific CRM records via `entity_id`
+
+### Security Audit & Codex Integration ✅ (2026-03-23, Phase 9)
+
+**Codex GitHub Integration:**
+- [x] **OpenAI Codex connected to `mudge-crm` repo** — automated code review on every PR
+- [x] **GitHub Action workflow** — `.github/workflows/codex-review.yml` triggers Codex review on PR open/sync/reopen
+- [x] **PR-based development workflow established** — branch → push → PR → Codex reviews → merge to main → Railway auto-deploys
+- [x] **First PR tested end-to-end** — `security/codex-audit-fixes` branch, all checks passed, merged
+
+**Codex Security Audit — 7 Vulnerabilities Fixed:**
+- [x] **#1 CRITICAL: `/api/db/query` locked down** — was open to all authenticated users for arbitrary SQL. Now admin-only + DDL blocking (DROP, TRUNCATE, ALTER blocked)
+- [x] **#2 CRITICAL: `/v1/chat/completions` authenticated** — was completely open (no auth). Now requires agent key or JWT
+- [x] **#3 CRITICAL: Socket.io JWT auth** — `io.use()` middleware verifies JWT on connection. All socket events now use server-derived `socket.authenticatedUser.user_id` instead of trusting client-sent userId. Prevents impersonation.
+- [x] **#4 HIGH: Chat REST IDOR fixed** — `GET /channels`, `/unread`, `/houston-dm`, `/messages/:channelId` now use `req.user.user_id` from JWT instead of `req.query.userId`. Migration fallback with warning logs.
+- [x] **#5 MEDIUM: JWT secret hardened** — production fails hard at startup if `JWT_SECRET` not set. Dev gets loud warning. No more forgeable tokens from known default.
+- [x] **#6 MEDIUM: AI route role checks** — already covered by global `requireAgentKeyOrJwt` middleware
+- [x] **#7 LOW: Numeric input validation** — `safeFloat()` helper prevents NaN-driven 500 errors in AI search endpoints
+- [x] **Security audit doc saved** — `ie-crm/docs/SECURITY_CODE_AUDIT_2026-03-23.md`
+
+**Agent Architecture Updates:**
+- [x] **Forum Debate protocol** — added to AGENT-SYSTEM.md and pushed as directive to Houston Command. When Ralph GPT and Gemini disagree on a sandbox item, they debate in 2 structured rounds before escalating. Produces better decisions + generates improvement insights. (Inspired by BettaFish Agent "Forum" mechanism)
+- [x] **Email Sentiment Analysis** — added to Phase 3 roadmap (64GB Mac Mini). Analyze tone of email replies using local Qwen model, feed into Campaign Manager optimization. (Inspired by BettaFish sentiment engine)
+- [x] **Deal Prediction Simulator** — added to Phase 4 roadmap (128GB Mac Studio). Multi-agent simulation for predicting deal outcomes and campaign effectiveness. (Inspired by MiroFish swarm intelligence engine)
+- [x] **Standing directive pushed** — "Auto-Configure New Agents On Arrival" — Houston Command must immediately configure any new OpenClaw instance without being asked
+
+**Known Issues Identified:**
+- Railway URL returning 404 (possibly redeployed to new URL) — directives can't go through API, using direct Telegram as workaround
+- SSH key to 16GB Mini didn't persist across sessions — needs re-setup
+- `gh` CLI not installed on work Mac — can't create PRs from terminal
+- Migration 024 still needs to run on production Neon
 
 ### Lease Comp Import Wizard ⬜ (next priority)
 - [ ] **Receive Excel examples from David** — need actual lease comp spreadsheet structure before designing
