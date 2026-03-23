@@ -7,8 +7,8 @@ SSH_KEY="$HOME/.ssh/houston_mini_16gb"
 MINI_HOST="houstonmudge@192.168.1.229"
 LOG_DIR="$HOME/Desktop/Claude Custom CRM/logs"
 LOG_FILE="$LOG_DIR/fleet-health-$(date +%Y-%m-%d).log"
-BOT_TOKEN="7848242490:AAFu5nl9-fO8RDR8kv6QGElK4A_xg00poYo"
-CHAT_ID="7938385256"
+BOT_TOKEN="$(cat "$HOME/.config/iecrm/telegram_bot_token" 2>/dev/null)"
+CHAT_ID="$(cat "$HOME/.config/iecrm/telegram_chat_id" 2>/dev/null)"
 
 mkdir -p "$LOG_DIR"
 
