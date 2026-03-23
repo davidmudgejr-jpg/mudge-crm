@@ -1076,9 +1076,10 @@ You can perform these actions when the user asks. Include an ACTION BLOCK at the
 Format: <!--ACTION:{"type":"...","params":{...}}-->
 
 Available actions:
-1. Log an interaction:
-   <!--ACTION:{"type":"log_interaction","params":{"contact_name":"Mike Thompson","property_address":"1234 Main St","interaction_type":"Door Knock","notes":"Interested in listing, waiting for lease expiry Sept 2026"}}-->
+1. Log an interaction (with automatic linking):
+   <!--ACTION:{"type":"log_interaction","params":{"contact_name":"Mike Thompson","property_address":"1234 Main St","company_name":"ABC Logistics","deal_name":"Thompson Listing","interaction_type":"Door Knock","notes":"Interested in listing, waiting for lease expiry Sept 2026"}}-->
    Valid types: Phone Call, Cold Call, Voicemail, Outbound Email, Inbound Email, Text, Meeting, Tour, Door Knock, Drive By, Note
+   IMPORTANT: Always include contact_name, company_name, property_address, and/or deal_name when the user mentions them. Houston will fuzzy-match and auto-link the interaction to all matching CRM records. You can link multiple contacts by passing an array: "contact_name": ["Mike Thompson", "Steve Chen"]
 
 2. Create a task (with automatic linking):
    <!--ACTION:{"type":"create_task","params":{"name":"Follow up with Mike Thompson","due_date":"2026-08-01","responsibility":"David Mudge Jr","high_priority":false,"notes":"Re: 1234 Main St listing interest","contact_name":"Mike Thompson","company_name":"ABC Logistics","property_address":"1234 Main St"}}-->
@@ -2190,46 +2191,104 @@ async function executeSingleAction(action, userId) {
     switch (action.type) {
       case 'log_interaction': {
         const p = action.params;
-        let contactId = null;
+        const linked = [];
+
+        // Match contact(s) — fuzzy search
+        let contactIds = [];
         if (p.contact_name) {
-          const contactResult = await pool.query(
-            `SELECT contact_id, full_name FROM contacts WHERE full_name ILIKE $1 LIMIT 1`,
-            ['%' + p.contact_name + '%']
-          );
-          if (contactResult.rows[0]) contactId = contactResult.rows[0].contact_id;
+          const names = Array.isArray(p.contact_name) ? p.contact_name : [p.contact_name];
+          for (const name of names) {
+            const contactResult = await pool.query(
+              `SELECT contact_id, full_name FROM contacts WHERE full_name ILIKE $1 LIMIT 3`,
+              ['%' + name + '%']
+            );
+            if (contactResult.rows.length === 1) {
+              contactIds.push(contactResult.rows[0].contact_id);
+              linked.push(contactResult.rows[0].full_name);
+            } else if (contactResult.rows.length > 1) {
+              // Multiple matches — use best match (shortest name that contains the search)
+              const best = contactResult.rows.sort((a, b) => a.full_name.length - b.full_name.length)[0];
+              contactIds.push(best.contact_id);
+              linked.push(best.full_name);
+            }
+          }
         }
 
+        // Match property — fuzzy search
         let propertyId = null;
         if (p.property_address) {
           const propResult = await pool.query(
             `SELECT property_id, property_address FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
             ['%' + p.property_address + '%']
           );
-          if (propResult.rows[0]) propertyId = propResult.rows[0].property_id;
+          if (propResult.rows[0]) {
+            propertyId = propResult.rows[0].property_id;
+            linked.push(propResult.rows[0].property_address);
+          }
         }
 
+        // Match company — fuzzy search
+        let companyId = null;
+        if (p.company_name) {
+          const compResult = await pool.query(
+            `SELECT company_id, company_name FROM companies WHERE company_name ILIKE $1 LIMIT 1`,
+            ['%' + p.company_name + '%']
+          );
+          if (compResult.rows[0]) {
+            companyId = compResult.rows[0].company_id;
+            linked.push(compResult.rows[0].company_name);
+          }
+        }
+
+        // Match deal — fuzzy search
+        let dealId = null;
+        if (p.deal_name) {
+          const dealResult = await pool.query(
+            `SELECT deal_id, name FROM deals WHERE name ILIKE $1 LIMIT 1`,
+            ['%' + p.deal_name + '%']
+          );
+          if (dealResult.rows[0]) {
+            dealId = dealResult.rows[0].deal_id;
+            linked.push(dealResult.rows[0].name);
+          }
+        }
+
+        // Create the interaction
         const interResult = await pool.query(
           `INSERT INTO interactions (type, date, notes, team_member)
-           VALUES ($1, NOW(), $2, $3) RETURNING interaction_id`,
-          [p.interaction_type || 'Note', p.notes || '', userId]
+           VALUES ($1, $2, $3, $4) RETURNING interaction_id`,
+          [p.interaction_type || 'Note', p.date || new Date().toISOString(), p.notes || '', userId]
         );
         const interactionId = interResult.rows[0].interaction_id;
 
-        if (contactId && interactionId) {
+        // Link all matched records
+        for (const cId of contactIds) {
           await pool.query(
             `INSERT INTO interaction_contacts (interaction_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-            [interactionId, contactId]
+            [interactionId, cId]
           );
         }
-        if (propertyId && interactionId) {
+        if (propertyId) {
           await pool.query(
             `INSERT INTO interaction_properties (interaction_id, property_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
             [interactionId, propertyId]
           );
         }
+        if (companyId) {
+          await pool.query(
+            `INSERT INTO interaction_companies (interaction_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [interactionId, companyId]
+          );
+        }
+        if (dealId) {
+          await pool.query(
+            `INSERT INTO interaction_deals (interaction_id, deal_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [interactionId, dealId]
+          );
+        }
 
-        const linkedTo = [contactId ? p.contact_name : null, propertyId ? p.property_address : null].filter(Boolean).join(' & ');
-        return { success: true, message: '\u2705 Logged ' + (p.interaction_type || 'Note') + (linkedTo ? ' for ' + linkedTo : '') };
+        const linkMsg = linked.length > 0 ? ' Linked to: ' + linked.join(', ') + '.' : '';
+        return { success: true, message: '\u2705 Logged ' + (p.interaction_type || 'Note') + '.' + linkMsg };
       }
 
       case 'create_task': {

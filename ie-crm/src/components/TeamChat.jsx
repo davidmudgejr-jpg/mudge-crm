@@ -31,7 +31,7 @@ function formatTime(dateStr) {
 // ============================================================
 // CHAT BUBBLE — single message
 // ============================================================
-function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick }) {
+function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick, onActionConfirm }) {
   const isHouston = message.sender_type === 'houston';
   const bubbleColor = isOwn
     ? 'bg-blue-600 text-white'
@@ -40,6 +40,14 @@ function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick }) {
       : 'bg-crm-card text-crm-text';
 
   const reactions = Array.isArray(message.reactions) ? message.reactions : [];
+
+  // Check for pending actions (Houston offering to do something)
+  const meta = typeof message.houston_meta === 'string'
+    ? JSON.parse(message.houston_meta || '{}') : (message.houston_meta || {});
+  const hasPendingActions = isHouston && meta.pending_actions?.length > 0 && !meta.action_executed;
+  const isExpired = meta.pending_actions_at
+    ? (Date.now() - new Date(meta.pending_actions_at).getTime()) > 5 * 60 * 1000
+    : false;
   const attachments = Array.isArray(message.attachments)
     ? message.attachments
     : (typeof message.attachments === 'string' ? JSON.parse(message.attachments || '[]') : []);
@@ -91,6 +99,45 @@ function ChatBubble({ message, isOwn, showAvatar, onReact, onImageClick }) {
           <div className={`px-3.5 py-2 rounded-2xl ${bubbleColor} ${isOwn ? 'rounded-br-md' : 'rounded-bl-md'} text-sm leading-relaxed whitespace-pre-wrap break-words`}>
             {message.body}
           </div>
+        )}
+
+        {/* Quick-action buttons (when Houston offers to do something) */}
+        {hasPendingActions && !isExpired && (
+          <div className="flex items-center gap-2 mt-2 ml-1">
+            <button
+              onClick={() => onActionConfirm?.(message.id, 'yes')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-emerald-600/20 text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              Yes, do it
+            </button>
+            <button
+              onClick={() => onActionConfirm?.(message.id, 'no')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-crm-card/50 text-crm-muted border border-crm-border/30 hover:bg-crm-hover transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              No
+            </button>
+            <button
+              onClick={() => onActionConfirm?.(message.id, 'edit')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-crm-card/50 text-crm-muted border border-crm-border/30 hover:bg-crm-hover transition-colors"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Edit
+            </button>
+          </div>
+        )}
+        {hasPendingActions && isExpired && (
+          <div className="text-[10px] text-crm-muted/50 mt-1 ml-1 italic">Action expired</div>
+        )}
+        {meta.action_executed && isHouston && meta.pending_actions?.length > 0 && (
+          <div className="text-[10px] text-emerald-500/60 mt-1 ml-1 italic">Action completed</div>
         )}
 
         {/* Reactions */}
@@ -890,6 +937,16 @@ export default function TeamChat({ isOpen, onClose }) {
                     showAvatar={shouldShowAvatar(msg, idx)}
                     onReact={(emoji) => addReaction(msg.id, emoji)}
                     onImageClick={setImagePreview}
+                    onActionConfirm={(msgId, action) => {
+                      if (action === 'yes') {
+                        // Send "yes" as a message — triggers text confirmation on backend
+                        sendMessage('yes');
+                      } else if (action === 'no') {
+                        sendMessage("No, cancel that.");
+                      } else if (action === 'edit') {
+                        sendMessage("Hold on, let me adjust that. ");
+                      }
+                    }}
                   />
                 ))
               )}
