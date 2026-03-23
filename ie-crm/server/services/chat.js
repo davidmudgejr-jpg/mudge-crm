@@ -2182,6 +2182,48 @@ async function executeHoustonWriteActions(responseText, userId) {
 }
 
 /**
+ * Fuzzy match a name/address against a CRM table.
+ * Returns: { match: row, ambiguous: false } for single match
+ *          { matches: [rows], ambiguous: true } for multiple matches
+ *          { match: null, ambiguous: false } for no matches
+ */
+async function fuzzyMatch(table, searchCol, searchTerm, extraCols = '', limit = 5) {
+  if (!searchTerm || !pool) return { match: null, ambiguous: false };
+
+  const idCol = table === 'contacts' ? 'contact_id' : table === 'companies' ? 'company_id' : table === 'properties' ? 'property_id' : table === 'deals' ? 'deal_id' : 'id';
+  const nameCol = table === 'contacts' ? 'full_name' : table === 'companies' ? 'company_name' : table === 'properties' ? 'property_address' : table === 'deals' ? 'name' : searchCol;
+  const extra = extraCols ? ', ' + extraCols : '';
+
+  // Try exact-ish match first (starts with or contains)
+  let query = `SELECT ${idCol}, ${nameCol}${extra} FROM ${table} WHERE ${searchCol} ILIKE $1`;
+  // For properties, also search normalized_address
+  if (table === 'properties') {
+    query = `SELECT ${idCol}, ${nameCol}${extra} FROM ${table} WHERE ${searchCol} ILIKE $1 OR normalized_address ILIKE $1`;
+  }
+  query += ` LIMIT ${limit}`;
+
+  const result = await pool.query(query, ['%' + searchTerm + '%']);
+
+  if (result.rows.length === 0) {
+    return { match: null, ambiguous: false, searchTerm };
+  }
+  if (result.rows.length === 1) {
+    return { match: result.rows[0], ambiguous: false };
+  }
+
+  // Multiple matches — check if one is clearly the best (exact match)
+  const exact = result.rows.find(r =>
+    (r[nameCol] || '').toLowerCase() === searchTerm.toLowerCase()
+  );
+  if (exact) {
+    return { match: exact, ambiguous: false };
+  }
+
+  // Multiple matches, none exact — this is ambiguous
+  return { matches: result.rows, ambiguous: true, searchTerm };
+}
+
+/**
  * Execute a single CRM write action
  */
 async function executeSingleAction(action, userId) {
@@ -2192,68 +2234,89 @@ async function executeSingleAction(action, userId) {
       case 'log_interaction': {
         const p = action.params;
         const linked = [];
+        const clarifications = [];
 
-        // Match contact(s) — fuzzy search
+        // Match contact(s)
         let contactIds = [];
         if (p.contact_name) {
           const names = Array.isArray(p.contact_name) ? p.contact_name : [p.contact_name];
           for (const name of names) {
-            const contactResult = await pool.query(
-              `SELECT contact_id, full_name FROM contacts WHERE full_name ILIKE $1 LIMIT 3`,
-              ['%' + name + '%']
-            );
-            if (contactResult.rows.length === 1) {
-              contactIds.push(contactResult.rows[0].contact_id);
-              linked.push(contactResult.rows[0].full_name);
-            } else if (contactResult.rows.length > 1) {
-              // Multiple matches — use best match (shortest name that contains the search)
-              const best = contactResult.rows.sort((a, b) => a.full_name.length - b.full_name.length)[0];
-              contactIds.push(best.contact_id);
-              linked.push(best.full_name);
+            const result = await fuzzyMatch('contacts', 'full_name', name, 'type, email');
+            if (result.ambiguous) {
+              clarifications.push({
+                field: 'contact_name',
+                searchTerm: name,
+                options: result.matches.map(r => ({ id: r.contact_id, label: r.full_name, detail: [r.type, r.email].filter(Boolean).join(' \u00B7 ') }))
+              });
+            } else if (result.match) {
+              contactIds.push(result.match.contact_id);
+              linked.push(result.match.full_name);
             }
           }
         }
 
-        // Match property — fuzzy search
+        // Match property
         let propertyId = null;
         if (p.property_address) {
-          const propResult = await pool.query(
-            `SELECT property_id, property_address FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
-            ['%' + p.property_address + '%']
-          );
-          if (propResult.rows[0]) {
-            propertyId = propResult.rows[0].property_id;
-            linked.push(propResult.rows[0].property_address);
+          const result = await fuzzyMatch('properties', 'property_address', p.property_address, 'city');
+          if (result.ambiguous) {
+            clarifications.push({
+              field: 'property_address',
+              searchTerm: p.property_address,
+              options: result.matches.map(r => ({ id: r.property_id, label: r.property_address, detail: r.city || '' }))
+            });
+          } else if (result.match) {
+            propertyId = result.match.property_id;
+            linked.push(result.match.property_address);
           }
         }
 
-        // Match company — fuzzy search
+        // Match company
         let companyId = null;
         if (p.company_name) {
-          const compResult = await pool.query(
-            `SELECT company_id, company_name FROM companies WHERE company_name ILIKE $1 LIMIT 1`,
-            ['%' + p.company_name + '%']
-          );
-          if (compResult.rows[0]) {
-            companyId = compResult.rows[0].company_id;
-            linked.push(compResult.rows[0].company_name);
+          const result = await fuzzyMatch('companies', 'company_name', p.company_name);
+          if (result.ambiguous) {
+            clarifications.push({
+              field: 'company_name',
+              searchTerm: p.company_name,
+              options: result.matches.map(r => ({ id: r.company_id, label: r.company_name }))
+            });
+          } else if (result.match) {
+            companyId = result.match.company_id;
+            linked.push(result.match.company_name);
           }
         }
 
-        // Match deal — fuzzy search
+        // Match deal
         let dealId = null;
         if (p.deal_name) {
-          const dealResult = await pool.query(
-            `SELECT deal_id, name FROM deals WHERE name ILIKE $1 LIMIT 1`,
-            ['%' + p.deal_name + '%']
-          );
-          if (dealResult.rows[0]) {
-            dealId = dealResult.rows[0].deal_id;
-            linked.push(dealResult.rows[0].name);
+          const result = await fuzzyMatch('deals', 'name', p.deal_name, 'status');
+          if (result.ambiguous) {
+            clarifications.push({
+              field: 'deal_name',
+              searchTerm: p.deal_name,
+              options: result.matches.map(r => ({ id: r.deal_id, label: r.name, detail: r.status || '' }))
+            });
+          } else if (result.match) {
+            dealId = result.match.deal_id;
+            linked.push(result.match.name);
           }
         }
 
-        // Create the interaction
+        // If anything is ambiguous, return clarification request (don't create yet)
+        if (clarifications.length > 0) {
+          let msg = '\u2753 I found multiple matches. Which did you mean?\n';
+          for (const c of clarifications) {
+            msg += '\n**' + c.field.replace('_', ' ') + '** ("' + c.searchTerm + '"):\n';
+            c.options.forEach((opt, i) => {
+              msg += '  ' + (i + 1) + '. ' + opt.label + (opt.detail ? ' (' + opt.detail + ')' : '') + '\n';
+            });
+          }
+          msg += '\nJust reply with the number(s) or name(s) and I\'ll redo this.';
+          return { success: false, needsClarification: true, clarifications, message: msg };
+        }
+
+        // All matches resolved — create the interaction
         const interResult = await pool.query(
           `INSERT INTO interactions (type, date, notes, team_member)
            VALUES ($1, $2, $3, $4) RETURNING interaction_id`,
@@ -2261,7 +2324,6 @@ async function executeSingleAction(action, userId) {
         );
         const interactionId = interResult.rows[0].interaction_id;
 
-        // Link all matched records
         for (const cId of contactIds) {
           await pool.query(
             `INSERT INTO interaction_contacts (interaction_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
@@ -2293,6 +2355,93 @@ async function executeSingleAction(action, userId) {
 
       case 'create_task': {
         const p = action.params;
+        const linked = [];
+        const clarifications = [];
+
+        // Pre-match all entities before creating the task
+        let contactMatches = [];
+        if (p.contact_name) {
+          const names = Array.isArray(p.contact_name) ? p.contact_name : [p.contact_name];
+          for (const name of names) {
+            const result = await fuzzyMatch('contacts', 'full_name', name, 'type, email');
+            if (result.ambiguous) {
+              clarifications.push({
+                field: 'contact_name',
+                searchTerm: name,
+                options: result.matches.map(r => ({ id: r.contact_id, label: r.full_name, detail: [r.type, r.email].filter(Boolean).join(' \u00B7 ') }))
+              });
+            } else if (result.match) {
+              contactMatches.push(result.match);
+              linked.push(result.match.full_name);
+            }
+          }
+        }
+
+        let companyMatches = [];
+        if (p.company_name) {
+          const names = Array.isArray(p.company_name) ? p.company_name : [p.company_name];
+          for (const name of names) {
+            const result = await fuzzyMatch('companies', 'company_name', name);
+            if (result.ambiguous) {
+              clarifications.push({
+                field: 'company_name',
+                searchTerm: name,
+                options: result.matches.map(r => ({ id: r.company_id, label: r.company_name }))
+              });
+            } else if (result.match) {
+              companyMatches.push(result.match);
+              linked.push(result.match.company_name);
+            }
+          }
+        }
+
+        let propertyMatches = [];
+        if (p.property_address) {
+          const addrs = Array.isArray(p.property_address) ? p.property_address : [p.property_address];
+          for (const addr of addrs) {
+            const result = await fuzzyMatch('properties', 'property_address', addr, 'city');
+            if (result.ambiguous) {
+              clarifications.push({
+                field: 'property_address',
+                searchTerm: addr,
+                options: result.matches.map(r => ({ id: r.property_id, label: r.property_address, detail: r.city || '' }))
+              });
+            } else if (result.match) {
+              propertyMatches.push(result.match);
+              linked.push(result.match.property_address);
+            }
+          }
+        }
+
+        let dealMatch = null;
+        if (p.deal_name) {
+          const result = await fuzzyMatch('deals', 'name', p.deal_name, 'status');
+          if (result.ambiguous) {
+            clarifications.push({
+              field: 'deal_name',
+              searchTerm: p.deal_name,
+              options: result.matches.map(r => ({ id: r.deal_id, label: r.name, detail: r.status || '' }))
+            });
+          } else if (result.match) {
+            dealMatch = result.match;
+            linked.push(result.match.name);
+          }
+        }
+
+        // If anything is ambiguous, ask for clarification before creating
+        if (clarifications.length > 0) {
+          let msg = '\u2753 I found multiple matches. Which did you mean?\n';
+          for (const c of clarifications) {
+            msg += '\n**' + c.field.replace(/_/g, ' ') + '** ("' + c.searchTerm + '"):\n';
+            c.options.forEach((opt, i) => {
+              msg += '  ' + (i + 1) + '. ' + opt.label + (opt.detail ? ' (' + opt.detail + ')' : '') + '\n';
+            });
+          }
+          msg += '\nJust reply with the number(s) or name(s) and I\'ll create the task with the right links.';
+          return { success: false, needsClarification: true, clarifications, message: msg };
+        }
+
+        // All matches resolved — create the task
         const taskResult = await pool.query(
           `INSERT INTO action_items (name, notes, due_date, responsibility, high_priority, status, source)
            VALUES ($1, $2, $3, $4, $5, 'Todo', 'houston') RETURNING action_item_id`,
@@ -2305,75 +2454,31 @@ async function executeSingleAction(action, userId) {
           ]
         );
         const taskId = taskResult.rows[0].action_item_id;
-        const linked = [];
 
-        // Link contact(s) — fuzzy match by name
-        if (p.contact_name) {
-          const names = Array.isArray(p.contact_name) ? p.contact_name : [p.contact_name];
-          for (const name of names) {
-            const contactResult = await pool.query(
-              `SELECT contact_id, full_name FROM contacts WHERE full_name ILIKE $1 LIMIT 1`,
-              ['%' + name + '%']
-            );
-            if (contactResult.rows[0]) {
-              await pool.query(
-                `INSERT INTO action_item_contacts (action_item_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-                [taskId, contactResult.rows[0].contact_id]
-              );
-              linked.push(contactResult.rows[0].full_name);
-            }
-          }
-        }
-
-        // Link company — fuzzy match by name
-        if (p.company_name) {
-          const names = Array.isArray(p.company_name) ? p.company_name : [p.company_name];
-          for (const name of names) {
-            const compResult = await pool.query(
-              `SELECT company_id, company_name FROM companies WHERE company_name ILIKE $1 LIMIT 1`,
-              ['%' + name + '%']
-            );
-            if (compResult.rows[0]) {
-              await pool.query(
-                `INSERT INTO action_item_companies (action_item_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-                [taskId, compResult.rows[0].company_id]
-              );
-              linked.push(compResult.rows[0].company_name);
-            }
-          }
-        }
-
-        // Link property — fuzzy match by address
-        if (p.property_address) {
-          const addrs = Array.isArray(p.property_address) ? p.property_address : [p.property_address];
-          for (const addr of addrs) {
-            const propResult = await pool.query(
-              `SELECT property_id, property_address FROM properties WHERE property_address ILIKE $1 OR normalized_address ILIKE $1 LIMIT 1`,
-              ['%' + addr + '%']
-            );
-            if (propResult.rows[0]) {
-              await pool.query(
-                `INSERT INTO action_item_properties (action_item_id, property_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-                [taskId, propResult.rows[0].property_id]
-              );
-              linked.push(propResult.rows[0].property_address);
-            }
-          }
-        }
-
-        // Link deal — fuzzy match by name
-        if (p.deal_name) {
-          const dealResult = await pool.query(
-            `SELECT deal_id, name FROM deals WHERE name ILIKE $1 LIMIT 1`,
-            ['%' + p.deal_name + '%']
+        // Link all resolved entities
+        for (const c of contactMatches) {
+          await pool.query(
+            `INSERT INTO action_item_contacts (action_item_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [taskId, c.contact_id]
           );
-          if (dealResult.rows[0]) {
-            await pool.query(
-              `INSERT INTO action_item_deals (action_item_id, deal_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-              [taskId, dealResult.rows[0].deal_id]
-            );
-            linked.push(dealResult.rows[0].name);
-          }
+        }
+        for (const c of companyMatches) {
+          await pool.query(
+            `INSERT INTO action_item_companies (action_item_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [taskId, c.company_id]
+          );
+        }
+        for (const p2 of propertyMatches) {
+          await pool.query(
+            `INSERT INTO action_item_properties (action_item_id, property_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [taskId, p2.property_id]
+          );
+        }
+        if (dealMatch) {
+          await pool.query(
+            `INSERT INTO action_item_deals (action_item_id, deal_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [taskId, dealMatch.deal_id]
+          );
         }
 
         const linkMsg = linked.length > 0 ? ' Linked to: ' + linked.join(', ') + '.' : '';
@@ -2625,7 +2730,32 @@ async function executePendingActions(houstonMsg, userId) {
       }
     }
 
-    // Mark as executed
+    // Check if any results need clarification (ambiguous matches)
+    const needsClarification = results.some(r => r.needsClarification);
+
+    if (needsClarification) {
+      // Don't mark as executed — user needs to clarify first
+      const clarificationMsgs = results.filter(r => r.needsClarification).map(r => r.message);
+      const clarBody = clarificationMsgs.join('\n\n');
+
+      const clarMessage = await insertMessage({
+        channelId: houstonMsg.channel_id,
+        senderId: null,
+        senderType: 'houston',
+        body: clarBody,
+        messageType: 'houston_insight',
+        houstonMeta: {
+          trigger: 'clarification_needed',
+          parent_message_id: houstonMsg.id,
+          original_actions: meta.pending_actions,
+          clarifications: results.filter(r => r.needsClarification).flatMap(r => r.clarifications || [])
+        }
+      });
+      io.to(`channel:${houstonMsg.channel_id}`).emit('chat:message:new', clarMessage);
+      return;
+    }
+
+    // All resolved — mark as executed
     await pool.query(
       `UPDATE chat_messages SET houston_meta = houston_meta || '{"action_executed": true}'::jsonb WHERE id = $1`,
       [houstonMsg.id]
