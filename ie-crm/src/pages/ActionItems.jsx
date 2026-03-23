@@ -45,9 +45,12 @@ function parseResponsibility(val) {
 }
 
 function TaskRow({ task, onToggleDone, onSelect, isNew }) {
-  const isDone = task.status === 'Done';
+  const [justCompleted, setJustCompleted] = useState(false);
+  const [sliding, setSliding] = useState(false);
+
+  const isDone = task.status === 'Done' || justCompleted;
   const isDead = task.status === 'Dead';
-  const dimmed = isDone || isDead;
+  const dimmed = (isDone && !justCompleted) || isDead;
 
   const today = new Date().toISOString().split('T')[0];
   const dueDay = task.due_date ? task.due_date.split('T')[0] : null;
@@ -55,18 +58,36 @@ function TaskRow({ task, onToggleDone, onSelect, isNew }) {
   const isDueToday = dueDay === today && !isDone && !isDead;
 
   const assignees = parseResponsibility(task.responsibility);
-  const circleColor = CIRCLE_COLORS[task.status] || 'border-crm-border';
   const isHouston = task.source && task.source.startsWith('houston_');
   const badge = !isDone && !isDead && STATUS_BADGE[task.status];
 
+  const circleColor = justCompleted
+    ? 'border-green-500 bg-green-500 scale-110'
+    : CIRCLE_COLORS[task.status] || 'border-crm-border';
+
+  const handleToggle = (e) => {
+    e.stopPropagation();
+    if (task.status === 'Done') {
+      onToggleDone(task);
+    } else {
+      setJustCompleted(true);
+      setTimeout(() => setSliding(true), 600);
+      setTimeout(() => onToggleDone(task), 800);
+    }
+  };
+
   return (
     <div
-      className={`group flex items-start gap-3 px-5 py-2.5 hover:bg-crm-hover/40 cursor-pointer transition-colors ${dimmed ? 'opacity-50' : ''} ${isNew ? 'animate-live-insert' : ''}`}
-      onClick={() => onSelect(task.action_item_id)}
+      className={`group flex items-start gap-3 px-5 py-2.5 cursor-pointer transition-all duration-300
+        ${dimmed ? 'opacity-50' : ''} ${justCompleted && !sliding ? 'opacity-70' : ''}
+        ${sliding ? 'opacity-0 -translate-x-4 max-h-0 py-0 overflow-hidden' : 'max-h-24'}
+        ${isNew ? 'animate-live-insert' : ''} ${!sliding ? 'hover:bg-crm-hover/40' : ''}`}
+      style={sliding ? { transition: 'all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)' } : undefined}
+      onClick={() => !sliding && onSelect(task.action_item_id)}
     >
       <button
-        onClick={(e) => { e.stopPropagation(); onToggleDone(task); }}
-        className={`w-[20px] h-[20px] rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all hover:scale-110 ${circleColor}`}
+        onClick={handleToggle}
+        className={`w-[20px] h-[20px] rounded-full border-2 flex-shrink-0 mt-0.5 flex items-center justify-center transition-all duration-300 hover:scale-110 ${circleColor}`}
         title={isDone ? 'Mark incomplete' : 'Mark done'}
       >
         {isDone && (
@@ -175,12 +196,18 @@ export default function ActionItems({ onCountChange }) {
     if (newStatus === 'Done') updates.date_completed = new Date().toISOString();
     else updates.date_completed = null;
 
+    // Optimistic update
+    setRows(prev => prev.map(r =>
+      r.action_item_id === task.action_item_id ? { ...r, ...updates } : r
+    ));
+
     try {
       await updateActionItem(task.action_item_id, updates);
       addToast(newStatus === 'Done' ? 'Task completed' : 'Task reopened');
-      fetchData();
+      setTimeout(() => fetchData(), 1200);
     } catch (err) {
       console.error('Failed to update task:', err);
+      fetchData();
     }
   };
 

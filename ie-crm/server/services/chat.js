@@ -1111,6 +1111,49 @@ Available actions:
    - Note any action items mentioned
    - Ask for confirmation before logging: "I'll log this as a phone call with Mike Thompson. Here's my summary: [summary]. Sound right?"
 
+6. Create a deal (GUIDED — ask questions step by step):
+   <!--ACTION:{"type":"create_deal","params":{"deal_name":"Thompson Fontana Listing","deal_type":"Sale","status":"Active","contact_name":"Mike Thompson","company_name":"Thompson LLC","property_address":"14520 Jurupa Ave","sf":22000,"rate":null,"asking_price":4200000,"commission_rate":4,"repping":["Seller"],"run_by":["David Mudge Jr"],"priority_deal":true,"notes":"Motivated seller, loan matures Q4"}}-->
+
+   GUIDED DEAL CREATION FLOW:
+   When a user says "create a deal" or "new deal" or "add a deal", walk them through the key fields conversationally. Ask 1-2 questions at a time, not all at once. Use their answers + CRM context to pre-fill what you can.
+
+   Step 1: Get the deal name (user usually provides this upfront)
+   Step 2: Ask deal type — offer buttons: Lease | Sale | Purchase | Sub-Lease | Renewal
+   Step 3: Ask status — offer buttons: Prospecting | Active | Lead | Under Contract
+   Step 4: Ask who the contact is — fuzzy match from CRM, offer buttons if found
+   Step 5: Ask what property — fuzzy match from CRM, offer buttons if found
+   Step 6: Ask for the numbers (in one batch):
+     - For LEASE deals: SF, Rate ($/SF/mo), Term (months), Commission %
+     - For SALE deals: SF, Asking Price, Commission %
+   Step 7: Ask: Who's running this? — offer buttons: Dave Mudge | David Mudge Jr | Missy
+   Step 8: Ask: Repping side? — offer buttons: Landlord | Tenant | Buyer | Seller | Dual
+   Step 9: Show a SUMMARY of everything, then offer: [Create Deal] [Edit something] [Cancel]
+
+   RULES for guided creation:
+   - If the user provides info upfront ("create a sale deal for Mike Thompson at 14520 Jurupa"), skip those questions
+   - If you can infer info from CRM context (property SF, contact company), pre-fill and confirm
+   - User can say "skip" to skip any question — leave that field blank
+   - Keep each message SHORT (2-3 lines max + buttons)
+   - The ACTION block only goes in the FINAL summary message (not during questions)
+
+   Available options:
+   deal_type: Lease, Sale, Purchase, Sub-Lease, Renewal, Other
+   status: Prospecting, Active, Lead, Long Leads, Under Contract, Closed, Deal fell through, Dead, Dead Lead
+   repping: Landlord, Tenant, Buyer, Seller, Dual
+   run_by: Dave Mudge, David Mudge Jr, Missy
+
+7. Create a contact (GUIDED):
+   <!--ACTION:{"type":"create_contact","params":{"full_name":"John Smith","first_name":"John","type":"Owner","email":"john@example.com","phone_1":"951-555-1234","company_name":"Smith LLC","client_level":"B","property_address":"1234 Main St"}}-->
+
+   When user says "create a contact" or "add a new contact", guide them:
+   Step 1: Full name
+   Step 2: Type — offer buttons: Owner | Tenant | Buyer | Seller | Investor | Broker | Attorney
+   Step 3: Email and phone (one batch)
+   Step 4: Company — fuzzy match or create
+   Step 5: Link to property? — fuzzy match from CRM
+   Step 6: Client level — offer buttons: A | B | C | D
+   Step 7: Summary → [Create Contact] [Edit] [Cancel]
+
 SMART BEHAVIORS (CRITICAL — follow these exactly):
 
 1. NEVER say "on it" or "pulling it up" unless you VERIFIED the record exists in your CRM DATA context.
@@ -2549,6 +2592,207 @@ async function executeSingleAction(action, userId) {
         }
         emitCrmChange('property', 'updated', propId, { address: p.address, updates: p.updates });
         return { success: true, message: '\u2705 Updated ' + p.address };
+      }
+
+      case 'create_deal': {
+        const p = action.params;
+        if (!p.deal_name) return { success: false, message: 'Deal name is required' };
+        const linked = [];
+        const clarifications = [];
+
+        // Match contact
+        let contactId = null;
+        if (p.contact_name) {
+          const result = await fuzzyMatch('contacts', 'full_name', p.contact_name, 'type, email');
+          if (result.ambiguous) {
+            clarifications.push({ field: 'contact_name', searchTerm: p.contact_name, options: result.matches.map(r => ({ id: r.contact_id, label: r.full_name, detail: [r.type, r.email].filter(Boolean).join(' \u00B7 ') })) });
+          } else if (result.match) {
+            contactId = result.match.contact_id;
+            linked.push(result.match.full_name);
+          }
+        }
+
+        // Match company
+        let companyId = null;
+        if (p.company_name) {
+          const result = await fuzzyMatch('companies', 'company_name', p.company_name);
+          if (result.ambiguous) {
+            clarifications.push({ field: 'company_name', searchTerm: p.company_name, options: result.matches.map(r => ({ id: r.company_id, label: r.company_name })) });
+          } else if (result.match) {
+            companyId = result.match.company_id;
+            linked.push(result.match.company_name);
+          }
+        }
+
+        // Match property
+        let propertyId = null;
+        if (p.property_address) {
+          const result = await fuzzyMatch('properties', 'property_address', p.property_address, 'city, building_sf');
+          if (result.ambiguous) {
+            clarifications.push({ field: 'property_address', searchTerm: p.property_address, options: result.matches.map(r => ({ id: r.property_id, label: r.property_address, detail: r.city || '' })) });
+          } else if (result.match) {
+            propertyId = result.match.property_id;
+            linked.push(result.match.property_address);
+            // Auto-fill SF from property if not provided
+            if (!p.sf && result.match.building_sf) p.sf = result.match.building_sf;
+          }
+        }
+
+        if (clarifications.length > 0) {
+          let msg = '\u2753 I found multiple matches. Which did you mean?\n';
+          for (const c of clarifications) {
+            msg += '\n**' + c.field.replace(/_/g, ' ') + '** ("' + c.searchTerm + '"):\n';
+            c.options.forEach((opt, i) => { msg += '  ' + (i + 1) + '. ' + opt.label + (opt.detail ? ' (' + opt.detail + ')' : '') + '\n'; });
+          }
+          return { success: false, needsClarification: true, clarifications, message: msg };
+        }
+
+        // Create the deal
+        const dealResult = await pool.query(
+          `INSERT INTO deals (deal_name, deal_type, status, sf, rate, asking_price, asking_rate,
+            commission_rate, repping, run_by, priority_deal, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+           RETURNING deal_id`,
+          [
+            p.deal_name,
+            p.deal_type || null,
+            p.status || 'Prospecting',
+            p.sf || null,
+            p.rate || null,
+            p.asking_price || null,
+            p.asking_rate || null,
+            p.commission_rate || null,
+            p.repping ? '{' + (Array.isArray(p.repping) ? p.repping.join(',') : p.repping) + '}' : null,
+            p.run_by ? '{' + (Array.isArray(p.run_by) ? p.run_by.join(',') : p.run_by) + '}' : '{David Mudge Jr}',
+            p.priority_deal || false,
+            p.notes || null,
+          ]
+        );
+        const dealId = dealResult.rows[0].deal_id;
+
+        // Link contact
+        if (contactId) {
+          await pool.query(
+            `INSERT INTO deal_contacts (deal_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [dealId, contactId]
+          );
+        }
+        // Link company
+        if (companyId) {
+          await pool.query(
+            `INSERT INTO deal_companies (deal_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [dealId, companyId]
+          );
+        }
+        // Link property
+        if (propertyId) {
+          await pool.query(
+            `INSERT INTO deal_properties (deal_id, property_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [dealId, propertyId]
+          );
+        }
+
+        // Calculate commission preview
+        let commPreview = '';
+        if (p.commission_rate && p.asking_price) {
+          const teamGross = p.asking_price * (p.commission_rate / 100);
+          commPreview = ' | Commission: ' + p.commission_rate + '% \u2192 Team Gross $' + teamGross.toLocaleString();
+        } else if (p.commission_rate && p.rate && p.sf) {
+          const annual = p.rate * p.sf * 12;
+          commPreview = ' | Annual rent ~$' + annual.toLocaleString() + ' | Commission: ' + p.commission_rate + '%';
+        }
+
+        const linkMsg = linked.length > 0 ? ' Linked to: ' + linked.join(', ') + '.' : '';
+        emitCrmChange('deal', 'created', dealId, { name: p.deal_name, linked });
+        return { success: true, message: '\u2705 Created deal: "' + p.deal_name + '" (' + (p.deal_type || 'Unknown type') + ' \u00B7 ' + (p.status || 'Prospecting') + ')' + commPreview + '.' + linkMsg };
+      }
+
+      case 'create_contact': {
+        const p = action.params;
+        if (!p.full_name) return { success: false, message: 'Contact name is required' };
+        const linked = [];
+        const clarifications = [];
+
+        // Check for duplicate contact
+        const dupeCheck = await pool.query(
+          `SELECT contact_id, full_name, email FROM contacts WHERE full_name ILIKE $1 LIMIT 3`,
+          ['%' + p.full_name + '%']
+        );
+        if (dupeCheck.rows.length > 0) {
+          const dupeNames = dupeCheck.rows.map(r => r.full_name + (r.email ? ' (' + r.email + ')' : '')).join(', ');
+          // Warn but still create — user confirmed
+        }
+
+        // Match company
+        let companyId = null;
+        if (p.company_name) {
+          const result = await fuzzyMatch('companies', 'company_name', p.company_name);
+          if (result.ambiguous) {
+            clarifications.push({ field: 'company_name', searchTerm: p.company_name, options: result.matches.map(r => ({ id: r.company_id, label: r.company_name })) });
+          } else if (result.match) {
+            companyId = result.match.company_id;
+            linked.push(result.match.company_name);
+          }
+        }
+
+        // Match property
+        let propertyId = null;
+        if (p.property_address) {
+          const result = await fuzzyMatch('properties', 'property_address', p.property_address, 'city');
+          if (result.ambiguous) {
+            clarifications.push({ field: 'property_address', searchTerm: p.property_address, options: result.matches.map(r => ({ id: r.property_id, label: r.property_address, detail: r.city || '' })) });
+          } else if (result.match) {
+            propertyId = result.match.property_id;
+            linked.push(result.match.property_address);
+          }
+        }
+
+        if (clarifications.length > 0) {
+          let msg = '\u2753 I found multiple matches. Which did you mean?\n';
+          for (const c of clarifications) {
+            msg += '\n**' + c.field.replace(/_/g, ' ') + '** ("' + c.searchTerm + '"):\n';
+            c.options.forEach((opt, i) => { msg += '  ' + (i + 1) + '. ' + opt.label + (opt.detail ? ' (' + opt.detail + ')' : '') + '\n'; });
+          }
+          return { success: false, needsClarification: true, clarifications, message: msg };
+        }
+
+        // Create the contact
+        const contactResult = await pool.query(
+          `INSERT INTO contacts (full_name, first_name, type, email, email_2, phone_1, phone_2, client_level, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+           RETURNING contact_id`,
+          [
+            p.full_name,
+            p.first_name || p.full_name.split(' ')[0] || null,
+            p.type || null,
+            p.email || null,
+            p.email_2 || null,
+            p.phone_1 || null,
+            p.phone_2 || null,
+            p.client_level || null,
+            p.notes || null,
+          ]
+        );
+        const newContactId = contactResult.rows[0].contact_id;
+
+        // Link to company
+        if (companyId) {
+          await pool.query(
+            `INSERT INTO contact_companies (contact_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [newContactId, companyId]
+          );
+        }
+        // Link to property
+        if (propertyId) {
+          await pool.query(
+            `INSERT INTO property_contacts (property_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [propertyId, newContactId]
+          );
+        }
+
+        const linkMsg = linked.length > 0 ? ' Linked to: ' + linked.join(', ') + '.' : '';
+        emitCrmChange('contact', 'created', newContactId, { name: p.full_name, linked });
+        return { success: true, message: '\u2705 Created contact: ' + p.full_name + (p.type ? ' (' + p.type + ')' : '') + '.' + linkMsg };
       }
 
       case 'log_transcript': {
