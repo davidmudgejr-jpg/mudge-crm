@@ -353,8 +353,51 @@ Every 10 minutes:
 |----------|-------------|--------|
 | Approve  | Approve     | **Auto-approve** → promote to IE CRM |
 | Reject   | Reject      | **Auto-reject** → feedback to agent |
-| Approve  | Reject      | **Escalate** → Houston Command decides |
-| Reject   | Approve     | **Escalate** → Houston Command decides |
+| Approve  | Reject      | **Forum Debate** → structured exchange, then decide |
+| Reject   | Approve     | **Forum Debate** → structured exchange, then decide |
+
+### The Forum Debate (Disagreement Resolution)
+
+*Inspired by BettaFish's Agent "Forum" collaboration mechanism.*
+
+When GPT and Gemini disagree on a sandbox item, instead of blindly escalating to Houston Command, they enter a **structured debate**. This produces better decisions AND generates insights that flow up to Command.
+
+**How it works:**
+
+```
+GPT says APPROVE, Gemini says REJECT (or vice versa)
+        ↓
+ROUND 1: Each states their case
+  GPT: "I approve because: 2 sources confirm the contact,
+        email domain matches company, phone area code is correct."
+  Gemini: "I reject because: the LLC was dissolved 2 years ago,
+           which means this person may no longer be associated."
+        ↓
+ROUND 2: Each responds to the other's argument
+  GPT: "Good point about the LLC. But the person's LinkedIn still
+        shows them at this company as of last month."
+  Gemini: "If LinkedIn confirms current employment, I'll change
+           to approve with a note to verify LLC status."
+        ↓
+DECISION: After 2 rounds, check for consensus
+  - If they now agree → execute that decision
+  - If still split → THEN escalate to Houston Command
+    with the full debate transcript attached
+```
+
+**Why this is better than blind escalation:**
+- Forces each validator to articulate *why* they decided what they decided
+- Often resolves disagreements without bothering Command (saves Opus tokens)
+- The debate transcript is gold for improvement proposals — Command can read the arguments and tune agent instructions
+- Catches edge cases that simple approve/reject misses
+- Both validators get smarter over time by seeing each other's reasoning
+
+**Debate rules:**
+- Maximum 2 rounds (keeps it fast — we're on a 10-minute cycle)
+- Each response must be <100 words (no rambling)
+- Must cite specific evidence from the sandbox item
+- If either validator changes their vote, the debate ends immediately
+- Full transcript saved to `improvement_proposals` table for Command review
 
 ### Secondary Job: Improvement Proposals
 
@@ -759,15 +802,22 @@ Toggle available in ContactDetail panel UI.
 
 ### Phase 0: NOW (Before 48GB Arrives)
 - [x] Houston Command running on 16GB Mini
-- [ ] Ralph GPT OpenClaw instance on 16GB Mini
-- [ ] Ralph Gemini OpenClaw instance on 16GB Mini
-- [ ] This document (AGENT-SYSTEM.md) finalized
-- [ ] Push directive to Houston Command with full architecture
-- [ ] Missing DB tables: improvement_proposals, workflow_chains, email preferences
-- [ ] Postmaster + Campaign Manager API endpoints in CRM
+- [x] Ralph GPT OpenClaw instance on 16GB Mini
+- [x] Ralph Gemini OpenClaw instance on 16GB Mini
+- [x] This document (AGENT-SYSTEM.md) finalized
+- [x] Push directive to Houston Command with full architecture
+- [x] Missing DB tables: improvement_proposals, workflow_chains, email preferences
+- [x] Postmaster + Campaign Manager API endpoints in CRM (16 new endpoints)
+- [x] Directive pipeline working end-to-end (cron → Telegram → OpenClaw)
+- [x] SSH access from work Mac to 16GB Mini
+- [x] Fleet health monitoring (scheduled every 4 hours)
+- [x] Codex connected to GitHub repo for PR reviews
+- [x] Email forwarding (Outlook → Houston Gmail) configured
+- [x] Agent heartbeats showing live status in AI Ops
 - [ ] All 10 agent .md instruction files written
 - [ ] Improvement proposal UI in AI Ops dashboard
 - [ ] track_emails toggle on ContactDetail
+- [ ] 48GB Mac Mini setup guide finalized (plug-and-play ready)
 
 ### Phase 1: 48GB Mac Mini Arrives (Week 1-2)
 - [ ] Ollama installed, Qwen 3.5 + MiniMax 2.5 pulled
@@ -781,6 +831,7 @@ Toggle available in ContactDetail panel UI.
 - [ ] Scout — evolution reports feeding Houston Command
 - [ ] Full self-improvement loop running
 - [ ] Houston Command autonomously rewriting agent instructions
+- [ ] Ralph Forum Debate on disagreements (instead of blind escalation)
 - [ ] Ralph Loop proposing improvements
 
 ### Phase 3: 64GB Mac Mini Arrives
@@ -788,11 +839,13 @@ Toggle available in ContactDetail panel UI.
 - [ ] Test larger model variants (32B+)
 - [ ] Social Media Manager agent
 - [ ] Fireflies.ai integration agent
+- [ ] **Email Sentiment Analysis** — analyze tone of email replies (warm/neutral/cold/hostile) using local sentiment model on Qwen. Feed results into Campaign Manager's optimization loop. "Casual tone gets 40% more warm replies than formal." Houston Command uses this to rewrite email templates. *(Inspired by BettaFish sentiment analysis engine)*
 
 ### Phase 4: 128GB Mac Studio Arrives
 - [ ] Houston Command migrates to 128GB
 - [ ] 70B+ local models for premium analysis
 - [ ] Full fleet optimization across 4 machines
+- [ ] **Deal Prediction Simulator** — feed CRM data (properties, contacts, market conditions, historical deal outcomes) into a multi-agent simulation engine to predict "what happens if we target warehouse tenants in Ontario with campaign X?" or "what's the probability this deal closes if we do Y?" Requires months of real performance data to be useful. Could run as a weekly strategic tool for Houston Command's Sunday reviews. *(Inspired by MiroFish swarm intelligence prediction engine)*
 
 ---
 

@@ -60,7 +60,7 @@ function requireAgentKeyOrJwt(req, res, next) {
   if (header && header.startsWith('Bearer ')) {
     try {
       const jwt = require('jsonwebtoken');
-      const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+      const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-DO-NOT-USE-IN-PRODUCTION';
       const token = header.slice(7);
       const payload = jwt.verify(token, JWT_SECRET);
       req.user = {
@@ -106,6 +106,13 @@ function clampLimit(val, defaultVal = 20, maxVal = 100) {
   const n = parseInt(val, 10);
   if (isNaN(n) || n < 1) return defaultVal;
   return Math.min(n, maxVal);
+}
+
+// Helper: safe parseFloat — returns null if invalid (prevents NaN in SQL)
+function safeFloat(val) {
+  if (val === undefined || val === null || val === '') return null;
+  const n = parseFloat(val);
+  return isNaN(n) ? null : n;
 }
 
 // ============================================================
@@ -192,22 +199,22 @@ router.get('/properties', async (req, res) => {
     }
     if (min_sf) {
       conditions.push(`rba >= $${idx}`);
-      params.push(parseFloat(min_sf));
+      params.push(safeFloat(min_sf));
       idx++;
     }
     if (max_sf) {
       conditions.push(`rba <= $${idx}`);
-      params.push(parseFloat(max_sf));
+      params.push(safeFloat(max_sf));
       idx++;
     }
     if (min_price) {
       conditions.push(`last_sale_price >= $${idx}`);
-      params.push(parseFloat(min_price));
+      params.push(safeFloat(min_price));
       idx++;
     }
     if (max_price) {
       conditions.push(`last_sale_price <= $${idx}`);
-      params.push(parseFloat(max_price));
+      params.push(safeFloat(max_price));
       idx++;
     }
 
@@ -300,12 +307,12 @@ router.get('/comps', async (req, res) => {
     }
     if (min_sf) {
       conditions.push(`${sfAlias}.sf >= $${idx}`);
-      params.push(parseFloat(min_sf));
+      params.push(safeFloat(min_sf));
       idx++;
     }
     if (max_sf) {
       conditions.push(`${sfAlias}.sf <= $${idx}`);
-      params.push(parseFloat(max_sf));
+      params.push(safeFloat(max_sf));
       idx++;
     }
 
@@ -1009,7 +1016,7 @@ const directivesRouter = express.Router();
 directivesRouter.use(agentLimiter);
 
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-DO-NOT-USE-IN-PRODUCTION';
 
 // Middleware: accepts either agent key or JWT admin auth
 function requireAgentOrAdmin(req, res, next) {

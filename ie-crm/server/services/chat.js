@@ -68,8 +68,35 @@ function initChat(socketServer, dbPool) {
     console.warn('[chat/houston] No ANTHROPIC_API_KEY — Houston will use placeholder responses');
   }
 
+  // SECURITY: Verify JWT on socket connection — derive userId server-side
+  const jwt = require('jsonwebtoken');
+  const JWT_SECRET = process.env.JWT_SECRET;
+
+  io.use((socket, next) => {
+    const token = socket.handshake.auth?.token;
+    if (!token) {
+      return next(new Error('Authentication required'));
+    }
+    if (!JWT_SECRET) {
+      return next(new Error('Server JWT not configured'));
+    }
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      socket.authenticatedUser = {
+        user_id: payload.user_id,
+        email: payload.email,
+        display_name: payload.display_name,
+        role: payload.role || 'broker',
+      };
+      next();
+    } catch (err) {
+      return next(new Error('Invalid or expired token'));
+    }
+  });
+
   io.on('connection', (socket) => {
-    console.log(`[chat] User connected: ${socket.id}`);
+    const authUser = socket.authenticatedUser;
+    console.log(`[chat] User connected: ${socket.id} (${authUser.display_name})`);
 
     // ── Join council room (AI Ops page) ──
     socket.on('council:join', ({ userId }) => {
@@ -82,7 +109,8 @@ function initChat(socketServer, dbPool) {
     });
 
     // ── Join channels ──
-    socket.on('chat:join', async ({ channelId, userId }) => {
+    socket.on('chat:join', async ({ channelId }) => {
+      const userId = authUser.user_id; // SECURITY: use server-verified userId
       socket.join(`channel:${channelId}`);
       socket.userId = userId;
       socket.channelId = channelId;
@@ -128,20 +156,23 @@ function initChat(socketServer, dbPool) {
     });
 
     // ── Typing indicators ──
-    socket.on('chat:typing', ({ channelId, userId, displayName }) => {
+    socket.on('chat:typing', ({ channelId }) => {
+      const userId = authUser.user_id; // SECURITY: server-derived
       socket.to(`channel:${channelId}`).emit('chat:typing', {
-        userId, displayName, channelId
+        userId, displayName: authUser.display_name, channelId
       });
     });
 
-    socket.on('chat:typing:stop', ({ channelId, userId }) => {
+    socket.on('chat:typing:stop', ({ channelId }) => {
+      const userId = authUser.user_id; // SECURITY: server-derived
       socket.to(`channel:${channelId}`).emit('chat:typing:stop', {
         userId, channelId
       });
     });
 
     // ── Mark as read ──
-    socket.on('chat:read', async ({ channelId, userId }) => {
+    socket.on('chat:read', async ({ channelId }) => {
+      const userId = authUser.user_id; // SECURITY: server-derived
       try {
         await pool.query(
           `UPDATE chat_channel_members SET last_read_at = NOW()
@@ -158,7 +189,8 @@ function initChat(socketServer, dbPool) {
     });
 
     // ── Reactions ──
-    socket.on('chat:react', async ({ messageId, userId, emoji }) => {
+    socket.on('chat:react', async ({ messageId, emoji }) => {
+      const userId = authUser.user_id; // SECURITY: server-derived
       try {
         await pool.query(
           `INSERT INTO chat_reactions (message_id, user_id, emoji)
@@ -181,7 +213,8 @@ function initChat(socketServer, dbPool) {
       }
     });
 
-    socket.on('chat:react:remove', async ({ messageId, userId, emoji }) => {
+    socket.on('chat:react:remove', async ({ messageId, emoji }) => {
+      const userId = authUser.user_id; // SECURITY: server-derived
       try {
         await pool.query(
           `DELETE FROM chat_reactions
@@ -197,7 +230,8 @@ function initChat(socketServer, dbPool) {
     });
 
     // ── Edit message ──
-    socket.on('chat:edit', async ({ messageId, userId, newBody }) => {
+    socket.on('chat:edit', async ({ messageId, newBody }) => {
+      const userId = authUser.user_id; // SECURITY: server-derived — can only edit own messages
       try {
         const result = await pool.query(
           `UPDATE chat_messages SET body = $1, edited_at = NOW()
@@ -214,7 +248,8 @@ function initChat(socketServer, dbPool) {
     });
 
     // ── Delete message (soft) ──
-    socket.on('chat:delete', async ({ messageId, userId }) => {
+    socket.on('chat:delete', async ({ messageId }) => {
+      const userId = authUser.user_id; // SECURITY: server-derived — can only delete own messages
       try {
         const result = await pool.query(
           `UPDATE chat_messages SET deleted_at = NOW()
@@ -2506,10 +2541,12 @@ function registerChatRoutes(app) {
   // GET /api/chat/channels — list channels for current user
   app.get('/api/chat/channels', async (req, res) => {
     try {
-      const userId = req.query.userId;
-      if (!userId) return res.status(400).json({ error: 'userId required' });
-
-      const channels = await getChannels(userId);
+      // SECURITY: Use JWT-derived userId; fall back to query param during migration
+      const userId = req.user?.user_id || req.query.userId;
+      if (!req.user?.user_id && req.query.userId) {
+        console.warn('[chat] SECURITY: GET /channels using query userId instead of JWT — update frontend');
+      }
+      if (!userId) return res.status(400).json({ error: 'Authentication required' });
       res.json(channels);
     } catch (err) {
       console.error('[chat] GET /channels error:', err.message);
@@ -2549,9 +2586,10 @@ function registerChatRoutes(app) {
       const { channelId } = req.params;
       const { limit = 50, before } = req.query;
 
-      // Auto-join user to channel if not a member
-      if (req.query.userId) {
-        await ensureMembership(channelId, req.query.userId);
+      // Auto-join authenticated user to channel if not a member
+      const msgUserId = req.user?.user_id || req.query.userId;
+      if (msgUserId) {
+        await ensureMembership(channelId, msgUserId);
       }
 
       const messages = await getMessages(channelId, {
@@ -2571,8 +2609,9 @@ function registerChatRoutes(app) {
   // GET /api/chat/unread — total unread count across all channels
   app.get('/api/chat/unread', async (req, res) => {
     try {
-      const userId = req.query.userId;
-      if (!userId) return res.status(400).json({ error: 'userId required' });
+      // SECURITY: Use JWT-derived userId; fall back to query param during migration
+      const userId = req.user?.user_id || req.query.userId;
+      if (!userId) return res.status(400).json({ error: 'Authentication required' });
 
       const result = await pool.query(`
         SELECT COALESCE(SUM(unread), 0) AS total_unread FROM (
@@ -2627,8 +2666,9 @@ function registerChatRoutes(app) {
   // GET /api/chat/houston-dm — get or create user's personal Houston channel
   app.get('/api/chat/houston-dm', async (req, res) => {
     try {
-      const userId = req.query.userId;
-      if (!userId) return res.status(400).json({ error: 'userId required' });
+      // SECURITY: Use JWT-derived userId; fall back to query param during migration
+      const userId = req.user?.user_id || req.query.userId;
+      if (!userId) return res.status(400).json({ error: 'Authentication required' });
 
       // Check for existing houston_dm channel for this user
       let result = await pool.query(

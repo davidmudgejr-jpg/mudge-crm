@@ -3,7 +3,15 @@
 
 const jwt = require('jsonwebtoken');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('[SECURITY] FATAL: JWT_SECRET not set in production! Auth will fail.');
+  process.exit(1);
+}
+if (!JWT_SECRET) {
+  console.warn('[SECURITY] WARNING: JWT_SECRET not set — using insecure dev fallback. Set JWT_SECRET in .env for production.');
+}
+const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-secret-DO-NOT-USE-IN-PRODUCTION';
 
 function extractUser(req) {
   const header = req.headers.authorization;
@@ -11,7 +19,7 @@ function extractUser(req) {
 
   try {
     const token = header.slice(7);
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET);
     return {
       user_id: payload.user_id,
       email: payload.email,
@@ -61,7 +69,7 @@ function signToken(user) {
       display_name: user.display_name,
       role: user.role || 'broker',
     },
-    JWT_SECRET,
+    EFFECTIVE_JWT_SECRET,
     { expiresIn: '90d' }
   );
 }
