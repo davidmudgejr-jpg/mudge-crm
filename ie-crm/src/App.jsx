@@ -40,6 +40,7 @@ import ActionItemDetail from './pages/ActionItemDetail';
 import CompDetail from './pages/CompDetail';
 import CampaignDetail from './pages/CampaignDetail';
 import MobileChat from './pages/MobileChat';
+import DesktopChat from './pages/DesktopChat';
 
 const DETAIL_COMPONENTS = {
   property: PropertyDetail,
@@ -165,6 +166,7 @@ function AuthGate() {
         <SlideOverProvider>
           <Routes>
             <Route path="/chat" element={<MobileChat />} />
+            <Route path="/houston" element={<DesktopChat />} />
             <Route path="*" element={<AppShell />} />
           </Routes>
         </SlideOverProvider>
