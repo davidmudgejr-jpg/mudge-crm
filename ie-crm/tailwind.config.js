@@ -55,6 +55,11 @@ export default {
           '0%': { transform: 'translateY(20px) scale(0.97)', opacity: '0' },
           '100%': { transform: 'translateY(0) scale(1)', opacity: '1' },
         },
+        'live-insert': {
+          '0%': { opacity: '0', transform: 'translateY(-12px) scaleY(0.95)', maxHeight: '0px', backgroundColor: 'rgba(16, 185, 129, 0.15)' },
+          '40%': { opacity: '1', transform: 'translateY(0) scaleY(1)', maxHeight: '120px', backgroundColor: 'rgba(16, 185, 129, 0.1)' },
+          '100%': { opacity: '1', transform: 'translateY(0) scaleY(1)', maxHeight: '120px', backgroundColor: 'transparent' },
+        },
       },
       animation: {
         'slide-in-right': 'slide-in-right 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
@@ -65,6 +70,7 @@ export default {
         'sheet-down': 'sheet-down 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
         'sheet-up': 'sheet-up 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)',
         'slide-up': 'slide-up 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
+        'live-insert': 'live-insert 0.8s cubic-bezier(0.25, 0.46, 0.45, 0.94) both',
       },
     },
   },

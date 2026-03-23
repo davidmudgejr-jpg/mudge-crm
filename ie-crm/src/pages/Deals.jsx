@@ -195,7 +195,7 @@ export default function Deals({ onCountChange }) {
   }, [search, filterStatus, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useLiveUpdates('deal', fetchData);
+  const { newRecordId } = useLiveUpdates('deal', fetchData);
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
@@ -385,6 +385,7 @@ export default function Deals({ onCountChange }) {
         ) : (
           <CrmTable
             tableKey="deals"
+            newRecordId={newRecordId}
             columns={visibleColumns}
             rows={augmentedRows}
             idField="deal_id"

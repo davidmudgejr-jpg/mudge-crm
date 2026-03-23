@@ -314,6 +314,7 @@ export default function CrmTable({
   // Column filters
   filters,           // current filter array from useViewEngine
   onColumnFilter,    // (columnKey, conditions) => void — callback to update filters for a column
+  newRecordId,       // ID of a just-created record — gets smooth insert animation
 }) {
   /* ── Column order: drag-to-reorder with localStorage persistence ─── */
   const colOrderKey = `crm_column_order_${tableKey}`;
@@ -559,7 +560,9 @@ export default function CrmTable({
                   e.preventDefault();
                   setContextMenu({ x: e.clientX, y: e.clientY, row });
                 }}
-                className={`border-b border-crm-border/30 cursor-pointer animate-row-appear ${
+                className={`border-b border-crm-border/30 cursor-pointer ${
+                  newRecordId && row[idField] === newRecordId ? 'animate-live-insert' : 'animate-row-appear'
+                } ${
                   isSelected
                     ? 'bg-crm-accent/15 shadow-[0_8px_24px_rgba(0,0,0,0.35),inset_0_0_0_1px_rgba(255,255,255,0.1)] -translate-y-[3px]'
                     : 'hover:bg-crm-hover hover:-translate-y-[2px] hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] active:scale-[0.995]'

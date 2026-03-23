@@ -1,11 +1,12 @@
-// useLiveUpdates — Listens for real-time CRM record changes via socket.io
-// When Houston creates/updates a record, the relevant page refreshes automatically.
+// useLiveUpdates — Real-time CRM record changes via socket.io
+// Supports two modes:
+//   1. Simple refresh: useLiveUpdates('action_item', fetchData)
+//   2. Smooth insert: useLiveUpdates('action_item', fetchData, { onNewId })
 //
-// Usage in any page:
-//   useLiveUpdates('action_item', loadData);
-//   useLiveUpdates(['contact', 'interaction'], loadData);
+// When Houston creates a record, the page can either reload all data
+// or smoothly animate the new record into the existing list.
 
-import { useEffect } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { io } from 'socket.io-client';
 
 const SOCKET_URL = import.meta.env.VITE_SOCKET_URL
@@ -33,11 +34,14 @@ function getSocket() {
 }
 
 /**
- * Listen for CRM record changes and call refresh when relevant entity type changes.
- * @param {string|string[]} entityTypes — entity type(s) to watch (e.g., 'action_item', 'contact')
- * @param {function} onRefresh — callback to refresh the page data
+ * Listen for CRM record changes.
+ * @param {string|string[]} entityTypes — entity type(s) to watch
+ * @param {function} onRefresh — callback to refresh page data
+ * @returns {{ newRecordId: string|null }} — ID of most recently created record (for animation)
  */
 export default function useLiveUpdates(entityTypes, onRefresh) {
+  const [newRecordId, setNewRecordId] = useState(null);
+
   useEffect(() => {
     if (!onRefresh) return;
 
@@ -46,7 +50,13 @@ export default function useLiveUpdates(entityTypes, onRefresh) {
 
     const handler = (event) => {
       if (types.includes(event.entityType)) {
-        // Small delay to ensure DB write is committed before we query
+        if (event.action === 'created' && event.recordId) {
+          // Track the new record ID for animation
+          setNewRecordId(event.recordId);
+          // Clear after animation completes
+          setTimeout(() => setNewRecordId(null), 2000);
+        }
+        // Refresh data (small delay for DB commit)
         setTimeout(() => onRefresh(), 300);
       }
     };
@@ -57,4 +67,6 @@ export default function useLiveUpdates(entityTypes, onRefresh) {
       sock.off('crm:record:changed', handler);
     };
   }, [entityTypes, onRefresh]);
+
+  return { newRecordId };
 }

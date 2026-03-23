@@ -197,7 +197,7 @@ export default function Contacts({ onCountChange }) {
   }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useLiveUpdates('contact', fetchData);
+  const { newRecordId } = useLiveUpdates('contact', fetchData);
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
@@ -410,6 +410,7 @@ export default function Contacts({ onCountChange }) {
         ) : (
           <CrmTable
             tableKey="contacts"
+            newRecordId={newRecordId}
             columns={visibleColumns}
             rows={augmentedRows}
             idField="contact_id"

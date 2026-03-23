@@ -237,7 +237,7 @@ export default function Properties({ onCountChange }) {
   }, [search, filterType, filterPriority, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useLiveUpdates('property', fetchData);
+  const { newRecordId } = useLiveUpdates('property', fetchData);
 
   const toggleSelect = (id) => {
     setSelected((prev) => {
@@ -462,6 +462,7 @@ export default function Properties({ onCountChange }) {
         ) : (
         <CrmTable
           tableKey="properties"
+          newRecordId={newRecordId}
           columns={visibleColumns}
           rows={augmentedRows}
           idField="property_id"

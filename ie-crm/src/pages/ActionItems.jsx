@@ -44,7 +44,7 @@ function parseResponsibility(val) {
   return String(val).split(',').map(s => s.trim()).filter(Boolean);
 }
 
-function TaskRow({ task, onToggleDone, onSelect }) {
+function TaskRow({ task, onToggleDone, onSelect, isNew }) {
   const isDone = task.status === 'Done';
   const isDead = task.status === 'Dead';
   const dimmed = isDone || isDead;
@@ -61,7 +61,7 @@ function TaskRow({ task, onToggleDone, onSelect }) {
 
   return (
     <div
-      className={`group flex items-start gap-3 px-5 py-2.5 hover:bg-crm-hover/40 cursor-pointer transition-colors ${dimmed ? 'opacity-50' : ''}`}
+      className={`group flex items-start gap-3 px-5 py-2.5 hover:bg-crm-hover/40 cursor-pointer transition-colors ${dimmed ? 'opacity-50' : ''} ${isNew ? 'animate-live-insert' : ''}`}
       onClick={() => onSelect(task.action_item_id)}
     >
       <button
@@ -167,7 +167,7 @@ export default function ActionItems({ onCountChange }) {
   }, [search, filterStatus, activeView, orderBy, order, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useLiveUpdates('action_item', fetchData);
+  const { newRecordId } = useLiveUpdates('action_item', fetchData);
 
   const handleToggleDone = async (task) => {
     const newStatus = task.status === 'Done' ? 'Todo' : 'Done';
@@ -283,7 +283,7 @@ export default function ActionItems({ onCountChange }) {
 
             <div className="divide-y divide-crm-border/30">
               {activeTasks.map((task) => (
-                <TaskRow key={task.action_item_id} task={task} onToggleDone={handleToggleDone} onSelect={setDetailId} />
+                <TaskRow key={task.action_item_id} task={task} onToggleDone={handleToggleDone} onSelect={setDetailId} isNew={task.action_item_id === newRecordId} />
               ))}
             </div>
 
@@ -303,7 +303,7 @@ export default function ActionItems({ onCountChange }) {
                 {showCompleted && (
                   <div className="divide-y divide-crm-border/30">
                     {doneTasks.map((task) => (
-                      <TaskRow key={task.action_item_id} task={task} onToggleDone={handleToggleDone} onSelect={setDetailId} />
+                      <TaskRow key={task.action_item_id} task={task} onToggleDone={handleToggleDone} onSelect={setDetailId} isNew={task.action_item_id === newRecordId} />
                     ))}
                   </div>
                 )}
@@ -320,7 +320,7 @@ export default function ActionItems({ onCountChange }) {
                 </div>
                 <div className="divide-y divide-crm-border/30">
                   {houstonTasks.map((task) => (
-                    <TaskRow key={task.action_item_id} task={task} onToggleDone={handleToggleDone} onSelect={setDetailId} />
+                    <TaskRow key={task.action_item_id} task={task} onToggleDone={handleToggleDone} onSelect={setDetailId} isNew={task.action_item_id === newRecordId} />
                   ))}
                 </div>
               </>

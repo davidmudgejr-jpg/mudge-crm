@@ -143,7 +143,7 @@ export default function Companies({ onCountChange }) {
   }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useLiveUpdates('company', fetchData);
+  const { newRecordId } = useLiveUpdates('company', fetchData);
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
@@ -326,6 +326,7 @@ export default function Companies({ onCountChange }) {
         ) : (
           <CrmTable
             tableKey="companies"
+            newRecordId={newRecordId}
             columns={visibleColumns}
             rows={augmentedRows}
             idField="company_id"

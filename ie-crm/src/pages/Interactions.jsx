@@ -73,7 +73,7 @@ export default function Interactions({ onCountChange }) {
   }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useLiveUpdates('interaction', fetchData);
+  const { newRecordId } = useLiveUpdates('interaction', fetchData);
 
   // Timeline-style view
   return (

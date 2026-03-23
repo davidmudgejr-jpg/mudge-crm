@@ -184,7 +184,7 @@ export default function Comps({ onCountChange }) {
   }, [search, filterType, orderBy, order, activeTab, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useLiveUpdates(['lease_comp', 'sale_comp'], fetchData);
+  const { newRecordId } = useLiveUpdates(['lease_comp', 'sale_comp'], fetchData);
 
   const handleBulkDelete = useCallback(async () => {
     if (selected.size === 0) return;
@@ -359,6 +359,7 @@ export default function Comps({ onCountChange }) {
         ) : (
           <CrmTable
             tableKey={activeTab === 'lease' ? 'lease_comps' : 'sale_comps'}
+            newRecordId={newRecordId}
             columns={vis.visibleColumns}
             rows={rows}
             idField="id"
