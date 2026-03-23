@@ -1,114 +1,83 @@
 #!/bin/bash
-# Fleet Health Check — run from David's work Mac
-# Checks all agent machines via SSH and CRM API
-# Called by Claude Code on schedule or on-demand
+# fleet-health-check.sh — Persistent watchdog for the AI fleet
+# Runs via launchd every 4 hours on David's work Mac
+# SSHes into the 16GB Mac Mini and checks all systems
 
 SSH_KEY="$HOME/.ssh/houston_mini_16gb"
-MINI_16="houstonmudge@192.168.1.229"
-CRM_API="https://mudge-crm-production.up.railway.app"
-AGENT_KEY="ak_iecrm_2026_Kx9mWvPqLt7nRjF3hYbZ8dUc"
+MINI_HOST="houstonmudge@192.168.1.229"
+LOG_DIR="$HOME/Desktop/Claude Custom CRM/logs"
+LOG_FILE="$LOG_DIR/fleet-health-$(date +%Y-%m-%d).log"
+BOT_TOKEN="7848242490:AAFu5nl9-fO8RDR8kv6QGElK4A_xg00poYo"
+CHAT_ID="7938385256"
 
-echo "═══════════════════════════════════════════"
-echo "  FLEET HEALTH CHECK — $(date '+%Y-%m-%d %H:%M:%S')"
-echo "═══════════════════════════════════════════"
-echo ""
+mkdir -p "$LOG_DIR"
 
-ISSUES=0
+log() { echo "[$(date -Iseconds)] $1" >> "$LOG_FILE"; }
 
-# ─── 16GB Mac Mini: SSH Reachable ───
-echo "▸ 16GB Mac Mini (192.168.1.229)"
-if ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_16" "echo OK" 2>/dev/null | grep -q OK; then
-    echo "  ✅ SSH connection OK"
+alert() {
+    log "ALERT: $1"
+    curl -s -X POST "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage" \
+        -d "chat_id=${CHAT_ID}" -d "text=$(echo "$1" | head -c 4000)" > /dev/null 2>&1
+}
+
+log "=== Fleet Health Check Starting ==="
+
+# 1. Can we reach the Mini?
+SSH_TEST=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 -o StrictHostKeyChecking=no "$MINI_HOST" "echo ok" 2>&1)
+if [ "$SSH_TEST" != "ok" ]; then
+    alert "🚨 FLEET DOWN: Cannot SSH into 16GB Mac Mini. Machine may be offline or network issue."
+    log "SSH failed: $SSH_TEST"
+    exit 1
+fi
+log "SSH: connected"
+
+# 2. Check OpenClaw process
+OPENCLAW=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_HOST" "ps aux | grep openclaw-gateway | grep -v grep | wc -l" 2>/dev/null)
+if [ "$OPENCLAW" -lt 1 ]; then
+    alert "🚨 OpenClaw gateway is NOT running on 16GB Mini. Houston Command is down."
 else
-    echo "  ❌ SSH connection FAILED"
-    ISSUES=$((ISSUES + 1))
+    log "OpenClaw: running"
 fi
 
-# ─── OpenClaw Process ───
-OPENCLAW_PID=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_16" "pgrep -f openclaw-gateway" 2>/dev/null)
-if [ -n "$OPENCLAW_PID" ]; then
-    echo "  ✅ OpenClaw running (PID: $OPENCLAW_PID)"
+# 3. Check Claude CLI process
+CLAUDE_CLI=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_HOST" "ps aux | grep '.local/bin/claude' | grep -v grep | wc -l" 2>/dev/null)
+if [ "$CLAUDE_CLI" -lt 1 ]; then
+    alert "⚠️ Claude CLI not running on 16GB Mini. Houston Command session may have ended."
 else
-    echo "  ❌ OpenClaw NOT running"
-    ISSUES=$((ISSUES + 1))
+    log "Claude CLI: running"
 fi
 
-# ─── Claude/Anthropic Token TTL ───
-TOKEN_MIN=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_16" "
-    security unlock-keychain -p '    ' ~/Library/Keychains/login.keychain-db 2>/dev/null
-    CREDS=\$(security find-generic-password -s 'Claude Code-credentials' -a 'houstonmudge' -w 2>/dev/null)
-    if [ -n \"\$CREDS\" ]; then
-        echo \"\$CREDS\" | python3 -c 'import json,sys,time; d=json.load(sys.stdin); exp=d[\"claudeAiOauth\"][\"expiresAt\"]; print(int((exp-time.time()*1000)/60000))'
-    else
-        echo 'ERROR'
-    fi
+# 4. Check Claude OAuth token
+TOKEN_MIN=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_HOST" "
+security unlock-keychain -p '    ' ~/Library/Keychains/login.keychain-db 2>/dev/null
+CREDS=\$(security find-generic-password -s 'Claude Code-credentials' -a 'houstonmudge' -w 2>/dev/null)
+if [ -n \"\$CREDS\" ]; then
+    echo \"\$CREDS\" | python3 -c \"import json,sys,time; d=json.load(sys.stdin); exp=d.get('claudeAiOauth',{}).get('expiresAt',0); print(int((exp-time.time()*1000)/60000))\" 2>/dev/null
+else
+    echo 'NO_CREDS'
+fi
 " 2>/dev/null)
-if [ "$TOKEN_MIN" = "ERROR" ] || [ -z "$TOKEN_MIN" ]; then
-    echo "  ❌ Claude token: CANNOT READ"
-    ISSUES=$((ISSUES + 1))
-elif [ "$TOKEN_MIN" -lt 30 ]; then
-    echo "  ⚠️  Claude token: ${TOKEN_MIN} min remaining (CRITICAL)"
-    ISSUES=$((ISSUES + 1))
-elif [ "$TOKEN_MIN" -lt 120 ]; then
-    echo "  ⚠️  Claude token: ${TOKEN_MIN} min remaining (LOW)"
+
+if [ "$TOKEN_MIN" = "NO_CREDS" ]; then
+    alert "🚨 No Claude credentials in keychain on 16GB Mini."
+elif [ "$TOKEN_MIN" -lt 0 ] 2>/dev/null; then
+    alert "🚨 Claude OAuth token EXPIRED (${TOKEN_MIN} min ago). Houston Command is down. Run /login on Mini."
+elif [ "$TOKEN_MIN" -lt 60 ] 2>/dev/null; then
+    alert "⚠️ Claude OAuth token expires in ${TOKEN_MIN} min. Watch for refresh."
 else
-    echo "  ✅ Claude token: ${TOKEN_MIN} min remaining"
+    log "Claude token: ${TOKEN_MIN} min remaining"
 fi
 
-# ─── Token Sync Check (keychain vs OpenClaw) ───
-SYNC_STATUS=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_16" "
-    security unlock-keychain -p '    ' ~/Library/Keychains/login.keychain-db 2>/dev/null
-    KC_TOKEN=\$(security find-generic-password -s 'Claude Code-credentials' -a 'houstonmudge' -w 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)[\"claudeAiOauth\"][\"accessToken\"][:20])' 2>/dev/null)
-    OC_TOKEN=\$(python3 -c 'import json; print(json.load(open(\"/Users/houstonmudge/.openclaw/agents/main/agent/auth-profiles.json\"))[\"profiles\"][\"anthropic:default\"][\"token\"][:20])' 2>/dev/null)
-    if [ \"\$KC_TOKEN\" = \"\$OC_TOKEN\" ]; then echo 'SYNCED'; else echo 'DESYNCED'; fi
-" 2>/dev/null)
-if [ "$SYNC_STATUS" = "SYNCED" ]; then
-    echo "  ✅ Token sync: keychain ↔ OpenClaw in sync"
+# 5. Check cron jobs exist
+CRON_COUNT=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_HOST" "crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$' | wc -l" 2>/dev/null)
+if [ "$CRON_COUNT" -lt 5 ]; then
+    alert "⚠️ Only ${CRON_COUNT} cron jobs on 16GB Mini (expected 9+). Some may be missing."
 else
-    echo "  ❌ Token sync: DESYNCED (keychain ≠ OpenClaw)"
-    ISSUES=$((ISSUES + 1))
+    log "Cron jobs: ${CRON_COUNT} active"
 fi
 
-# ─── Cron Jobs Running ───
-CRON_COUNT=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_16" "crontab -l 2>/dev/null | grep -v '^#' | grep -v '^$' | wc -l" 2>/dev/null | tr -d ' ')
-if [ "$CRON_COUNT" -ge 8 ]; then
-    echo "  ✅ Cron jobs: $CRON_COUNT active"
-else
-    echo "  ⚠️  Cron jobs: only $CRON_COUNT active (expected 8)"
-    ISSUES=$((ISSUES + 1))
-fi
+# 6. Check uptime
+UPTIME=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_HOST" "uptime" 2>/dev/null)
+log "Uptime: $UPTIME"
 
-# ─── Last Heartbeat in CRM ───
-echo ""
-echo "▸ CRM Agent Dashboard"
-HEARTBEAT=$(curl -s -H "X-Agent-Key: $AGENT_KEY" "$CRM_API/api/ai/agent/heartbeat" 2>/dev/null)
-# Check if chief_of_staff heartbeat is recent (via stats endpoint)
-AGENTS_STATUS=$(curl -s -H "X-Agent-Key: $AGENT_KEY" "$CRM_API/api/ai/stats" 2>/dev/null)
-if echo "$AGENTS_STATUS" | grep -q "chief_of_staff"; then
-    echo "  ✅ Chief of Staff heartbeat registered"
-else
-    echo "  ℹ️  Heartbeat status: check AI Ops dashboard"
-fi
-
-# ─── Telegram Bot Check (last message in gateway log) ───
-echo ""
-echo "▸ Telegram Bots"
-LAST_MSG=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_16" "grep 'sendMessage ok' ~/.openclaw/logs/gateway.log 2>/dev/null | tail -1" 2>/dev/null)
-if [ -n "$LAST_MSG" ]; then
-    echo "  ✅ Last Telegram send: $LAST_MSG"
-else
-    echo "  ⚠️  No recent Telegram messages in log"
-fi
-
-BOT_COUNT=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_16" "grep 'starting provider' ~/.openclaw/logs/gateway.log 2>/dev/null | tail -3 | wc -l" 2>/dev/null | tr -d ' ')
-echo "  ✅ Telegram bots registered: $BOT_COUNT/3"
-
-# ─── Summary ───
-echo ""
-echo "═══════════════════════════════════════════"
-if [ "$ISSUES" -eq 0 ]; then
-    echo "  ✅ ALL CLEAR — $ISSUES issues found"
-else
-    echo "  ⚠️  $ISSUES ISSUE(S) FOUND — review above"
-fi
-echo "═══════════════════════════════════════════"
+log "=== Health Check Complete ==="
