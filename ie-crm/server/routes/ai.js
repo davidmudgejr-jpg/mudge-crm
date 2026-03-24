@@ -1488,6 +1488,351 @@ directivesRouter.put('/council/recommendation/:messageId', requireJwtAdmin, asyn
 });
 
 // ============================================================
+// SUGGESTED UPDATES — Data Trust Tier Review System
+// ============================================================
+
+// 39. POST /api/ai/suggested-updates — Submit a suggested update for review
+// Called by Enricher when it finds data that conflicts with existing CRM data
+router.post('/suggested-updates', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      entity_type, entity_id, entity_name, field_name, field_label,
+      current_value, suggested_value, source_detail, confidence,
+      data_tier, is_ownership_change, workflow_id, batch_id,
+    } = req.body;
+
+    if (!entity_type || !entity_id || !field_name || !suggested_value) {
+      return res.status(400).json({ error: 'entity_type, entity_id, field_name, and suggested_value are required' });
+    }
+
+    // Dedup: don't create duplicate suggestions for same entity+field+value
+    const existing = await pool.query(
+      `SELECT id FROM suggested_updates
+       WHERE entity_type = $1 AND entity_id = $2 AND field_name = $3
+         AND suggested_value = $4 AND status = 'pending'`,
+      [entity_type, entity_id, field_name, suggested_value]
+    );
+    if (existing.rows.length > 0) {
+      return res.json({ ok: true, skipped: true, reason: 'Duplicate suggestion already pending', id: existing.rows[0].id });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO suggested_updates
+         (entity_type, entity_id, entity_name, field_name, field_label,
+          current_value, suggested_value, source, source_detail, confidence,
+          data_tier, is_ownership_change, agent_name, workflow_id, batch_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       RETURNING *`,
+      [
+        entity_type, entity_id, entity_name || null, field_name, field_label || field_name,
+        current_value || null, suggested_value, req.agentName || 'enricher', source_detail || null,
+        confidence || 50, data_tier || 'bronze', is_ownership_change || false,
+        req.agentName || 'enricher', workflow_id || null, batch_id || null,
+      ]
+    );
+
+    res.json({ ok: true, suggestion: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /suggested-updates error:', err.message);
+    res.status(500).json({ error: 'Failed to submit suggested update' });
+  }
+});
+
+// 40. GET /api/ai/suggested-updates — List suggested updates (with filters)
+// Called by CRM dashboard for the review UI and by Houston Command for oversight
+router.get('/suggested-updates', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { status = 'pending', entity_type, entity_id, is_ownership_change, batch_id, limit = 50 } = req.query;
+
+    let query = 'SELECT * FROM suggested_updates WHERE 1=1';
+    const params = [];
+    let idx = 1;
+
+    if (status !== 'all') {
+      query += ` AND status = $${idx++}`;
+      params.push(status);
+    }
+    if (entity_type) {
+      query += ` AND entity_type = $${idx++}`;
+      params.push(entity_type);
+    }
+    if (entity_id) {
+      query += ` AND entity_id = $${idx++}`;
+      params.push(entity_id);
+    }
+    if (is_ownership_change === 'true') {
+      query += ' AND is_ownership_change = true';
+    }
+    if (batch_id) {
+      query += ` AND batch_id = $${idx++}`;
+      params.push(batch_id);
+    }
+
+    query += ` ORDER BY CASE WHEN is_ownership_change THEN 0 ELSE 1 END, confidence DESC, created_at DESC LIMIT $${idx++}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+
+    // Also get counts by status
+    const counts = await pool.query(
+      `SELECT status, COUNT(*) as count FROM suggested_updates GROUP BY status`
+    );
+    const statusCounts = {};
+    counts.rows.forEach(r => { statusCounts[r.status] = parseInt(r.count); });
+
+    res.json({ suggestions: result.rows, count: result.rows.length, status_counts: statusCounts });
+  } catch (err) {
+    console.error('[AI API] GET /suggested-updates error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch suggested updates' });
+  }
+});
+
+// 41. PATCH /api/ai/suggested-updates/:id — Accept or reject a suggested update
+// Called from the CRM dashboard review UI
+router.patch('/suggested-updates/:id', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const { status, review_notes } = req.body;
+
+    if (!status || !['accepted', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'status must be "accepted" or "rejected"' });
+    }
+
+    // Get the suggestion
+    const suggestion = await pool.query('SELECT * FROM suggested_updates WHERE id = $1', [id]);
+    if (suggestion.rows.length === 0) {
+      return res.status(404).json({ error: 'Suggestion not found' });
+    }
+    const s = suggestion.rows[0];
+
+    // Update the suggestion status
+    const reviewerName = req.agentName || req.user?.display_name || 'admin';
+    await pool.query(
+      `UPDATE suggested_updates
+       SET status = $1, reviewed_by = $2, reviewed_at = NOW(), review_notes = $3, updated_at = NOW()
+       WHERE id = $4`,
+      [status, reviewerName, review_notes || null, id]
+    );
+
+    // If accepted, apply the change to the actual record
+    if (status === 'accepted') {
+      const tableMap = { contact: 'contacts', property: 'properties', company: 'companies' };
+      const idColMap = { contact: 'contact_id', property: 'property_id', company: 'company_id' };
+      const table = tableMap[s.entity_type];
+      const idCol = idColMap[s.entity_type];
+
+      if (table && idCol) {
+        // Validate the field name to prevent SQL injection
+        const validFields = await pool.query(
+          `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
+          [table]
+        );
+        const validFieldNames = validFields.rows.map(r => r.column_name);
+
+        if (validFieldNames.includes(s.field_name)) {
+          await pool.query(
+            `UPDATE ${table} SET "${s.field_name}" = $1 WHERE "${idCol}" = $2`,
+            [s.suggested_value, s.entity_id]
+          );
+
+          // Mark as applied
+          await pool.query(
+            'UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1',
+            [id]
+          );
+        }
+      }
+    }
+
+    // Emit socket event for live UI update
+    const io = getIo();
+    if (io) {
+      io.emit('suggested-update:reviewed', { id: parseInt(id), status, entity_type: s.entity_type, entity_id: s.entity_id });
+    }
+
+    res.json({ ok: true, status, applied: status === 'accepted' });
+  } catch (err) {
+    console.error('[AI API] PATCH /suggested-updates/:id error:', err.message);
+    res.status(500).json({ error: 'Failed to review suggested update' });
+  }
+});
+
+// 42. POST /api/ai/suggested-updates/batch — Accept or reject multiple suggestions at once
+router.post('/suggested-updates/batch', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { ids, status, review_notes } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    if (!status || !['accepted', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'status must be "accepted" or "rejected"' });
+    }
+
+    const reviewerName = req.agentName || req.user?.display_name || 'admin';
+    let appliedCount = 0;
+
+    for (const id of ids) {
+      // Get suggestion
+      const suggestion = await pool.query('SELECT * FROM suggested_updates WHERE id = $1 AND status = $2', [id, 'pending']);
+      if (suggestion.rows.length === 0) continue;
+      const s = suggestion.rows[0];
+
+      // Update status
+      await pool.query(
+        `UPDATE suggested_updates
+         SET status = $1, reviewed_by = $2, reviewed_at = NOW(), review_notes = $3, updated_at = NOW()
+         WHERE id = $4`,
+        [status, reviewerName, review_notes || null, id]
+      );
+
+      // Apply if accepted
+      if (status === 'accepted') {
+        const tableMap = { contact: 'contacts', property: 'properties', company: 'companies' };
+        const idColMap = { contact: 'contact_id', property: 'property_id', company: 'company_id' };
+        const table = tableMap[s.entity_type];
+        const idCol = idColMap[s.entity_type];
+
+        if (table && idCol) {
+          const validFields = await pool.query(
+            `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
+            [table]
+          );
+          if (validFields.rows.map(r => r.column_name).includes(s.field_name)) {
+            await pool.query(
+              `UPDATE ${table} SET "${s.field_name}" = $1 WHERE "${idCol}" = $2`,
+              [s.suggested_value, s.entity_id]
+            );
+            await pool.query('UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1', [id]);
+            appliedCount++;
+          }
+        }
+      }
+    }
+
+    const io = getIo();
+    if (io) {
+      io.emit('suggested-updates:batch-reviewed', { ids, status, applied_count: appliedCount });
+    }
+
+    res.json({ ok: true, reviewed: ids.length, applied: appliedCount });
+  } catch (err) {
+    console.error('[AI API] POST /suggested-updates/batch error:', err.message);
+    res.status(500).json({ error: 'Failed to batch review suggestions' });
+  }
+});
+
+// 43. POST /api/ai/deal-dossiers — Create or update a deal dossier
+router.post('/deal-dossiers', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      deal_id, title, content_md, key_people, deal_timeline,
+      transcript_refs, houston_analysis, oracle_score, oracle_signals,
+      file_path,
+    } = req.body;
+
+    if (!deal_id || !title) {
+      return res.status(400).json({ error: 'deal_id and title are required' });
+    }
+
+    // Upsert: update if exists for this deal, create if not
+    const existing = await pool.query('SELECT id FROM deal_dossiers WHERE deal_id = $1', [deal_id]);
+
+    let result;
+    if (existing.rows.length > 0) {
+      result = await pool.query(
+        `UPDATE deal_dossiers SET
+          title = COALESCE($1, title),
+          content_md = COALESCE($2, content_md),
+          key_people = COALESCE($3, key_people),
+          deal_timeline = COALESCE($4, deal_timeline),
+          transcript_refs = COALESCE($5, transcript_refs),
+          houston_analysis = COALESCE($6, houston_analysis),
+          oracle_score = COALESCE($7, oracle_score),
+          oracle_signals = COALESCE($8, oracle_signals),
+          file_path = COALESCE($9, file_path),
+          updated_by = $10,
+          updated_at = NOW()
+         WHERE deal_id = $11
+         RETURNING *`,
+        [title, content_md, key_people ? JSON.stringify(key_people) : null,
+         deal_timeline ? JSON.stringify(deal_timeline) : null,
+         transcript_refs ? JSON.stringify(transcript_refs) : null,
+         houston_analysis || null, oracle_score || null,
+         oracle_signals ? JSON.stringify(oracle_signals) : null,
+         file_path || null, req.agentName || 'houston_command', deal_id]
+      );
+    } else {
+      result = await pool.query(
+        `INSERT INTO deal_dossiers
+           (deal_id, title, content_md, key_people, deal_timeline, transcript_refs,
+            houston_analysis, oracle_score, oracle_signals, file_path, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING *`,
+        [deal_id, title, content_md || '', key_people ? JSON.stringify(key_people) : '[]',
+         deal_timeline ? JSON.stringify(deal_timeline) : '[]',
+         transcript_refs ? JSON.stringify(transcript_refs) : '[]',
+         houston_analysis || null, oracle_score || null,
+         oracle_signals ? JSON.stringify(oracle_signals) : '[]',
+         file_path || null, req.agentName || 'houston_command']
+      );
+    }
+
+    res.json({ ok: true, dossier: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /deal-dossiers error:', err.message);
+    res.status(500).json({ error: 'Failed to save deal dossier' });
+  }
+});
+
+// 44. GET /api/ai/deal-dossiers/:dealId — Get a deal's dossier
+router.get('/deal-dossiers/:dealId', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { dealId } = req.params;
+    const result = await pool.query('SELECT * FROM deal_dossiers WHERE deal_id = $1', [dealId]);
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No dossier found for this deal' });
+    }
+
+    res.json({ dossier: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] GET /deal-dossiers/:dealId error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch deal dossier' });
+  }
+});
+
+// 45. GET /api/ai/deal-dossiers — List all deal dossiers
+router.get('/deal-dossiers', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const result = await pool.query(
+      `SELECT dd.*, d.name as deal_name, d.type as deal_type, d.status as deal_status
+       FROM deal_dossiers dd
+       JOIN deals d ON dd.deal_id = d.deal_id
+       ORDER BY dd.updated_at DESC`
+    );
+    res.json({ dossiers: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[AI API] GET /deal-dossiers error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch deal dossiers' });
+  }
+});
+
+// ============================================================
 // FIREFLIES TRANSCRIPT ENDPOINTS — Call transcript ingestion
 // ============================================================
 
