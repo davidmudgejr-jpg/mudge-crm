@@ -270,7 +270,20 @@ function CouncilMessage({ msg, isAdmin, onApprove, onReject }) {
   const isHouston = msg.sender_type === 'houston';
   const isSystem = msg.message_type === 'system';
   const isActionRequest = msg.message_type === 'council_action_request';
-  const senderName = msg.sender_name || (isHouston ? 'Houston' : 'Admin');
+  // Normalize sender names to proper display names
+  const DISPLAY_NAMES = {
+    'chief_of_staff': 'Houston Command',
+    'claude_code': 'Claude Code',
+    'Claude Code': 'Houston Command',
+    'OpenClaw': 'Houston Command',
+    'houston': 'Houston Sonnet',
+    'Houston': 'Houston Sonnet',
+    'ralph_gpt': 'Ralph GPT',
+    'ralph_gemini': 'Ralph Gemini',
+    'System': 'System',
+  };
+  const rawName = msg.sender_name || (isHouston ? 'Houston' : 'Admin');
+  const senderName = DISPLAY_NAMES[rawName] || rawName;
 
   if (isSystem) {
     return (
@@ -282,7 +295,7 @@ function CouncilMessage({ msg, isAdmin, onApprove, onReject }) {
     );
   }
 
-  const isCommand = isHouston && (senderName === 'Houston Command' || senderName === 'OpenClaw');
+  const isCommand = isHouston && senderName === 'Houston Command';
   const accentColor = isCommand
     ? 'border-l-indigo-500'
     : isHouston
