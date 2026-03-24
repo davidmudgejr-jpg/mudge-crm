@@ -1488,6 +1488,310 @@ directivesRouter.put('/council/recommendation/:messageId', requireJwtAdmin, asyn
 });
 
 // ============================================================
+// HOUSTON COMMAND WRITE ACCESS — Controlled DB writes with trust tiers
+// ============================================================
+
+// 46. POST /api/ai/command/fill-empty — Fill empty fields on a record (Silver+ tier)
+// Houston Command can fill fields that are currently NULL/empty
+// but CANNOT overwrite existing data (that goes through suggested_updates)
+router.post('/command/fill-empty', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { entity_type, entity_id, fields, source_detail } = req.body;
+    // fields: { email: "john@acme.com", phone_1: "909-555-1234", ... }
+
+    if (!entity_type || !entity_id || !fields || Object.keys(fields).length === 0) {
+      return res.status(400).json({ error: 'entity_type, entity_id, and fields are required' });
+    }
+
+    const tableMap = { contact: 'contacts', property: 'properties', company: 'companies' };
+    const idColMap = { contact: 'contact_id', property: 'property_id', company: 'company_id' };
+    const table = tableMap[entity_type];
+    const idCol = idColMap[entity_type];
+
+    if (!table) return res.status(400).json({ error: 'Invalid entity_type' });
+
+    // Get current record
+    const current = await pool.query(`SELECT * FROM ${table} WHERE "${idCol}" = $1`, [entity_id]);
+    if (current.rows.length === 0) {
+      return res.status(404).json({ error: 'Record not found' });
+    }
+    const record = current.rows[0];
+
+    // Validate field names against actual columns
+    const validFields = await pool.query(
+      'SELECT column_name FROM information_schema.columns WHERE table_name = $1',
+      [table]
+    );
+    const validFieldNames = validFields.rows.map(r => r.column_name);
+
+    // Protected fields that Houston Command can NEVER write to
+    const protectedFields = [idCol, 'airtable_id', 'created_at', 'modified'];
+
+    const filled = [];
+    const conflicted = [];
+    const skipped = [];
+
+    for (const [fieldName, newValue] of Object.entries(fields)) {
+      // Skip invalid or protected fields
+      if (!validFieldNames.includes(fieldName)) {
+        skipped.push({ field: fieldName, reason: 'invalid_column' });
+        continue;
+      }
+      if (protectedFields.includes(fieldName)) {
+        skipped.push({ field: fieldName, reason: 'protected' });
+        continue;
+      }
+
+      const currentValue = record[fieldName];
+
+      // If field is empty → fill it directly
+      if (currentValue === null || currentValue === '' || currentValue === undefined) {
+        await pool.query(
+          `UPDATE ${table} SET "${fieldName}" = $1 WHERE "${idCol}" = $2`,
+          [newValue, entity_id]
+        );
+        filled.push({ field: fieldName, value: newValue });
+      }
+      // If field is Gold (manual) → NEVER touch, create suggestion
+      else if (record.data_source === 'manual') {
+        await pool.query(
+          `INSERT INTO suggested_updates
+             (entity_type, entity_id, entity_name, field_name, current_value, suggested_value,
+              source, source_detail, data_tier, agent_name, confidence)
+           VALUES ($1, $2, $3, $4, $5, $6, 'houston_command', $7, 'silver', 'houston_command', 75)`,
+          [entity_type, entity_id, record.full_name || record.name || record.address || '',
+           fieldName, String(currentValue), newValue, source_detail || 'Houston Command analysis']
+        );
+        conflicted.push({ field: fieldName, current: currentValue, suggested: newValue, action: 'suggested_update_created' });
+      }
+      // If field has existing non-manual data that DIFFERS → create suggestion
+      else if (String(currentValue).toLowerCase() !== String(newValue).toLowerCase()) {
+        await pool.query(
+          `INSERT INTO suggested_updates
+             (entity_type, entity_id, entity_name, field_name, current_value, suggested_value,
+              source, source_detail, data_tier, agent_name, confidence)
+           VALUES ($1, $2, $3, $4, $5, $6, 'houston_command', $7, 'silver', 'houston_command', 70)`,
+          [entity_type, entity_id, record.full_name || record.name || record.address || '',
+           fieldName, String(currentValue), newValue, source_detail || 'Houston Command analysis']
+        );
+        conflicted.push({ field: fieldName, current: currentValue, suggested: newValue, action: 'suggested_update_created' });
+      }
+      // Same value → skip
+      else {
+        skipped.push({ field: fieldName, reason: 'same_value' });
+      }
+    }
+
+    // Update enrichment tracking
+    if (filled.length > 0) {
+      await pool.query(
+        `UPDATE ${table} SET last_enriched_at = NOW(), data_source = COALESCE(NULLIF(data_source, ''), 'enricher_verified')
+         WHERE "${idCol}" = $1 AND (data_source IS NULL OR data_source = '' OR data_source = 'import')`,
+        [entity_id]
+      );
+    }
+
+    res.json({
+      ok: true,
+      filled: filled.length,
+      conflicted: conflicted.length,
+      skipped: skipped.length,
+      details: { filled, conflicted, skipped },
+    });
+  } catch (err) {
+    console.error('[AI API] POST /command/fill-empty error:', err.message);
+    res.status(500).json({ error: 'Failed to fill empty fields' });
+  }
+});
+
+// 47. POST /api/ai/command/log-interaction — Houston Command logs an interaction
+// Writes directly to interactions table (no sandbox needed — Command is trusted)
+router.post('/command/log-interaction', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      contact_id, property_id, company_id, deal_id,
+      type, notes, direction, date,
+    } = req.body;
+
+    if (!type || !notes) {
+      return res.status(400).json({ error: 'type and notes are required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO interactions
+         (type, notes, direction, contact_id, property_id, company_id, interaction_date, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'houston_command')
+       RETURNING *`,
+      [
+        type, notes, direction || 'outbound',
+        contact_id || null, property_id || null, company_id || null,
+        date || new Date().toISOString(),
+      ]
+    );
+
+    // Link to deal if provided
+    if (deal_id && result.rows[0]) {
+      await pool.query(
+        `INSERT INTO deal_interactions (deal_id, interaction_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [deal_id, result.rows[0].interaction_id || result.rows[0].id]
+      ).catch(() => {}); // Ignore if junction doesn't exist yet
+    }
+
+    // Emit for live UI update
+    const io = getIo();
+    if (io) {
+      io.emit('crm:record-created', { table: 'interactions', record: result.rows[0] });
+    }
+
+    res.json({ ok: true, interaction: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /command/log-interaction error:', err.message);
+    res.status(500).json({ error: 'Failed to log interaction' });
+  }
+});
+
+// 48. POST /api/ai/command/create-task — Houston Command creates an action item
+router.post('/command/create-task', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      task_name, due_date, assigned_to, priority,
+      contact_id, company_id, property_id, deal_id, notes,
+    } = req.body;
+
+    if (!task_name) {
+      return res.status(400).json({ error: 'task_name is required' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO action_items
+         (task_name, due_date, assigned_to, high_priority, notes, source)
+       VALUES ($1, $2, $3, $4, $5, 'houston_command')
+       RETURNING *`,
+      [
+        task_name,
+        due_date || new Date().toISOString().split('T')[0],
+        assigned_to || 'David Mudge Jr',
+        priority === 'high' || priority === true || false,
+        notes || null,
+      ]
+    );
+
+    const taskId = result.rows[0].action_item_id || result.rows[0].id;
+
+    // Link to entities if provided
+    if (contact_id) {
+      await pool.query(
+        'INSERT INTO action_item_contacts (action_item_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [taskId, contact_id]
+      ).catch(() => {});
+    }
+    if (company_id) {
+      await pool.query(
+        'INSERT INTO action_item_companies (action_item_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [taskId, company_id]
+      ).catch(() => {});
+    }
+    if (property_id) {
+      await pool.query(
+        'INSERT INTO action_item_properties (action_item_id, property_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [taskId, property_id]
+      ).catch(() => {});
+    }
+    if (deal_id) {
+      await pool.query(
+        'INSERT INTO action_item_deals (action_item_id, deal_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        [taskId, deal_id]
+      ).catch(() => {});
+    }
+
+    // Emit for live UI update
+    const io = getIo();
+    if (io) {
+      io.emit('crm:record-created', { table: 'action_items', record: result.rows[0] });
+    }
+
+    res.json({ ok: true, task: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /command/create-task error:', err.message);
+    res.status(500).json({ error: 'Failed to create task' });
+  }
+});
+
+// 49. POST /api/ai/command/flag-ownership-change — Flag a potential ownership change
+// Special endpoint because ownership changes are high-impact and always need David's review
+router.post('/command/flag-ownership-change', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      property_id, current_owner, new_owner, source_detail, confidence,
+    } = req.body;
+
+    if (!property_id || !new_owner) {
+      return res.status(400).json({ error: 'property_id and new_owner are required' });
+    }
+
+    // Get property info
+    const prop = await pool.query(
+      'SELECT property_id, address, city FROM properties WHERE property_id = $1',
+      [property_id]
+    );
+    const propName = prop.rows.length > 0 ? `${prop.rows[0].address}, ${prop.rows[0].city}` : property_id;
+
+    // Create a high-priority suggested update with ownership change flag
+    const result = await pool.query(
+      `INSERT INTO suggested_updates
+         (entity_type, entity_id, entity_name, field_name, field_label,
+          current_value, suggested_value, source, source_detail,
+          confidence, data_tier, is_ownership_change, agent_name)
+       VALUES ('property', $1, $2, 'owner_entity', 'Property Owner',
+          $3, $4, 'houston_command', $5, $6, 'gold', true, 'houston_command')
+       RETURNING *`,
+      [property_id, propName, current_owner || 'Unknown', new_owner,
+       source_detail || 'Detected by Houston Command', confidence || 80]
+    );
+
+    // Also alert via Team Chat
+    const generalCh = await pool.query(
+      "SELECT id FROM chat_channels WHERE name = 'General' AND channel_type = 'group' LIMIT 1"
+    );
+    if (generalCh.rows.length > 0) {
+      const alertMsg = await pool.query(
+        `INSERT INTO chat_messages
+           (channel_id, sender_id, sender_type, body, message_type, houston_meta)
+         VALUES ($1, NULL, 'houston', $2, 'houston_insight', $3)
+         RETURNING *`,
+        [
+          generalCh.rows[0].id,
+          `🏠 **Ownership Change Detected**\n\n**Property:** ${propName}\n**Previous:** ${current_owner || 'Unknown'}\n**New:** ${new_owner}\n\n_Source: ${source_detail || 'Houston Command analysis'}_\n\nThis needs your review — check Suggested Updates in AI Ops.`,
+          JSON.stringify({ trigger: 'ownership_change', property_id, confidence }),
+        ]
+      );
+
+      const io = getIo();
+      if (io) {
+        const msg = alertMsg.rows[0];
+        msg.sender_name = 'Houston';
+        msg.sender_color = '#10b981';
+        io.to(`channel:${generalCh.rows[0].id}`).emit('chat:message:new', msg);
+      }
+    }
+
+    res.json({ ok: true, suggestion: result.rows[0], alert_sent: true });
+  } catch (err) {
+    console.error('[AI API] POST /command/flag-ownership-change error:', err.message);
+    res.status(500).json({ error: 'Failed to flag ownership change' });
+  }
+});
+
+// ============================================================
 // SUGGESTED UPDATES — Data Trust Tier Review System
 // ============================================================
 
