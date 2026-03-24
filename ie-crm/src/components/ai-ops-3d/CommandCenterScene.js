@@ -80,9 +80,9 @@ export function createCommandCenterScene(container) {
   composer.addPass(new RenderPass(scene, camera));
   const bloomPass = new UnrealBloomPass(
     new THREE.Vector2(width, height),
-    1.0,
-    0.5,
-    0.3
+    0.7,
+    0.4,
+    0.4
   );
   composer.addPass(bloomPass);
 
@@ -167,7 +167,7 @@ export function createCommandCenterScene(container) {
     animatables.particles.geometry.attributes.position.needsUpdate = true;
 
     // Bloom pulse
-    animatables.bloomPass.strength = 0.9 + Math.sin(t * 0.5) * 0.1;
+    animatables.bloomPass.strength = 0.65 + Math.sin(t * 0.5) * 0.05;
 
     // External tick consumers
     for (const cb of tickCallbacks) cb(t);
