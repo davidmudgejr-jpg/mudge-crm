@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-23 (Phase 10: Oracle Prediction Engine + Fleet Infrastructure Hardening)
-> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) Fleet operations: SSH access, directive pipeline via Telegram, health monitoring, agent fixes. (9) Security + workflow: Codex connected, 7 vulnerabilities fixed, PR workflow established, Forum Debate + roadmap additions. (10) **Oracle + Infrastructure session**: Designed complete Oracle prediction engine (Monte Carlo + knowledge graph + persona engine + scenario engine + report agent, 12 signal categories, market-wide calibration from AIR data), wrote Migration 025 (live on Neon — 6 new tables, 25 new columns, 48 initial signal weights seeded), expanded AGENT-SYSTEM.md to 1400+ lines, fixed SSH access + OAuth auto-refresh + token sync + Full Disk Access on both machines, persistent launchd health monitoring, pushed Oracle directive to Houston Command, reviewed all 9 agent instruction files, added Forum Debate to tier2-validator.
-> Next tasks: **48GB Mac Mini arrives → deploy Tier 3 agents** (Enricher first, then Postmaster), **Fireflies.ai integration** (call transcripts → activities + Oracle signals), **Native PWA app setup** (CRM + Houston messaging as separate installable apps), **Fix Railway URL** (directives through API), **Improvement proposal UI testing** (UI built, needs live data from agents), **Install `gh` CLI on work Mac**.
+> Updated: 2026-03-25 (Phase 11: AIR Pipeline + Instantly.ai + Brain Sessions + Dedup Scanner)
+> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) Fleet operations: SSH access, directive pipeline via Telegram, health monitoring, agent fixes. (9) Security + workflow: Codex connected, 7 vulnerabilities fixed, PR workflow established, Forum Debate + roadmap additions. (10) Oracle + Infrastructure: Monte Carlo prediction engine designed, Migration 025, AGENT-SYSTEM.md expanded. (11) **Massive multi-day session**: Houston Command stabilized (1-year setup token, stale Ralph profiles removed), Tailscale mesh network (all machines connected from anywhere), AIR super sheet pipeline live (parser + ingest + field normalizer), Instantly.ai API wired (13 endpoints), property dedup scanner (3 matching strategies + one-click merge), Brain Session system built (three-way team meetings recorded to Council), pre-call briefs for Houston Sonnet, Data Trust Tiers + Deal Dossiers + David Filter scoring, 3D Command Center integrated, Council of Minds meetings + improvement proposals with David approval.
+> Next tasks: **Build data trust tiers UI** (safety layer before enrichment), **Re-run dedup scan** (table name fix deployed, need clean results), **48GB Mac Mini arrives April 14-21** (deploy Tier 3 agents — Enricher first), **M1 Mac Mini setup** (Ralphs for contact research), **David: share active deals with Houston Command** (for dossiers + pre-call briefs), **Fireflies.ai integration** (API key needed), **Native PWA app setup**, **Agent instruction files** (Postmaster + Campaign Manager).
 
 ---
 
@@ -463,6 +463,68 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 - [x] **Email forwarding configured** — Outlook rule forwarding all inbound dmudgejr@lee-associates.com to houstonmudge@gmail.com
 - [x] **Migration 024 run on production Neon** — improvement_proposals, workflow_chains, agent_skills tables live
 - [x] **Migration 025 run on production Neon** — all Oracle tables live, signal weights seeded
+
+### AIR Pipeline + Instantly.ai + Brain Sessions + Dedup (2026-03-24/25, Phase 11)
+
+**Houston Command Stabilization:**
+- [x] **1-year setup token** — replaced fragile OAuth with Anthropic setup token (`sk-ant-oat01-...`), valid 1 year. No more daily expiration headaches.
+- [x] **Stale Ralph profiles removed** — deleted `~/.openclaw/agents/ralph-gpt/` and `ralph-gemini/` which had expired tokens causing 401 failover. 16GB Mini is now single-purpose Houston Command machine.
+- [x] **Upgraded to $200/mo Max plan** — eliminates rate limiting that was cutting off the strategic brain mid-session. David's work Mac downgraded to $100/mo (mostly built, Sonnet handles maintenance).
+- [x] **Directive scope filter** — `directive-poll.sh` now only picks up directives with scope matching `houston_command` or `all`. Prevents bounce-back loop when Claude Code pushes directives.
+
+**Tailscale Mesh Network:**
+- [x] **Tailscale installed on all machines** — 16GB Mini (`100.64.122.123`), Work Mac (`100.70.27.99`), MacBook Air (`100.78.244.61`). SSH works from any network worldwide.
+- [x] **Fleet health check updated** — uses Tailscale IP, no more local IP changes breaking SSH.
+- [x] **Static IP set on Mini** — `192.168.1.229` as local fallback.
+
+**AIR Super Sheet Pipeline (LIVE — ingesting real data):**
+- [x] **Houston Command built Python parser** (`air_parser.py`) — parses AIR CRE Industrial Super Sheet PDFs, extracts listings/comps, classifies into 5 categories
+- [x] **Migration 032** — `market_tracking_changes` table (listing change history), `air_parse_runs` table (parse run tracking), new fields on market_tracking/lease_comps/sale_comps
+- [x] **`POST /api/ai/air/ingest` endpoint** — routes classified JSON to correct tables: new listings → market_tracking, lease comps → lease_comps, sale comps → sale_comps, updates → change history. Auto-creates properties, deduplicates, logs parse runs.
+- [x] **Universal field normalizer** (`server/utils/fieldNormalizer.js`) — 150+ field aliases across all known sources (AIR, CoStar, RE Apps, Reonomy, title reps). Strips `$`, cleans dates, removes foot marks. Database column names never change regardless of source.
+- [x] **Two days of real AIR data ingested** — March 23 + 24: 9 new properties, 9 lease comps, 1 sale comp, 27+ market tracking records created automatically.
+
+**Instantly.ai Integration:**
+- [x] **`server/services/instantly.js`** — full wrapper for Instantly API v2: campaigns, leads, email accounts, webhooks, verification, block list, workspace
+- [x] **13 new endpoints (39-51)** — campaign CRUD, analytics, lead management, sender account health checks, real-time webhook receiver for opens/replies/bounces
+- [x] **`INSTANTLY_API_KEY` set on Railway** — Campaign Manager can now talk to Instantly.ai
+
+**Property Dedup Scanner:**
+- [x] **Migration 033** — `dedup_candidates` table with confidence scoring, side-by-side summaries, status workflow
+- [x] **3 matching strategies** — exact normalized address, fuzzy address + similar SF (within 10%), same property name + city
+- [x] **One-click merge** — moves all linked records (contacts, deals, comps, interactions), fills empty fields from loser, deletes loser, auto-dismisses related candidates
+- [x] **Daily scheduled task** — runs at 6:32 AM, reports results
+- [x] **Bug fix** — `property_deals` → `deal_properties` (correct junction table name)
+
+**Brain Session System:**
+- [x] **Migration 034** — `meeting_type` column on council_meetings ('council_of_minds' vs 'team_session'), expanded round types for freeform discussion
+- [x] **4 new endpoints (60-63)** — start session, post message, end session with summary, check active session
+- [x] **Three-way team meetings** — David + Houston Command + Claude Code. All messages recorded to Council with author attribution.
+- [x] **Protocol established:** David says "Brain session: [topic]" → recording starts. "End session" → Claude Code posts summary with decisions + action items. Houston Command saves to memory + pushes directives.
+- [x] **First brain session logged retroactively** — AIR Pipeline discussion (session-2026-03-24-1)
+- [x] **Second brain session completed** — "CRM + AI System Analysis: Roles, Workflow & Optimization" (session-2026-03-25-1). Defined roles: David closes deals, Houston thinks strategically, Claude Code builds. Agreed enrichment roadmap: existing data briefs now → Ralphs on M1 → Reonomy → Enricher on 48GB.
+
+**Communication Channels Formalized:**
+- [x] **`for-claude-code.md`** — Houston Command writes TO Claude Code (read by Claude Code via SSH)
+- [x] **`for-houston-command.md`** — Claude Code writes TO Houston Command (read by Houston Command)
+- [x] **Telegram** — David ↔ Houston Command only (private channel)
+- [x] **Council** — permanent record of brain sessions and AI-to-AI discussions
+
+**Other Completed This Session:**
+- [x] **Data Trust Tiers** (Migration 029) — gold/silver/bronze data quality tracking, deal dossiers table, 7 new endpoints (40-49)
+- [x] **David Filter scoring** (Migration 030) — reachability scores, david_modifier, final_priority, institutional/blacklist flags
+- [x] **Houston Command controlled write access** — 4 endpoints for suggested updates, empty field fills, deal dossier writes, interaction logging
+- [x] **Pre-call brief system** — Houston Sonnet generates 30-second briefs when David says "calling [name]" with contact info, properties, last activity, key intel, suggested approach
+- [x] **3D Command Center replaced** — Houston Command built Three.js scene, Claude Code integrated into React. Bloom effects tuned (1.8→0.7 strength).
+- [x] **Council of Minds meeting system** (Migration 031) — threaded meetings with Reddit-style UI, per-post author/model tags, proposal extraction
+- [x] **Agent Schedules view** in AI Ops — shows cron jobs with last-run timestamps
+- [x] **Migrations 031-034 all run on production Neon**
+
+**Brain Session Decisions (session-2026-03-25-1):**
+- Houston Command conserves tokens — $500/hr thinking, NOT $5/hr grinding
+- Enrichment is phased: existing data → Ralphs (M1) → Reonomy → Enricher (48GB)
+- Data trust tiers + safety layer BEFORE automated enrichment
+- David's immediate action: tell Houston Command about active deals for dossiers
 
 **Reference Materials Saved:**
 - [x] `reference/mirofish/` — Full MiroFish source code (persona generation, simulation engine, knowledge graph memory, report agent)
