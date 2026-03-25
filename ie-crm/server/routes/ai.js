@@ -2753,6 +2753,403 @@ router.get('/campaign/analytics', async (req, res) => {
 });
 
 // ============================================================
+// ============================================================
+// AIR INGEST — Parse AIR super sheets into CRM
+// ============================================================
+
+// 53. POST /api/ai/air/ingest — Ingest parsed AIR data into CRM
+// Called by Matcher agent (or Houston Command) with classified JSON from the parser
+router.post('/air/ingest', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      parsed_date,
+      source_file,
+      new_listings_for_lease = [],
+      new_listings_for_sale = [],
+      lease_comps = [],
+      sale_comps = [],
+      updated_listings = [],
+      summary = {},
+    } = req.body;
+
+    if (!parsed_date) {
+      return res.status(400).json({ error: 'parsed_date is required' });
+    }
+
+    const results = {
+      properties_created: 0,
+      properties_updated: 0,
+      lease_comps_created: 0,
+      sale_comps_created: 0,
+      market_tracking_created: 0,
+      market_tracking_updated: 0,
+      errors: [],
+    };
+
+    // Helper: find or create property by address + city
+    async function findOrCreateProperty(entry) {
+      const addr = (entry.address || '').trim();
+      const city = (entry.city || '').trim();
+      if (!addr) return null;
+
+      // Try to find existing property by address fuzzy match
+      const existing = await pool.query(
+        `SELECT property_id, property_address, city FROM properties
+         WHERE LOWER(property_address) = LOWER($1)
+         OR (LOWER(property_address) LIKE '%' || LOWER($2) || '%' AND LOWER(city) = LOWER($3))
+         LIMIT 1`,
+        [addr, addr.split(' ').slice(1).join(' '), city]
+      );
+
+      if (existing.rows.length > 0) {
+        return existing.rows[0].property_id;
+      }
+
+      // Create new property
+      const newProp = await pool.query(
+        `INSERT INTO properties (property_address, city, state, zip, property_type, building_sf, property_name)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING property_id`,
+        [addr, city, entry.state || 'CA', entry.zip, entry.property_type || 'Industrial',
+         entry.building_sf, entry.property_name]
+      );
+      results.properties_created++;
+      return newProp.rows[0].property_id;
+    }
+
+    // ── NEW LISTINGS FOR LEASE ──
+    for (const listing of new_listings_for_lease) {
+      try {
+        const propertyId = await findOrCreateProperty(listing);
+
+        // Check if already in market_tracking
+        const exists = await pool.query(
+          `SELECT id FROM market_tracking
+           WHERE LOWER(property_address) = LOWER($1) AND market_status = 'for_lease'
+           AND outcome_type IS NULL`,
+          [listing.address]
+        );
+
+        if (exists.rows.length === 0) {
+          await pool.query(
+            `INSERT INTO market_tracking
+               (property_id, property_address, submarket, property_type, building_sf,
+                market_status, first_seen_date, first_seen_source,
+                asking_lease_rate, available_sf, office_sf, clear_height,
+                dock_high_doors, grade_level_doors, construction_status,
+                property_name, listing_broker, listing_agents,
+                air_entry_number, last_air_sheet_date)
+             VALUES ($1,$2,$3,$4,$5,'for_lease',$6,'air_sheet',$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+            [propertyId, listing.address, listing.submarket || listing.city,
+             listing.property_type || 'Industrial', listing.building_sf,
+             parsed_date, listing.asking_rate, listing.available_sf,
+             listing.office_sf, listing.clear_height, listing.dock_high_doors,
+             listing.grade_level_doors, listing.construction_status,
+             listing.property_name, listing.listing_broker, listing.listing_agents,
+             listing.air_entry_number, parsed_date]
+          );
+          results.market_tracking_created++;
+        } else {
+          results.market_tracking_updated++;
+        }
+      } catch (err) {
+        results.errors.push({ type: 'new_listing_lease', address: listing.address, error: err.message });
+      }
+    }
+
+    // ── NEW LISTINGS FOR SALE ──
+    for (const listing of new_listings_for_sale) {
+      try {
+        const propertyId = await findOrCreateProperty(listing);
+
+        const exists = await pool.query(
+          `SELECT id FROM market_tracking
+           WHERE LOWER(property_address) = LOWER($1) AND market_status = 'for_sale'
+           AND outcome_type IS NULL`,
+          [listing.address]
+        );
+
+        if (exists.rows.length === 0) {
+          await pool.query(
+            `INSERT INTO market_tracking
+               (property_id, property_address, submarket, property_type, building_sf,
+                market_status, first_seen_date, first_seen_source,
+                asking_price, asking_price_psf,
+                property_name, listing_broker, listing_agents,
+                air_entry_number, last_air_sheet_date)
+             VALUES ($1,$2,$3,$4,$5,'for_sale',$6,'air_sheet',$7,$8,$9,$10,$11,$12,$13)`,
+            [propertyId, listing.address, listing.submarket || listing.city,
+             listing.property_type || 'Industrial', listing.building_sf,
+             parsed_date, listing.asking_price, listing.price_psf,
+             listing.property_name, listing.listing_broker, listing.listing_agents,
+             listing.air_entry_number, parsed_date]
+          );
+          results.market_tracking_created++;
+        } else {
+          results.market_tracking_updated++;
+        }
+      } catch (err) {
+        results.errors.push({ type: 'new_listing_sale', address: listing.address, error: err.message });
+      }
+    }
+
+    // ── LEASE COMPS ──
+    for (const comp of lease_comps) {
+      try {
+        const propertyId = await findOrCreateProperty(comp);
+
+        // Dedup: check if this comp already exists (same address + tenant + similar SF)
+        const exists = await pool.query(
+          `SELECT id FROM lease_comps
+           WHERE property_address = $1 AND LOWER(tenant_name) = LOWER($2)
+           AND air_sheet_date = $3`,
+          [comp.address, comp.tenant_name || '', parsed_date]
+        );
+
+        if (exists.rows.length === 0) {
+          await pool.query(
+            `INSERT INTO lease_comps
+               (property_id, property_address, city, tenant_name, sf, rate, rent_type,
+                sign_date, term_months, building_rba,
+                tenant_rep_agents, landlord_rep_agents,
+                source, air_sheet_date, air_entry_number, notes)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'air_sheet',$13,$14,$15)`,
+            [propertyId, comp.address, comp.city, comp.tenant_name,
+             comp.sf, comp.rate, comp.rate_type,
+             comp.sign_date, comp.term_months, comp.building_sf,
+             comp.tenant_rep, comp.landlord_rep,
+             parsed_date, comp.air_entry_number, comp.notes]
+          );
+          results.lease_comps_created++;
+
+          // Also update market_tracking if this property was listed
+          await pool.query(
+            `UPDATE market_tracking SET
+               outcome_type = 'transacted', outcome_date = $1,
+               lease_rate = $2, days_on_market = EXTRACT(DAY FROM ($1::date - first_seen_date))::int
+             WHERE LOWER(property_address) = LOWER($3)
+             AND market_status = 'for_lease' AND outcome_type IS NULL`,
+            [comp.sign_date || parsed_date, comp.rate, comp.address]
+          );
+        }
+      } catch (err) {
+        results.errors.push({ type: 'lease_comp', address: comp.address, error: err.message });
+      }
+    }
+
+    // ── SALE COMPS ──
+    for (const comp of sale_comps) {
+      try {
+        const propertyId = await findOrCreateProperty(comp);
+
+        const exists = await pool.query(
+          `SELECT id FROM sale_comps
+           WHERE property_address = $1 AND air_sheet_date = $2`,
+          [comp.address, parsed_date]
+        );
+
+        if (exists.rows.length === 0) {
+          await pool.query(
+            `INSERT INTO sale_comps
+               (property_id, property_address, city, sale_date, sale_price, price_psf,
+                sf, building_sf, cap_rate, buyer_name, seller_name,
+                property_type, source, air_sheet_date, air_entry_number, notes)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'air_sheet',$13,$14,$15)`,
+            [propertyId, comp.address, comp.city,
+             comp.sale_date, comp.sale_price, comp.price_psf,
+             comp.sf, comp.building_sf, comp.cap_rate,
+             comp.buyer_name, comp.seller_name,
+             comp.property_type || 'Industrial',
+             parsed_date, comp.air_entry_number, comp.notes]
+          );
+          results.sale_comps_created++;
+
+          // Update market_tracking
+          await pool.query(
+            `UPDATE market_tracking SET
+               outcome_type = 'transacted', outcome_date = $1,
+               sale_price = $2, sale_price_psf = $3,
+               days_on_market = EXTRACT(DAY FROM ($1::date - first_seen_date))::int
+             WHERE LOWER(property_address) = LOWER($4)
+             AND market_status = 'for_sale' AND outcome_type IS NULL`,
+            [comp.sale_date || parsed_date, comp.sale_price, comp.price_psf, comp.address]
+          );
+        }
+      } catch (err) {
+        results.errors.push({ type: 'sale_comp', address: comp.address, error: err.message });
+      }
+    }
+
+    // ── UPDATED LISTINGS ──
+    for (const update of updated_listings) {
+      try {
+        // Find the existing market_tracking entry
+        const existing = await pool.query(
+          `SELECT id, asking_lease_rate, asking_price, market_status, available_sf
+           FROM market_tracking
+           WHERE LOWER(property_address) = LOWER($1) AND outcome_type IS NULL
+           ORDER BY first_seen_date DESC LIMIT 1`,
+          [update.address]
+        );
+
+        if (existing.rows.length > 0) {
+          const mt = existing.rows[0];
+
+          // Log the change
+          await pool.query(
+            `INSERT INTO market_tracking_changes
+               (market_tracking_id, property_address, field_changed,
+                previous_value, new_value, change_type,
+                air_sheet_date, notes)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [mt.id, update.address, update.field_changed || 'unknown',
+             update.previous_value, update.new_value,
+             update.change_type || 'update',
+             parsed_date, update.notes]
+          );
+
+          // Update the market_tracking row with new values if applicable
+          if (update.field_changed === 'asking_rate' || update.field_changed === 'asking_lease_rate') {
+            await pool.query(
+              `UPDATE market_tracking SET asking_lease_rate = $1, last_air_sheet_date = $2,
+               change_count = change_count + 1 WHERE id = $3`,
+              [parseFloat(update.new_value) || null, parsed_date, mt.id]
+            );
+          } else if (update.field_changed === 'asking_price') {
+            await pool.query(
+              `UPDATE market_tracking SET asking_price = $1, last_air_sheet_date = $2,
+               change_count = change_count + 1 WHERE id = $3`,
+              [parseFloat(update.new_value) || null, parsed_date, mt.id]
+            );
+          } else if (update.field_changed === 'available_sf') {
+            await pool.query(
+              `UPDATE market_tracking SET available_sf = $1, last_air_sheet_date = $2,
+               change_count = change_count + 1 WHERE id = $3`,
+              [parseFloat(update.new_value) || null, parsed_date, mt.id]
+            );
+          } else {
+            // Generic update — just bump the sheet date and change count
+            await pool.query(
+              `UPDATE market_tracking SET last_air_sheet_date = $1,
+               change_count = change_count + 1 WHERE id = $2`,
+              [parsed_date, mt.id]
+            );
+          }
+
+          results.market_tracking_updated++;
+        } else {
+          // No existing record — might be a listing we haven't seen before
+          results.errors.push({
+            type: 'updated_listing',
+            address: update.address,
+            error: 'No existing market_tracking record found for update',
+          });
+        }
+      } catch (err) {
+        results.errors.push({ type: 'updated_listing', address: update.address, error: err.message });
+      }
+    }
+
+    // ── LOG THE PARSE RUN ──
+    await pool.query(
+      `INSERT INTO air_parse_runs
+         (source_file, parsed_date, agent_name,
+          new_listings_lease, new_listings_sale, lease_comps_found, sale_comps_found,
+          updated_listings, total_entries,
+          properties_created, properties_updated,
+          lease_comps_created, sale_comps_created,
+          market_tracking_created, market_tracking_updated,
+          errors, status, error_log)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+      [source_file || `air-sheet-${parsed_date}.pdf`,
+       parsed_date,
+       req.agentName || 'matcher',
+       new_listings_for_lease.length,
+       new_listings_for_sale.length,
+       lease_comps.length,
+       sale_comps.length,
+       updated_listings.length,
+       summary.total_entries || (new_listings_for_lease.length + new_listings_for_sale.length +
+         lease_comps.length + sale_comps.length + updated_listings.length),
+       results.properties_created,
+       results.properties_updated,
+       results.lease_comps_created,
+       results.sale_comps_created,
+       results.market_tracking_created,
+       results.market_tracking_updated,
+       results.errors.length,
+       results.errors.length === 0 ? 'completed' : 'partial',
+       JSON.stringify(results.errors)]
+    );
+
+    res.json({
+      ok: true,
+      parsed_date,
+      results,
+      summary: {
+        new_listings: new_listings_for_lease.length + new_listings_for_sale.length,
+        comps: lease_comps.length + sale_comps.length,
+        updates: updated_listings.length,
+        properties_created: results.properties_created,
+        errors: results.errors.length,
+      },
+    });
+  } catch (err) {
+    console.error('[AI API] POST /air/ingest error:', err.message);
+    res.status(500).json({ error: 'Failed to ingest AIR data' });
+  }
+});
+
+// 54. GET /api/ai/air/runs — List AIR parse run history
+router.get('/air/runs', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { limit = 20 } = req.query;
+    const result = await pool.query(
+      `SELECT * FROM air_parse_runs ORDER BY parsed_date DESC LIMIT $1`,
+      [parseInt(limit)]
+    );
+    res.json({ runs: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[AI API] GET /air/runs error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch parse runs' });
+  }
+});
+
+// 55. GET /api/ai/air/changes — List market tracking changes
+router.get('/air/changes', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { address, field, limit = 50 } = req.query;
+    let query = 'SELECT * FROM market_tracking_changes WHERE 1=1';
+    const params = [];
+    let idx = 1;
+
+    if (address) {
+      query += ` AND LOWER(property_address) LIKE LOWER($${idx++})`;
+      params.push(`%${address}%`);
+    }
+    if (field) {
+      query += ` AND field_changed = $${idx++}`;
+      params.push(field);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${idx++}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+    res.json({ changes: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[AI API] GET /air/changes error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch changes' });
+  }
+});
+
+// ============================================================
 // INSTANTLY.AI PROXY — Direct access to Instantly API for agents + dashboard
 // ============================================================
 
