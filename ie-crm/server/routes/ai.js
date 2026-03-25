@@ -3432,7 +3432,7 @@ router.post('/dedup/scan', async (req, res) => {
         pool.query('SELECT COUNT(*) FROM property_contacts WHERE property_id = $1', [propId]),
         pool.query('SELECT COUNT(*) FROM lease_comps WHERE property_id = $1', [propId]),
         pool.query('SELECT COUNT(*) FROM sale_comps WHERE property_id = $1', [propId]),
-        pool.query('SELECT COUNT(*) FROM property_deals WHERE property_id = $1', [propId]),
+        pool.query('SELECT COUNT(*) FROM deal_properties WHERE property_id = $1', [propId]),
         pool.query('SELECT COUNT(*) FROM interaction_properties WHERE property_id = $1', [propId]),
       ]);
       return {
@@ -3580,7 +3580,7 @@ router.post('/dedup/merge/:id', async (req, res) => {
     // Move all linked records from loser to winner
     const junctionTables = [
       { table: 'property_contacts', col: 'property_id' },
-      { table: 'property_deals', col: 'property_id' },
+      { table: 'deal_properties', col: 'property_id' },
       { table: 'interaction_properties', col: 'property_id' },
     ];
 
