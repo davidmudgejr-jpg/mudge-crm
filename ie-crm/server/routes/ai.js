@@ -3231,6 +3231,381 @@ router.post('/skills/:skillId/use', async (req, res) => {
 });
 
 // ============================================================
+// COUNCIL OF MINDS — Threaded meeting system
+// ============================================================
+
+// 39. POST /api/ai/council-meetings — Create a new council meeting thread
+router.post('/council-meetings', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { title, topic, participants, scheduled_at } = req.body;
+
+    if (!title) {
+      return res.status(400).json({ error: 'title is required' });
+    }
+
+    // Generate meeting_id
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const countResult = await pool.query(
+      "SELECT COUNT(*) FROM council_meetings WHERE meeting_id LIKE $1",
+      [`council-${dateStr}%`]
+    );
+    const seq = parseInt(countResult.rows[0].count) + 1;
+    const meetingId = seq > 1 ? `council-${dateStr}-${seq}` : `council-${dateStr}`;
+
+    // Get meeting number (sequential count of all meetings)
+    const totalCount = await pool.query("SELECT COUNT(*) FROM council_meetings");
+    const meetingNumber = parseInt(totalCount.rows[0].count) + 1;
+
+    const result = await pool.query(
+      `INSERT INTO council_meetings
+         (meeting_id, title, topic, participants, scheduled_at, meeting_number, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        meetingId,
+        title,
+        topic || null,
+        participants || '{houston_command,ralph_gpt,ralph_gemini}',
+        scheduled_at || null,
+        meetingNumber,
+        'in_progress',
+      ]
+    );
+
+    res.json({ ok: true, meeting: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /council-meetings error:', err.message);
+    res.status(500).json({ error: 'Failed to create council meeting' });
+  }
+});
+
+// 40. GET /api/ai/council-meetings — List all council meetings
+router.get('/council-meetings', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { status, limit = 20, offset = 0 } = req.query;
+
+    let query = 'SELECT * FROM council_meetings WHERE 1=1';
+    const params = [];
+    let idx = 1;
+
+    if (status && status !== 'all') {
+      query += ` AND status = $${idx++}`;
+      params.push(status);
+    }
+
+    query += ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    const result = await pool.query(query, params);
+
+    // Also get post counts per meeting
+    const meetingIds = result.rows.map(m => m.meeting_id);
+    let postCounts = {};
+    if (meetingIds.length > 0) {
+      const counts = await pool.query(
+        `SELECT meeting_id, COUNT(*) as post_count,
+                COUNT(*) FILTER (WHERE has_proposal) as proposal_count
+         FROM council_meeting_posts
+         WHERE meeting_id = ANY($1)
+         GROUP BY meeting_id`,
+        [meetingIds]
+      );
+      counts.rows.forEach(r => {
+        postCounts[r.meeting_id] = { posts: parseInt(r.post_count), proposals: parseInt(r.proposal_count) };
+      });
+    }
+
+    const meetings = result.rows.map(m => ({
+      ...m,
+      post_count: postCounts[m.meeting_id]?.posts || 0,
+      proposal_count: postCounts[m.meeting_id]?.proposals || 0,
+    }));
+
+    res.json({ meetings, count: meetings.length });
+  } catch (err) {
+    console.error('[AI API] GET /council-meetings error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch council meetings' });
+  }
+});
+
+// 41. GET /api/ai/council-meetings/:meetingId — Get a single meeting with all posts
+router.get('/council-meetings/:meetingId', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { meetingId } = req.params;
+
+    const meeting = await pool.query(
+      'SELECT * FROM council_meetings WHERE meeting_id = $1',
+      [meetingId]
+    );
+    if (meeting.rows.length === 0) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    const posts = await pool.query(
+      `SELECT * FROM council_meeting_posts
+       WHERE meeting_id = $1
+       ORDER BY created_at ASC`,
+      [meetingId]
+    );
+
+    res.json({
+      meeting: meeting.rows[0],
+      posts: posts.rows,
+    });
+  } catch (err) {
+    console.error('[AI API] GET /council-meetings/:id error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch meeting' });
+  }
+});
+
+// 42. POST /api/ai/council-meetings/:meetingId/posts — Add a post to a meeting thread
+router.post('/council-meetings/:meetingId/posts', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { meetingId } = req.params;
+    const {
+      author,
+      author_display_name,
+      author_model,
+      round,
+      round_number,
+      body,
+      has_proposal,
+      proposal_id,
+    } = req.body;
+
+    if (!author || !body) {
+      return res.status(400).json({ error: 'author and body are required' });
+    }
+
+    // Verify meeting exists
+    const meeting = await pool.query(
+      'SELECT * FROM council_meetings WHERE meeting_id = $1',
+      [meetingId]
+    );
+    if (meeting.rows.length === 0) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    const wordCount = body.split(/\s+/).length;
+
+    const result = await pool.query(
+      `INSERT INTO council_meeting_posts
+         (meeting_id, author, author_display_name, author_model, round, round_number,
+          body, has_proposal, proposal_id, word_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING *`,
+      [
+        meetingId,
+        author,
+        author_display_name || author,
+        author_model || null,
+        round || null,
+        round_number || null,
+        body,
+        has_proposal || false,
+        proposal_id || null,
+        wordCount,
+      ]
+    );
+
+    // Update meeting proposals_generated count if this post has a proposal
+    if (has_proposal) {
+      await pool.query(
+        'UPDATE council_meetings SET proposals_generated = proposals_generated + 1 WHERE meeting_id = $1',
+        [meetingId]
+      );
+    }
+
+    // Emit via socket for live updates
+    const io = getIo();
+    if (io) {
+      io.to('council').emit('council:meeting:new_post', {
+        meetingId,
+        post: result.rows[0],
+      });
+    }
+
+    res.json({ ok: true, post: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /council-meetings/:id/posts error:', err.message);
+    res.status(500).json({ error: 'Failed to add post to meeting' });
+  }
+});
+
+// 43. PATCH /api/ai/council-meetings/:meetingId — Update meeting status/summary
+router.patch('/council-meetings/:meetingId', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { meetingId } = req.params;
+    const { status, summary, top_recommendations, action_items, duration_minutes } = req.body;
+
+    const updates = ['updated_at = NOW()'];
+    const params = [];
+    let idx = 1;
+
+    if (status) {
+      updates.push(`status = $${idx++}`);
+      params.push(status);
+      if (status === 'completed') {
+        updates.push('completed_at = NOW()');
+      }
+    }
+    if (summary) {
+      updates.push(`summary = $${idx++}`);
+      params.push(summary);
+    }
+    if (top_recommendations) {
+      updates.push(`top_recommendations = $${idx++}`);
+      params.push(JSON.stringify(top_recommendations));
+    }
+    if (action_items) {
+      updates.push(`action_items = $${idx++}`);
+      params.push(JSON.stringify(action_items));
+    }
+    if (duration_minutes) {
+      updates.push(`duration_minutes = $${idx++}`);
+      params.push(duration_minutes);
+    }
+
+    params.push(meetingId);
+    const result = await pool.query(
+      `UPDATE council_meetings SET ${updates.join(', ')} WHERE meeting_id = $${idx} RETURNING *`,
+      params
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    res.json({ ok: true, meeting: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] PATCH /council-meetings/:id error:', err.message);
+    res.status(500).json({ error: 'Failed to update meeting' });
+  }
+});
+
+// 44. POST /api/ai/council-meetings/:meetingId/posts/:postId/react — David reacts to a post
+router.post('/council-meetings/:meetingId/posts/:postId/react', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { postId } = req.params;
+    const { reaction } = req.body; // 'agree', 'disagree', 'interesting', 'implement'
+
+    if (!reaction) {
+      return res.status(400).json({ error: 'reaction is required' });
+    }
+
+    const result = await pool.query(
+      'UPDATE council_meeting_posts SET david_reaction = $1 WHERE id = $2 RETURNING *',
+      [reaction, postId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Post not found' });
+    }
+
+    // If reaction is 'implement', auto-create an improvement proposal
+    if (reaction === 'implement') {
+      const post = result.rows[0];
+      const proposal = await pool.query(
+        `INSERT INTO improvement_proposals
+           (source_agent, about_agent, category, observation, proposal,
+            confidence, status, meeting_id, david_decision, david_decision_at)
+         VALUES ($1, 'system', 'other', $2, $3, 'high', 'accepted', $4, 'approved', NOW())
+         RETURNING id`,
+        [
+          post.author,
+          `David marked this Council of Minds post for implementation`,
+          post.body.substring(0, 500),
+          post.meeting_id,
+        ]
+      );
+
+      // Link proposal back to the post
+      await pool.query(
+        'UPDATE council_meeting_posts SET has_proposal = true, proposal_id = $1 WHERE id = $2',
+        [proposal.rows[0].id, postId]
+      );
+    }
+
+    res.json({ ok: true, post: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /react error:', err.message);
+    res.status(500).json({ error: 'Failed to react to post' });
+  }
+});
+
+// ============================================================
+// IMPROVEMENT PROPOSALS — David approve/disapprove
+// ============================================================
+
+// 45. PATCH /api/ai/proposals/:id/david-decision — David approves or rejects a proposal
+router.patch('/proposals/:id/david-decision', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const { decision, notes } = req.body; // 'approved', 'rejected', 'needs_discussion'
+
+    if (!decision) {
+      return res.status(400).json({ error: 'decision is required (approved, rejected, needs_discussion)' });
+    }
+
+    // Update the proposal with David's decision
+    const result = await pool.query(
+      `UPDATE improvement_proposals
+       SET david_decision = $1,
+           david_decision_at = NOW(),
+           david_notes = $2,
+           status = CASE
+             WHEN $1 = 'approved' THEN 'accepted'
+             WHEN $1 = 'rejected' THEN 'rejected'
+             ELSE status
+           END,
+           reviewed_by = COALESCE(reviewed_by, 'david'),
+           reviewed_at = COALESCE(reviewed_at, NOW()),
+           updated_at = NOW()
+       WHERE id = $3
+       RETURNING *`,
+      [decision, notes || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Proposal not found' });
+    }
+
+    // If approved, push a directive to Houston Command to implement
+    if (decision === 'approved') {
+      const proposal = result.rows[0];
+      await pool.query(
+        `INSERT INTO directives
+           (title, body, priority, scope, source, status)
+         VALUES ($1, $2, 'normal', 'houston_command', 'david', 'active')`,
+        [
+          `Implement approved proposal: ${proposal.category}`,
+          `David approved this improvement proposal. Implement it.\n\nProposal: ${proposal.proposal}\n\nAbout: ${proposal.about_agent || 'system'}\n\nEvidence: ${JSON.stringify(proposal.evidence)}`,
+        ]
+      );
+    }
+
+    res.json({ ok: true, proposal: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] PATCH /proposals/:id/david-decision error:', err.message);
+    res.status(500).json({ error: 'Failed to record David decision' });
+  }
+});
+
+// ============================================================
 // MOUNT FUNCTION — called from server/index.js
 // ============================================================
 

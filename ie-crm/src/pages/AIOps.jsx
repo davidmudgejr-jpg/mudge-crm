@@ -12,6 +12,7 @@ import TerritoryIntel from '../components/ai-ops/detail-views/TerritoryIntel';
 import SystemHealth from '../components/ai-ops/detail-views/SystemHealth';
 import CouncilChat from '../components/ai-ops/detail-views/CouncilChat';
 import ImprovementProposals from '../components/ai-ops/detail-views/ImprovementProposals';
+import CouncilMeetings from '../components/ai-ops/detail-views/CouncilMeetings';
 
 // ─────────────────────────────────────────────────────────────
 // Detail view registry — maps screen/agent IDs to components
@@ -29,6 +30,7 @@ const DETAIL_VIEWS = {
   health:           SystemHealth,
   council:          CouncilChat,
   proposals:        ImprovementProposals,
+  meetings:         CouncilMeetings,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -94,6 +96,7 @@ export default function AIOps() {
         onScreenClick={handleScreenClick}
         onCouncilClick={() => setActiveView('council')}
         onProposalsClick={() => setActiveView('proposals')}
+        onMeetingsClick={() => setActiveView('meetings')}
       />
 
       {/* Live Ticker — bottom bar */}
