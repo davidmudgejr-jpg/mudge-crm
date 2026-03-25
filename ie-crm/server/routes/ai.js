@@ -3160,6 +3160,361 @@ router.get('/air/changes', async (req, res) => {
 });
 
 // ============================================================
+// DEDUP SCANNER — Find and merge duplicate properties
+// ============================================================
+
+// 56. POST /api/ai/dedup/scan — Run dedup scan across all properties
+// Uses multiple signals: normalized_address, city, rba (building SF), property_name
+router.post('/dedup/scan', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    // Find potential duplicates using multiple matching strategies
+
+    // Strategy 1: Exact normalized address match (HIGH confidence)
+    const exactMatches = await pool.query(`
+      SELECT
+        a.property_id AS a_id, a.property_address AS a_addr, a.city AS a_city,
+        a.rba AS a_rba, a.property_name AS a_name,
+        b.property_id AS b_id, b.property_address AS b_addr, b.city AS b_city,
+        b.rba AS b_rba, b.property_name AS b_name
+      FROM properties a
+      JOIN properties b ON a.normalized_address = b.normalized_address
+        AND a.property_id < b.property_id
+      WHERE a.normalized_address IS NOT NULL
+        AND a.normalized_address != ''
+        AND LOWER(COALESCE(a.city,'')) = LOWER(COALESCE(b.city,''))
+    `);
+
+    // Strategy 2: Same street number + similar street name + same city + similar SF (MEDIUM confidence)
+    const fuzzyMatches = await pool.query(`
+      SELECT
+        a.property_id AS a_id, a.property_address AS a_addr, a.city AS a_city,
+        a.rba AS a_rba, a.property_name AS a_name,
+        b.property_id AS b_id, b.property_address AS b_addr, b.city AS b_city,
+        b.rba AS b_rba, b.property_name AS b_name
+      FROM properties a
+      JOIN properties b ON a.property_id < b.property_id
+      WHERE a.property_address IS NOT NULL AND b.property_address IS NOT NULL
+        AND LOWER(COALESCE(a.city,'')) = LOWER(COALESCE(b.city,''))
+        -- Same street number (first token)
+        AND SPLIT_PART(LOWER(a.property_address), ' ', 1) = SPLIT_PART(LOWER(b.property_address), ' ', 1)
+        -- Street number is actually numeric
+        AND SPLIT_PART(LOWER(a.property_address), ' ', 1) ~ '^[0-9]+$'
+        -- Similar building size (within 10%)
+        AND a.rba IS NOT NULL AND b.rba IS NOT NULL AND a.rba > 0
+        AND ABS(a.rba - b.rba) / GREATEST(a.rba, b.rba) < 0.1
+        -- Not already caught by exact match
+        AND (a.normalized_address IS NULL OR b.normalized_address IS NULL
+             OR a.normalized_address != b.normalized_address)
+      LIMIT 200
+    `);
+
+    // Strategy 3: Same property_name + same city (MEDIUM confidence)
+    const nameMatches = await pool.query(`
+      SELECT
+        a.property_id AS a_id, a.property_address AS a_addr, a.city AS a_city,
+        a.rba AS a_rba, a.property_name AS a_name,
+        b.property_id AS b_id, b.property_address AS b_addr, b.city AS b_city,
+        b.rba AS b_rba, b.property_name AS b_name
+      FROM properties a
+      JOIN properties b ON LOWER(a.property_name) = LOWER(b.property_name)
+        AND a.property_id < b.property_id
+      WHERE a.property_name IS NOT NULL AND a.property_name != ''
+        AND LOWER(COALESCE(a.city,'')) = LOWER(COALESCE(b.city,''))
+        AND a.property_address != b.property_address
+      LIMIT 100
+    `);
+
+    // Helper: build property summary with linked record counts
+    async function buildSummary(propId) {
+      const [contacts, leaseComps, saleComps, deals, interactions] = await Promise.all([
+        pool.query('SELECT COUNT(*) FROM property_contacts WHERE property_id = $1', [propId]),
+        pool.query('SELECT COUNT(*) FROM lease_comps WHERE property_id = $1', [propId]),
+        pool.query('SELECT COUNT(*) FROM sale_comps WHERE property_id = $1', [propId]),
+        pool.query('SELECT COUNT(*) FROM property_deals WHERE property_id = $1', [propId]),
+        pool.query('SELECT COUNT(*) FROM interaction_properties WHERE property_id = $1', [propId]),
+      ]);
+      return {
+        contacts: parseInt(contacts.rows[0].count),
+        lease_comps: parseInt(leaseComps.rows[0].count),
+        sale_comps: parseInt(saleComps.rows[0].count),
+        deals: parseInt(deals.rows[0].count),
+        interactions: parseInt(interactions.rows[0].count),
+        total_linked: parseInt(contacts.rows[0].count) + parseInt(leaseComps.rows[0].count) +
+          parseInt(saleComps.rows[0].count) + parseInt(deals.rows[0].count) +
+          parseInt(interactions.rows[0].count),
+      };
+    }
+
+    let created = 0;
+    let skipped = 0;
+
+    // Process all matches
+    const allMatches = [
+      ...exactMatches.rows.map(r => ({ ...r, confidence: 'high', match_type: 'exact_normalized' })),
+      ...fuzzyMatches.rows.map(r => ({ ...r, confidence: 'medium', match_type: 'fuzzy_address_sf' })),
+      ...nameMatches.rows.map(r => ({ ...r, confidence: 'medium', match_type: 'same_name_city' })),
+    ];
+
+    // Deduplicate pairs (same pair might be caught by multiple strategies)
+    const seenPairs = new Set();
+
+    for (const match of allMatches) {
+      const pairKey = [match.a_id, match.b_id].sort().join('|');
+      if (seenPairs.has(pairKey)) { skipped++; continue; }
+      seenPairs.add(pairKey);
+
+      try {
+        // Check if this pair already exists (pending or deferred)
+        const existing = await pool.query(
+          `SELECT id FROM dedup_candidates
+           WHERE (property_a_id = $1 AND property_b_id = $2)
+              OR (property_a_id = $2 AND property_b_id = $1)`,
+          [match.a_id, match.b_id]
+        );
+
+        if (existing.rows.length > 0) { skipped++; continue; }
+
+        // Build summaries
+        const [summA, summB] = await Promise.all([
+          buildSummary(match.a_id),
+          buildSummary(match.b_id),
+        ]);
+
+        const reason = match.match_type === 'exact_normalized'
+          ? `Both normalize to same address in ${match.a_city || 'same city'}`
+          : match.match_type === 'fuzzy_address_sf'
+          ? `Same street number, same city, similar SF (${match.a_rba} vs ${match.b_rba})`
+          : `Same property name "${match.a_name}" in ${match.a_city}`;
+
+        await pool.query(
+          `INSERT INTO dedup_candidates
+             (property_a_id, property_b_id, confidence, match_type, match_reason,
+              property_a_summary, property_b_summary, scan_date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE)
+           ON CONFLICT (property_a_id, property_b_id) DO NOTHING`,
+          [
+            match.a_id, match.b_id, match.confidence, match.match_type, reason,
+            JSON.stringify({ address: match.a_addr, city: match.a_city, rba: match.a_rba, name: match.a_name, ...summA }),
+            JSON.stringify({ address: match.b_addr, city: match.b_city, rba: match.b_rba, name: match.b_name, ...summB }),
+          ]
+        );
+        created++;
+      } catch (err) {
+        console.error(`[Dedup] Error processing pair ${match.a_id}/${match.b_id}:`, err.message);
+      }
+    }
+
+    res.json({
+      ok: true,
+      scan_date: new Date().toISOString().slice(0, 10),
+      candidates_found: created,
+      duplicates_skipped: skipped,
+      strategies: {
+        exact_normalized: exactMatches.rows.length,
+        fuzzy_address_sf: fuzzyMatches.rows.length,
+        same_name_city: nameMatches.rows.length,
+      },
+    });
+  } catch (err) {
+    console.error('[AI API] POST /dedup/scan error:', err.message);
+    res.status(500).json({ error: 'Failed to run dedup scan' });
+  }
+});
+
+// 57. GET /api/ai/dedup/candidates — List dedup candidates for review
+router.get('/dedup/candidates', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { status = 'pending', confidence, limit = 50 } = req.query;
+
+    let query = 'SELECT * FROM dedup_candidates WHERE 1=1';
+    const params = [];
+    let idx = 1;
+
+    if (status !== 'all') {
+      query += ` AND status = $${idx++}`;
+      params.push(status);
+    }
+    if (confidence) {
+      query += ` AND confidence = $${idx++}`;
+      params.push(confidence);
+    }
+
+    query += ` ORDER BY confidence = 'high' DESC, created_at DESC LIMIT $${idx++}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+    res.json({ candidates: result.rows, count: result.rows.length });
+  } catch (err) {
+    console.error('[AI API] GET /dedup/candidates error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch dedup candidates' });
+  }
+});
+
+// 58. POST /api/ai/dedup/merge/:id — Merge two properties
+// Moves all linked records from loser → winner, then deletes loser
+router.post('/dedup/merge/:id', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const { direction, notes } = req.body; // 'a_absorbs_b' or 'b_absorbs_a'
+
+    if (!direction || !['a_absorbs_b', 'b_absorbs_a'].includes(direction)) {
+      return res.status(400).json({ error: 'direction must be a_absorbs_b or b_absorbs_a' });
+    }
+
+    // Get the candidate
+    const candidate = await pool.query('SELECT * FROM dedup_candidates WHERE id = $1', [id]);
+    if (candidate.rows.length === 0) {
+      return res.status(404).json({ error: 'Dedup candidate not found' });
+    }
+
+    const c = candidate.rows[0];
+    const winnerId = direction === 'a_absorbs_b' ? c.property_a_id : c.property_b_id;
+    const loserId = direction === 'a_absorbs_b' ? c.property_b_id : c.property_a_id;
+
+    // Move all linked records from loser to winner
+    const junctionTables = [
+      { table: 'property_contacts', col: 'property_id' },
+      { table: 'property_deals', col: 'property_id' },
+      { table: 'interaction_properties', col: 'property_id' },
+    ];
+
+    let recordsMoved = 0;
+    for (const { table, col } of junctionTables) {
+      // Delete any existing links that would create duplicates
+      await pool.query(
+        `DELETE FROM ${table} WHERE ${col} = $1 AND contact_id IN (
+           SELECT contact_id FROM ${table} WHERE ${col} = $2
+         )`,
+        [loserId, winnerId]
+      ).catch(() => {}); // Some tables don't have contact_id
+
+      const moved = await pool.query(
+        `UPDATE ${table} SET ${col} = $1 WHERE ${col} = $2`,
+        [winnerId, loserId]
+      );
+      recordsMoved += moved.rowCount;
+    }
+
+    // Move comps
+    const leaseCompsMoved = await pool.query(
+      'UPDATE lease_comps SET property_id = $1 WHERE property_id = $2',
+      [winnerId, loserId]
+    );
+    const saleCompsMoved = await pool.query(
+      'UPDATE sale_comps SET property_id = $1 WHERE property_id = $2',
+      [winnerId, loserId]
+    );
+    recordsMoved += leaseCompsMoved.rowCount + saleCompsMoved.rowCount;
+
+    // Move market_tracking
+    await pool.query(
+      'UPDATE market_tracking SET property_id = $1 WHERE property_id = $2',
+      [winnerId, loserId]
+    );
+
+    // Fill in any empty fields on the winner from the loser
+    const winner = await pool.query('SELECT * FROM properties WHERE property_id = $1', [winnerId]);
+    const loser = await pool.query('SELECT * FROM properties WHERE property_id = $1', [loserId]);
+
+    if (winner.rows.length > 0 && loser.rows.length > 0) {
+      const w = winner.rows[0];
+      const l = loser.rows[0];
+      const fillUpdates = [];
+      const fillParams = [];
+      let fIdx = 1;
+
+      // List of fields to fill if empty on winner
+      const fillFields = ['rba', 'property_name', 'property_type', 'year_built', 'clear_ht',
+        'number_of_loading_docks', 'drive_ins', 'zoning', 'owner_name', 'owner_phone',
+        'owner_entity_type', 'land_sf', 'land_area_ac', 'rent_psf_mo', 'cap_rate',
+        'parking_ratio', 'parcel_number', 'costar_url'];
+
+      for (const field of fillFields) {
+        if ((w[field] == null || w[field] === '') && l[field] != null && l[field] !== '') {
+          fillUpdates.push(`${field} = $${fIdx++}`);
+          fillParams.push(l[field]);
+        }
+      }
+
+      if (fillUpdates.length > 0) {
+        fillParams.push(winnerId);
+        await pool.query(
+          `UPDATE properties SET ${fillUpdates.join(', ')} WHERE property_id = $${fIdx}`,
+          fillParams
+        );
+      }
+    }
+
+    // Delete the loser property
+    await pool.query('DELETE FROM properties WHERE property_id = $1', [loserId]);
+
+    // Update the candidate record
+    await pool.query(
+      `UPDATE dedup_candidates SET
+         status = 'merged', resolved_by = $1, resolved_at = NOW(),
+         merge_direction = $2, merge_notes = $3, updated_at = NOW()
+       WHERE id = $4`,
+      [req.agentName || req.user?.display_name || 'admin', direction, notes || null, id]
+    );
+
+    // Also dismiss any other candidates involving the deleted property
+    await pool.query(
+      `UPDATE dedup_candidates SET status = 'dismissed', merge_notes = 'Auto-dismissed: one property was merged elsewhere'
+       WHERE (property_a_id = $1 OR property_b_id = $1) AND status = 'pending'`,
+      [loserId]
+    );
+
+    res.json({
+      ok: true,
+      winner: winnerId,
+      loser_deleted: loserId,
+      records_moved: recordsMoved,
+      message: `Merged ${loserId} into ${winnerId}. ${recordsMoved} linked records moved.`,
+    });
+  } catch (err) {
+    console.error('[AI API] POST /dedup/merge error:', err.message);
+    res.status(500).json({ error: 'Failed to merge properties' });
+  }
+});
+
+// 59. PATCH /api/ai/dedup/:id — Dismiss or defer a candidate
+router.patch('/dedup/:id', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const { status, notes } = req.body; // 'dismissed' or 'deferred'
+
+    if (!status || !['dismissed', 'deferred'].includes(status)) {
+      return res.status(400).json({ error: 'status must be dismissed or deferred' });
+    }
+
+    const result = await pool.query(
+      `UPDATE dedup_candidates SET
+         status = $1, resolved_by = $2, resolved_at = NOW(),
+         merge_notes = $3, updated_at = NOW()
+       WHERE id = $4 RETURNING *`,
+      [status, req.agentName || req.user?.display_name || 'admin', notes || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Candidate not found' });
+    }
+
+    res.json({ ok: true, candidate: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] PATCH /dedup/:id error:', err.message);
+    res.status(500).json({ error: 'Failed to update candidate' });
+  }
+});
+
+// ============================================================
 // INSTANTLY.AI PROXY — Direct access to Instantly API for agents + dashboard
 // ============================================================
 
