@@ -72,6 +72,7 @@ export default function AIOpsPage3D({
   onCouncilClick,
   onProposalsClick,
   onMeetingsClick,
+  onSchedulesClick,
   apiBaseUrl = '',
 }) {
   const containerRef = useRef(null);
@@ -260,6 +261,24 @@ export default function AIOpsPage3D({
             <path d="M16 3.13a4 4 0 0 1 0 7.75" />
           </svg>
           MEETINGS
+        </button>
+        <button
+          style={{
+            ...proposalsBtnStyle,
+            background: 'rgba(34,197,94,0.15)',
+            border: '1px solid rgba(34,197,94,0.3)',
+            color: '#22c55e',
+          }}
+          onClick={onSchedulesClick}
+          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.05)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
+          title="Agent Schedules"
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          SCHEDULES
         </button>
       </div>
     </div>
