@@ -6,6 +6,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 
 const instantly = require('../services/instantly');
+const { normalizeRecord } = require('../utils/fieldNormalizer');
 
 const router = express.Router();
 
@@ -2789,9 +2790,11 @@ router.post('/air/ingest', async (req, res) => {
     };
 
     // Helper: find or create property by address + city
-    async function findOrCreateProperty(entry) {
-      const addr = (entry.address || '').trim();
-      const city = (entry.city || '').trim();
+    // Uses fieldNormalizer so any source's field names work
+    async function findOrCreateProperty(rawEntry) {
+      const norm = normalizeRecord(rawEntry, 'properties', 'air_sheet');
+      const addr = (rawEntry.address || norm.property_address || '').trim();
+      const city = (rawEntry.city || norm.city || '').trim();
       if (!addr) return null;
 
       // Try to find existing property by address fuzzy match
@@ -2807,13 +2810,15 @@ router.post('/air/ingest', async (req, res) => {
         return existing.rows[0].property_id;
       }
 
-      // Create new property
+      // Create new property using normalized fields
       const newProp = await pool.query(
         `INSERT INTO properties (property_address, city, state, zip, property_type, rba, property_name)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING property_id`,
-        [addr, city, entry.state || 'CA', entry.zip, entry.property_type || 'Industrial',
-         entry.building_sf || entry.sf, entry.property_name]
+        [addr, city, rawEntry.state || 'CA', rawEntry.zip,
+         norm.property_type || rawEntry.property_type || 'Industrial',
+         norm.rba || rawEntry.building_sf || rawEntry.sf,
+         norm.property_name || rawEntry.property_name]
       );
       results.properties_created++;
       return newProp.rows[0].property_id;
