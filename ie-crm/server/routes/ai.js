@@ -2809,11 +2809,11 @@ router.post('/air/ingest', async (req, res) => {
 
       // Create new property
       const newProp = await pool.query(
-        `INSERT INTO properties (property_address, city, state, zip, property_type, building_sf, property_name)
+        `INSERT INTO properties (property_address, city, state, zip, property_type, rba, property_name)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING property_id`,
         [addr, city, entry.state || 'CA', entry.zip, entry.property_type || 'Industrial',
-         entry.building_sf, entry.property_name]
+         entry.building_sf || entry.sf, entry.property_name]
       );
       results.properties_created++;
       return newProp.rows[0].property_id;
@@ -2928,7 +2928,9 @@ router.post('/air/ingest', async (req, res) => {
           await pool.query(
             `UPDATE market_tracking SET
                outcome_type = 'transacted', outcome_date = $1,
-               lease_rate = $2, days_on_market = EXTRACT(DAY FROM ($1::date - first_seen_date))::int
+               lease_rate = $2,
+               days_on_market = CASE WHEN $1 IS NOT NULL AND first_seen_date IS NOT NULL
+                 THEN EXTRACT(DAY FROM ($1::date - first_seen_date))::int ELSE NULL END
              WHERE LOWER(property_address) = LOWER($3)
              AND market_status = 'for_lease' AND outcome_type IS NULL`,
             [comp.sign_date || parsed_date, comp.rate, comp.address]
@@ -2971,7 +2973,8 @@ router.post('/air/ingest', async (req, res) => {
             `UPDATE market_tracking SET
                outcome_type = 'transacted', outcome_date = $1,
                sale_price = $2, sale_price_psf = $3,
-               days_on_market = EXTRACT(DAY FROM ($1::date - first_seen_date))::int
+               days_on_market = CASE WHEN $1 IS NOT NULL AND first_seen_date IS NOT NULL
+                 THEN EXTRACT(DAY FROM ($1::date - first_seen_date))::int ELSE NULL END
              WHERE LOWER(property_address) = LOWER($4)
              AND market_status = 'for_sale' AND outcome_type IS NULL`,
             [comp.sale_date || parsed_date, comp.sale_price, comp.price_psf, comp.address]
