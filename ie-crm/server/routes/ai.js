@@ -5,6 +5,8 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 
+const instantly = require('../services/instantly');
+
 const router = express.Router();
 
 // These get injected via the mount function (getters for lazy access —
@@ -2751,10 +2753,206 @@ router.get('/campaign/analytics', async (req, res) => {
 });
 
 // ============================================================
+// INSTANTLY.AI PROXY — Direct access to Instantly API for agents + dashboard
+// ============================================================
+
+// 39. GET /api/ai/instantly/campaigns — List all Instantly campaigns
+router.get('/instantly/campaigns', async (req, res) => {
+  try {
+    const data = await instantly.listCampaigns(req.query);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] GET /instantly/campaigns error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 40. GET /api/ai/instantly/campaigns/:id — Get campaign details
+router.get('/instantly/campaigns/:id', async (req, res) => {
+  try {
+    const data = await instantly.getCampaign(req.params.id);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] GET /instantly/campaigns/:id error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 41. GET /api/ai/instantly/campaigns/:id/analytics — Campaign analytics
+router.get('/instantly/campaigns/:id/analytics', async (req, res) => {
+  try {
+    const data = await instantly.getCampaignAnalytics(req.params.id);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] GET /instantly/campaigns/:id/analytics error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 42. GET /api/ai/instantly/analytics/overview — Analytics across all campaigns
+router.get('/instantly/analytics/overview', async (req, res) => {
+  try {
+    const data = await instantly.getAnalyticsOverview(req.query);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] GET /instantly/analytics/overview error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 43. POST /api/ai/instantly/leads/bulk-add — Add leads to a campaign
+router.post('/instantly/leads/bulk-add', async (req, res) => {
+  try {
+    const data = await instantly.bulkAddLeads(req.body);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] POST /instantly/leads/bulk-add error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 44. GET /api/ai/instantly/accounts — List email accounts (the 12 senders)
+router.get('/instantly/accounts', async (req, res) => {
+  try {
+    const data = await instantly.listAccounts(req.query);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] GET /instantly/accounts error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 45. GET /api/ai/instantly/accounts/:id/test-vitals — Test sender health
+router.get('/instantly/accounts/:id/test-vitals', async (req, res) => {
+  try {
+    const data = await instantly.testAccountVitals(req.params.id);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] GET /instantly/accounts/:id/test-vitals error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 46. POST /api/ai/instantly/campaigns — Create a new campaign
+router.post('/instantly/campaigns', async (req, res) => {
+  try {
+    const data = await instantly.createCampaign(req.body);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] POST /instantly/campaigns error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 47. POST /api/ai/instantly/campaigns/:id/activate — Start a campaign
+router.post('/instantly/campaigns/:id/activate', async (req, res) => {
+  try {
+    const data = await instantly.activateCampaign(req.params.id);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] POST /instantly/campaigns/:id/activate error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 48. POST /api/ai/instantly/campaigns/:id/stop — Pause a campaign
+router.post('/instantly/campaigns/:id/stop', async (req, res) => {
+  try {
+    const data = await instantly.stopCampaign(req.params.id);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] POST /instantly/campaigns/:id/stop error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 49. POST /api/ai/instantly/webhooks — Create an Instantly webhook
+router.post('/instantly/webhooks', async (req, res) => {
+  try {
+    const data = await instantly.createWebhook(req.body);
+    res.json(data);
+  } catch (err) {
+    console.error('[AI API] POST /instantly/webhooks error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// 50. POST /api/ai/instantly/webhook/event — Receive Instantly webhook events
+// This is the INBOUND endpoint that Instantly calls when emails are opened/replied/bounced
+router.post('/instantly/webhook/event', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const event = req.body;
+    const eventType = event.event_type || event.type;
+
+    console.log(`[Instantly Webhook] Event: ${eventType}`, JSON.stringify(event).substring(0, 200));
+
+    // Log the event to outbound_email_queue if we can match it
+    if (event.lead_email) {
+      const updateFields = {};
+      if (eventType === 'email_opened' || eventType === 'open') {
+        updateFields.opened_at = 'NOW()';
+      } else if (eventType === 'email_replied' || eventType === 'reply') {
+        updateFields.replied_at = 'NOW()';
+      } else if (eventType === 'email_bounced' || eventType === 'bounce') {
+        updateFields.bounced_at = 'NOW()';
+      } else if (eventType === 'email_unsubscribed' || eventType === 'unsubscribe') {
+        updateFields.unsubscribed_at = 'NOW()';
+      }
+
+      if (Object.keys(updateFields).length > 0) {
+        // Try to match the email to our outbound queue
+        const setClauses = Object.entries(updateFields)
+          .map(([k, v]) => `${k} = ${v}`)
+          .join(', ');
+        await pool.query(
+          `UPDATE outbound_email_queue SET ${setClauses}
+           WHERE contact_id IN (
+             SELECT contact_id FROM contacts
+             WHERE email = $1 OR email_2 = $1 OR email_3 = $1
+           ) AND ${Object.keys(updateFields)[0]} IS NULL`,
+          [event.lead_email]
+        );
+      }
+
+      // Also log as agent activity
+      await pool.query(
+        `INSERT INTO agent_logs (agent_name, log_type, message, metadata)
+         VALUES ('campaign_manager', 'email_event', $1, $2)`,
+        [
+          `${eventType}: ${event.lead_email}`,
+          JSON.stringify(event),
+        ]
+      );
+    }
+
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[Instantly Webhook] Error:', err.message);
+    res.status(500).json({ error: 'Failed to process webhook event' });
+  }
+});
+
+// 51. GET /api/ai/instantly/workspace — Get workspace/plan info
+router.get('/instantly/workspace', async (req, res) => {
+  try {
+    const [workspace, plan] = await Promise.all([
+      instantly.getWorkspace(),
+      instantly.getPlan().catch(() => null),
+    ]);
+    res.json({ workspace, plan });
+  } catch (err) {
+    console.error('[AI API] GET /instantly/workspace error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // IMPROVEMENT PROPOSALS — Tier 2/Tier 1 improvement workflow
 // ============================================================
 
-// 29. POST /api/ai/proposals — Submit an improvement proposal
+// 52. POST /api/ai/proposals — Submit an improvement proposal
 // Called by Ralph GPT/Gemini or Houston Command when they spot an improvement opportunity
 router.post('/proposals', async (req, res) => {
   const pool = dbPool(res);
