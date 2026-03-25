@@ -3160,6 +3160,206 @@ router.get('/air/changes', async (req, res) => {
 });
 
 // ============================================================
+// ============================================================
+// BRAIN SESSIONS — Three-way team meetings (David + Houston + Claude Code)
+// ============================================================
+
+// 60. POST /api/ai/brain-session/start — Start a new brain session
+router.post('/brain-session/start', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { topic } = req.body;
+    if (!topic) {
+      return res.status(400).json({ error: 'topic is required' });
+    }
+
+    const dateStr = new Date().toISOString().slice(0, 10);
+    // Count existing sessions today
+    const count = await pool.query(
+      "SELECT COUNT(*) FROM council_meetings WHERE meeting_id LIKE $1",
+      [`session-${dateStr}%`]
+    );
+    const seqNum = parseInt(count.rows[0].count) + 1;
+    const meetingId = `session-${dateStr}-${seqNum}`;
+
+    const result = await pool.query(
+      `INSERT INTO council_meetings
+         (meeting_id, title, topic, status, meeting_type, participants, started_at)
+       VALUES ($1, $2, $3, 'in_progress', 'team_session', $4, NOW())
+       RETURNING *`,
+      [
+        meetingId,
+        `Team Session — ${new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric' })} — ${topic}`,
+        topic,
+        '{david,houston_command,claude_code}',
+      ]
+    );
+
+    res.json({ ok: true, meeting: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /brain-session/start error:', err.message);
+    res.status(500).json({ error: 'Failed to start brain session' });
+  }
+});
+
+// 61. POST /api/ai/brain-session/post — Post a message to the active brain session
+router.post('/brain-session/post', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { meeting_id, author, body, round = 'discussion' } = req.body;
+
+    if (!meeting_id || !author || !body) {
+      return res.status(400).json({ error: 'meeting_id, author, and body are required' });
+    }
+
+    const displayNames = {
+      david: 'David Mudge Jr',
+      houston_command: 'Houston Command',
+      claude_code: 'Claude Code',
+      houston_sonnet: 'Houston Sonnet',
+    };
+    const modelNames = {
+      houston_command: 'Opus 4.6',
+      claude_code: 'Opus 4.6',
+      houston_sonnet: 'Sonnet 4.6',
+      ralph_gpt: 'GPT-4',
+      ralph_gemini: 'Gemini Pro',
+    };
+
+    const result = await pool.query(
+      `INSERT INTO council_meeting_posts
+         (meeting_id, author, author_display_name, author_model, round, body, word_count)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        meeting_id,
+        author,
+        displayNames[author] || author,
+        modelNames[author] || null,
+        round,
+        body,
+        body.split(/\s+/).length,
+      ]
+    );
+
+    // Emit via socket for real-time updates in the UI
+    const io = getIo();
+    if (io) {
+      io.to('council').emit('council:meeting:post', {
+        meeting_id,
+        post: result.rows[0],
+      });
+    }
+
+    res.json({ ok: true, post: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] POST /brain-session/post error:', err.message);
+    res.status(500).json({ error: 'Failed to post to brain session' });
+  }
+});
+
+// 62. POST /api/ai/brain-session/end — End the brain session with a summary
+router.post('/brain-session/end', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { meeting_id, summary, action_items = [], decisions = [] } = req.body;
+
+    if (!meeting_id) {
+      return res.status(400).json({ error: 'meeting_id is required' });
+    }
+
+    // Post the summary as the final message
+    if (summary) {
+      await pool.query(
+        `INSERT INTO council_meeting_posts
+           (meeting_id, author, author_display_name, author_model, round, body, word_count)
+         VALUES ($1, 'claude_code', 'Claude Code', 'Opus 4.6', 'summary', $2, $3)`,
+        [meeting_id, summary, summary.split(/\s+/).length]
+      );
+    }
+
+    // Calculate duration
+    const meeting = await pool.query(
+      'SELECT started_at FROM council_meetings WHERE meeting_id = $1',
+      [meeting_id]
+    );
+    const durationMin = meeting.rows.length > 0
+      ? Math.round((Date.now() - new Date(meeting.rows[0].started_at).getTime()) / 60000)
+      : null;
+
+    // Count posts
+    const postCount = await pool.query(
+      'SELECT COUNT(*) FROM council_meeting_posts WHERE meeting_id = $1',
+      [meeting_id]
+    );
+
+    // Update the meeting record
+    const result = await pool.query(
+      `UPDATE council_meetings SET
+         status = 'completed',
+         completed_at = NOW(),
+         summary = $1,
+         action_items = $2,
+         top_recommendations = $3,
+         duration_minutes = $4,
+         updated_at = NOW()
+       WHERE meeting_id = $5
+       RETURNING *`,
+      [
+        summary,
+        JSON.stringify(action_items),
+        JSON.stringify(decisions),
+        durationMin,
+        meeting_id,
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    res.json({
+      ok: true,
+      meeting: result.rows[0],
+      stats: {
+        duration_minutes: durationMin,
+        total_posts: parseInt(postCount.rows[0].count),
+        action_items: action_items.length,
+        decisions: decisions.length,
+      },
+    });
+  } catch (err) {
+    console.error('[AI API] POST /brain-session/end error:', err.message);
+    res.status(500).json({ error: 'Failed to end brain session' });
+  }
+});
+
+// 63. GET /api/ai/brain-session/active — Get the currently active brain session
+router.get('/brain-session/active', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const result = await pool.query(
+      `SELECT m.*,
+         (SELECT COUNT(*) FROM council_meeting_posts WHERE meeting_id = m.meeting_id) AS post_count
+       FROM council_meetings m
+       WHERE m.status = 'in_progress' AND m.meeting_type = 'team_session'
+       ORDER BY m.started_at DESC LIMIT 1`
+    );
+    if (result.rows.length === 0) {
+      return res.json({ active: false, meeting: null });
+    }
+    res.json({ active: true, meeting: result.rows[0] });
+  } catch (err) {
+    console.error('[AI API] GET /brain-session/active error:', err.message);
+    res.status(500).json({ error: 'Failed to check active session' });
+  }
+});
+
+// ============================================================
 // DEDUP SCANNER — Find and merge duplicate properties
 // ============================================================
 
