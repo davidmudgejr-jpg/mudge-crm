@@ -1,0 +1,251 @@
+# Schema Column Audit
+
+Generated: 2026-03-27T15:28:38.660Z
+
+## Scope
+
+- Migrations processed: 36
+- Tables discovered from migrations: 60
+- Code files scanned for SQL template literals: 187
+- Potential invalid qualified column references: 741
+
+## Summary
+
+- Unknown table references: 235
+- Unknown column references: 506
+
+### Top files by finding count
+
+- `src/api/database.js`: 397
+- `server/routes/ai.js`: 119
+- `server/services/chat.js`: 105
+- `server/services/houstonRAG.js`: 31
+- `src/pages/ContactDetail.jsx`: 19
+- `server/utils/airtableContactEngine.js`: 18
+- `scripts/audit-links.js`: 11
+- `server/utils/airtableCompanyEngine.js`: 10
+- `server/utils/airtablePropertyEngine.js`: 9
+- `server/utils/leaseCompEngine.js`: 8
+
+### Top resolved tables by finding count
+
+- `properties`: 159
+- `contacts`: 105
+- `interactions`: 96
+- `deals`: 76
+- `companies`: 49
+- `contact_companies`: 30
+- `interaction_contacts`: 28
+- `property_contacts`: 24
+- `deal_properties`: 22
+- `interaction_deals`: 20
+
+## Findings (first 200)
+
+- **unknown_table**: `c.agent_count` in `server/index.js:1655` (resolved table: `convergence`).
+- **unknown_table**: `c.signal_count` in `server/index.js:1655` (resolved table: `convergence`).
+- **unknown_table**: `c.avg_confidence` in `server/index.js:1655` (resolved table: `convergence`).
+- **unknown_table**: `cc.contact_id` in `server/routes/ai.js:149` (resolved table: `contact_companies`).
+- **unknown_column**: `c.company_id` in `server/routes/ai.js:149` (resolved table: `companies`).
+- **unknown_table**: `cc.company_id` in `server/routes/ai.js:149` (resolved table: `contact_companies`).
+- **unknown_column**: `c.company_name` in `server/routes/ai.js:149` (resolved table: `companies`).
+- **unknown_column**: `p.property_address` in `server/routes/ai.js:327` (resolved table: `properties`).
+- **unknown_column**: `p.city` in `server/routes/ai.js:327` (resolved table: `properties`).
+- **unknown_column**: `p.property_id` in `server/routes/ai.js:327` (resolved table: `properties`).
+- **unknown_column**: `p.property_address` in `server/routes/ai.js:340` (resolved table: `properties`).
+- **unknown_column**: `p.city` in `server/routes/ai.js:340` (resolved table: `properties`).
+- **unknown_column**: `p.property_id` in `server/routes/ai.js:340` (resolved table: `properties`).
+- **unknown_column**: `d.deal_id` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.deal_name` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.deal_type` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.status` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.sf` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.rate` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.price` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.close_date` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.priority_deal` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `p.property_address` in `server/routes/ai.js:386` (resolved table: `properties`).
+- **unknown_column**: `p.property_id` in `server/routes/ai.js:386` (resolved table: `properties`).
+- **unknown_table**: `pd.property_id` in `server/routes/ai.js:386` (resolved table: `deal_properties`).
+- **unknown_table**: `pd.deal_id` in `server/routes/ai.js:386` (resolved table: `deal_properties`).
+- **unknown_column**: `d.deal_id` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `c.full_name` in `server/routes/ai.js:386` (resolved table: `contacts`).
+- **unknown_column**: `c.contact_id` in `server/routes/ai.js:386` (resolved table: `contacts`).
+- **unknown_table**: `dc.contact_id` in `server/routes/ai.js:386` (resolved table: `deal_contacts`).
+- **unknown_table**: `dc.deal_id` in `server/routes/ai.js:386` (resolved table: `deal_contacts`).
+- **unknown_column**: `d.deal_id` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.modified` in `server/routes/ai.js:386` (resolved table: `deals`).
+- **unknown_column**: `d.name` in `server/routes/ai.js:2130` (resolved table: `deals`).
+- **unknown_column**: `d.type` in `server/routes/ai.js:2130` (resolved table: `deals`).
+- **unknown_column**: `d.status` in `server/routes/ai.js:2130` (resolved table: `deals`).
+- **unknown_column**: `d.deal_id` in `server/routes/ai.js:2130` (resolved table: `deals`).
+- **unknown_column**: `a.property_id` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `a.property_address` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `a.city` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `a.rba` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `a.property_name` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `b.property_id` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `b.property_address` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `b.city` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `b.rba` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `b.property_name` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `a.property_id` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `b.property_id` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `a.city` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `b.city` in `server/routes/ai.js:3375` (resolved table: `properties`).
+- **unknown_column**: `a.property_id` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.property_address` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.city` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.rba` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.property_name` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.property_id` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.property_address` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.city` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.rba` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.property_name` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.property_id` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.property_id` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.property_address` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.property_address` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.city` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.city` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.property_address` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.property_address` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.property_address` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.rba` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.rba` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.rba` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.rba` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.rba` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.rba` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `b.rba` in `server/routes/ai.js:3390` (resolved table: `properties`).
+- **unknown_column**: `a.property_id` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.property_address` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.city` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.rba` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.property_name` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `b.property_id` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `b.property_address` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `b.city` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `b.rba` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `b.property_name` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.property_name` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `b.property_name` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.property_id` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `b.property_id` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.property_name` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.property_name` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.city` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `b.city` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `a.property_address` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `b.property_address` in `server/routes/ai.js:3414` (resolved table: `properties`).
+- **unknown_column**: `c.contact_id` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_column**: `c.full_name` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_column**: `c.first_name` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_column**: `c.type` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_column**: `c.email_2` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_column**: `c.phone_1` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_column**: `c.phone_2` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_column**: `c.data_source` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_table**: `t.tpe_score` in `server/routes/ai.js:4794` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `pc.contact_id` in `server/routes/ai.js:4794` (resolved table: `property_contacts`).
+- **unknown_column**: `c.contact_id` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_table**: `t.property_id` in `server/routes/ai.js:4794` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `pc.property_id` in `server/routes/ai.js:4794` (resolved table: `property_contacts`).
+- **unknown_column**: `c.contact_id` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_table**: `t.tpe_score` in `server/routes/ai.js:4794` (resolved table: `property_tpe_scores`).
+- **unknown_column**: `c.updated_at` in `server/routes/ai.js:4794` (resolved table: `contacts`).
+- **unknown_column**: `vr.research_trail` in `server/routes/ai.js:5192` (resolved table: `verification_requests`).
+- **unknown_column**: `c.full_name` in `server/routes/ai.js:5192` (resolved table: `contacts`).
+- **unknown_column**: `c.first_name` in `server/routes/ai.js:5192` (resolved table: `contacts`).
+- **unknown_column**: `c.type` in `server/routes/ai.js:5192` (resolved table: `contacts`).
+- **unknown_column**: `c.phone_1` in `server/routes/ai.js:5192` (resolved table: `contacts`).
+- **unknown_column**: `p.address` in `server/routes/ai.js:5192` (resolved table: `properties`).
+- **unknown_column**: `p.city` in `server/routes/ai.js:5192` (resolved table: `properties`).
+- **unknown_column**: `c.contact_id` in `server/routes/ai.js:5192` (resolved table: `contacts`).
+- **unknown_column**: `p.id` in `server/routes/ai.js:5192` (resolved table: `properties`).
+- **unknown_column**: `c.full_name` in `server/routes/verification.js:145` (resolved table: `contacts`).
+- **unknown_column**: `c.first_name` in `server/routes/verification.js:145` (resolved table: `contacts`).
+- **unknown_column**: `c.type` in `server/routes/verification.js:145` (resolved table: `contacts`).
+- **unknown_column**: `c.phone_1` in `server/routes/verification.js:145` (resolved table: `contacts`).
+- **unknown_column**: `c.data_source` in `server/routes/verification.js:145` (resolved table: `contacts`).
+- **unknown_column**: `c.contact_id` in `server/routes/verification.js:145` (resolved table: `contacts`).
+- **unknown_column**: `p.property_address` in `server/services/chat.js:982` (resolved table: `properties`).
+- **unknown_column**: `p.city` in `server/services/chat.js:982` (resolved table: `properties`).
+- **unknown_table**: `t.final_score` in `server/services/chat.js:982` (resolved table: `property_tpe_scores`).
+- **unknown_column**: `p.property_id` in `server/services/chat.js:982` (resolved table: `properties`).
+- **unknown_table**: `t.property_id` in `server/services/chat.js:982` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `t.final_score` in `server/services/chat.js:982` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `t.final_score` in `server/services/chat.js:982` (resolved table: `property_tpe_scores`).
+- **unknown_column**: `d.deal_name` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_column**: `d.status` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_column**: `d.deal_type` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_column**: `d.close_date` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_column**: `d.sf` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_column**: `d.rate` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_table**: `df.team_gross_computed` in `server/services/chat.js:1439` (resolved table: `deal_formulas`).
+- **unknown_table**: `df.jr_gross_computed` in `server/services/chat.js:1439` (resolved table: `deal_formulas`).
+- **unknown_column**: `d.deal_id` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_table**: `df.deal_id` in `server/services/chat.js:1439` (resolved table: `deal_formulas`).
+- **unknown_column**: `d.deal_name` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_column**: `d.notes` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_column**: `d.close_date` in `server/services/chat.js:1439` (resolved table: `deals`).
+- **unknown_column**: `p.property_address` in `server/services/chat.js:1515` (resolved table: `properties`).
+- **unknown_column**: `p.city` in `server/services/chat.js:1515` (resolved table: `properties`).
+- **unknown_column**: `p.property_id` in `server/services/chat.js:1515` (resolved table: `properties`).
+- **unknown_column**: `p.city` in `server/services/chat.js:1515` (resolved table: `properties`).
+- **unknown_column**: `c.full_name` in `server/services/chat.js:1588` (resolved table: `contacts`).
+- **unknown_column**: `c.title` in `server/services/chat.js:1588` (resolved table: `contacts`).
+- **unknown_column**: `c.phone_1` in `server/services/chat.js:1588` (resolved table: `contacts`).
+- **unknown_column**: `c.type` in `server/services/chat.js:1588` (resolved table: `contacts`).
+- **unknown_column**: `p.property_address` in `server/services/chat.js:1588` (resolved table: `properties`).
+- **unknown_column**: `c.contact_id` in `server/services/chat.js:1588` (resolved table: `contacts`).
+- **unknown_table**: `pc.contact_id` in `server/services/chat.js:1588` (resolved table: `property_contacts`).
+- **unknown_column**: `p.property_id` in `server/services/chat.js:1588` (resolved table: `properties`).
+- **unknown_table**: `pc.property_id` in `server/services/chat.js:1588` (resolved table: `property_contacts`).
+- **unknown_table**: `pc.property_id` in `server/services/chat.js:1588` (resolved table: `property_contacts`).
+- **unknown_column**: `d.deal_name` in `server/services/chat.js:1619` (resolved table: `deals`).
+- **unknown_column**: `d.status` in `server/services/chat.js:1619` (resolved table: `deals`).
+- **unknown_column**: `d.deal_type` in `server/services/chat.js:1619` (resolved table: `deals`).
+- **unknown_column**: `d.sf` in `server/services/chat.js:1619` (resolved table: `deals`).
+- **unknown_column**: `d.asking_rate` in `server/services/chat.js:1619` (resolved table: `deals`).
+- **unknown_column**: `p.property_address` in `server/services/chat.js:1619` (resolved table: `properties`).
+- **unknown_column**: `d.deal_id` in `server/services/chat.js:1619` (resolved table: `deals`).
+- **unknown_table**: `dp.deal_id` in `server/services/chat.js:1619` (resolved table: `deal_properties`).
+- **unknown_column**: `p.property_id` in `server/services/chat.js:1619` (resolved table: `properties`).
+- **unknown_table**: `dp.property_id` in `server/services/chat.js:1619` (resolved table: `deal_properties`).
+- **unknown_table**: `dp.property_id` in `server/services/chat.js:1619` (resolved table: `deal_properties`).
+- **unknown_column**: `i.type` in `server/services/chat.js:1649` (resolved table: `interactions`).
+- **unknown_column**: `i.date` in `server/services/chat.js:1649` (resolved table: `interactions`).
+- **unknown_column**: `i.notes` in `server/services/chat.js:1649` (resolved table: `interactions`).
+- **unknown_column**: `p.property_address` in `server/services/chat.js:1649` (resolved table: `properties`).
+- **unknown_column**: `i.interaction_id` in `server/services/chat.js:1649` (resolved table: `interactions`).
+- **unknown_table**: `ip.interaction_id` in `server/services/chat.js:1649` (resolved table: `interaction_properties`).
+- **unknown_column**: `p.property_id` in `server/services/chat.js:1649` (resolved table: `properties`).
+- **unknown_table**: `ip.property_id` in `server/services/chat.js:1649` (resolved table: `interaction_properties`).
+- **unknown_table**: `ip.property_id` in `server/services/chat.js:1649` (resolved table: `interaction_properties`).
+- **unknown_column**: `i.date` in `server/services/chat.js:1649` (resolved table: `interactions`).
+- **unknown_table**: `ts.tpe_score` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `ts.lease_score` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `ts.ownership_score` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `ts.age_score` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `ts.growth_score` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `ts.stress_score` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `ts.tpe_tier` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `ts.blended_priority` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `ts.address` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_table**: `ts.property_id` in `server/services/chat.js:1674` (resolved table: `property_tpe_scores`).
+- **unknown_column**: `p.property_address` in `server/services/chat.js:1701` (resolved table: `properties`).
+- **unknown_column**: `p.city` in `server/services/chat.js:1701` (resolved table: `properties`).
+- **unknown_column**: `p.property_type` in `server/services/chat.js:1701` (resolved table: `properties`).
+- **unknown_column**: `p.rba` in `server/services/chat.js:1701` (resolved table: `properties`).
+- **unknown_column**: `c.full_name` in `server/services/chat.js:1701` (resolved table: `contacts`).
+- **unknown_column**: `p.property_id` in `server/services/chat.js:1701` (resolved table: `properties`).
+- **unknown_table**: `pc.property_id` in `server/services/chat.js:1701` (resolved table: `property_contacts`).
+
+_Showing 200 of 741 findings. Full list is in `docs/schema-column-audit.json`._
+
+## Notes
+
+- This audit is static and regex-based; dynamic SQL string assembly may evade detection.
+- False positives are possible in CTE-heavy SQL where aliases shadow table names unexpectedly.
