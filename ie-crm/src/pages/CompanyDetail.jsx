@@ -76,7 +76,7 @@ export default function CompanyDetail({ companyId, id, onClose, onSave, onRefres
   const contactRecords = linkedContacts.map((c) => ({
     id: c.contact_id,
     label: `${c.full_name}${c.type ? ` (${c.type})` : ''}`,
-    secondary: c.email,
+    secondary: c.email_1,
   }));
 
   const propertyRecords = linkedProperties.map((p) => ({

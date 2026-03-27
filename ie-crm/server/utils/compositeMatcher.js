@@ -209,7 +209,7 @@ function formatCompanyCandidate(c) {
  * @param {object[]} contacts - All contacts from DB
  */
 function matchContact(row, contacts) {
-  const email = (row.email || '').toLowerCase().trim();
+  const email = (row.email_1 || row.email || '').toLowerCase().trim();
   const name = (row.full_name || '').toLowerCase().trim();
 
   if (!email && !name) return { match: null, candidates: [], level: 'no_data' };
@@ -217,7 +217,7 @@ function matchContact(row, contacts) {
   // Match by email first (most unique)
   if (email) {
     const emailMatches = contacts.filter(c =>
-      (c.email || '').toLowerCase().trim() === email ||
+      (c.email_1 || '').toLowerCase().trim() === email ||
       (c.email_2 || '').toLowerCase().trim() === email ||
       (c.email_3 || '').toLowerCase().trim() === email
     );
@@ -270,7 +270,7 @@ function formatContactCandidate(c) {
   return {
     id: c.contact_id || c.id,
     name: c.full_name,
-    email: c.email,
+    email: c.email_1,
     company: c.company_name || null,
   };
 }
@@ -289,7 +289,7 @@ const TABLE_SIGNATURES = {
     moderate: ['sf', 'land_sf', 'property_type'],
   },
   contacts: {
-    strong: ['full_name', 'first_name', 'email', 'phone', 'phone_1', 'linkedin', 'title', 'born'],
+    strong: ['full_name', 'first_name', 'email_1', 'phone', 'phone_1', 'linkedin', 'title', 'date_of_birth'],
     moderate: ['home_address', 'work_address', 'tags', 'follow_up', 'last_contacted'],
   },
   properties: {

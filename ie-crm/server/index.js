@@ -13,6 +13,7 @@ const { Server: SocketServer } = require('socket.io');
 const multer = require('multer');
 const { initChat, registerChatRoutes, triggerCouncilHoustonResponse } = require('./services/chat');
 const { mountAiRoutes } = require('./routes/ai');
+const { mountVerificationRoutes } = require('./routes/verification');
 
 // Load env
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
@@ -274,6 +275,9 @@ mountAiRoutes(app, {
   getIo: () => io,
   getCouncilResponder: () => triggerCouncilHoustonResponse,
 });
+
+// Mount Verification Queue routes BEFORE requireAuth — has its own dual-auth (JWT or X-Agent-Key)
+mountVerificationRoutes(app, { getPool: () => pool, requireAuth, optionalAuth });
 
 // Protect all API routes below this line (except Houston completions which use optionalAuth)
 app.use('/api', requireAuth);
@@ -800,16 +804,23 @@ const IMPORT_COLS = {
     'notes', 'overflow',
   ]),
   contacts: new Set([
-    'full_name', 'first_name', 'type', 'title', 'email', 'email_2', 'email_3',
+    'full_name', 'first_name', 'type', 'title', 'email_1', 'email_2', 'email_3',
     'phone_1', 'phone_2', 'phone_3', 'phone_hot', 'email_hot', 'email_kickback',
     'home_address', 'work_address', 'work_city', 'work_state', 'work_zip',
-    'born', 'age', 'client_level', 'active_need', 'notes', 'linkedin',
+    'date_of_birth', 'client_level', 'active_need', 'notes', 'linkedin',
     'follow_up', 'last_contacted', 'data_source', 'tags', 'airtable_id', 'overflow',
     'white_pages_url', 'been_verified_url', 'zoom_info_url',
     'property_type_interest', 'lease_months_left', 'tenant_space_fit',
-    'tenant_ownership_intent', 'business_trajectory', 'last_call_outcome',
+    'tenant_ownership_intent', 'business_trajectory', 'last_call_result',
     'follow_up_behavior', 'decision_authority', 'price_cost_awareness',
     'frustration_signals', 'exit_trigger_events',
+    'owner_name_verified', 'email_1_confidence', 'email_2_confidence',
+    'email_1_source', 'email_2_source', 'email_1_verified', 'email_2_verified',
+    'phone_1_type', 'phone_2_type', 'phone_1_verified', 'phone_2_verified',
+    'phone_1_source', 'phone_2_source', 'enrichment_source_trail',
+    'campaign_ready', 'enriched_by', 'enrichment_notes', 'enrichment_decay_check',
+    'last_email_sent', 'last_email_opened', 'last_email_replied', 'email_bounce_count',
+    'last_text_sent', 'last_text_replied', 'last_call_attempted', 'outreach_stage',
   ]),
   companies: new Set([
     'company_name', 'company_type', 'industry_type', 'website', 'sf', 'employees',
@@ -946,7 +957,7 @@ app.post('/api/import/preview', async (req, res) => {
       if (matchCompanies && row.tenant_name) {
         result.matches.company = matchCompany(row.tenant_name || row.company_name, companies, row.city);
       }
-      if (matchContacts && (row.email || row.full_name)) {
+      if (matchContacts && (row.email_1 || row.email || row.full_name)) {
         result.matches.contact = matchContact(row, contacts);
       }
 
@@ -1544,8 +1555,8 @@ app.post('/api/ai/sandbox/contacts/promote', async (req, res) => {
       if (sandbox.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'No approved sandbox contact with that ID' }); }
       const sc = sandbox.rows[0];
       let existingId = null;
-      if (sc.email) {
-        const existing = await client.query('SELECT contact_id FROM contacts WHERE email = $1', [sc.email]);
+      if (sc.email_1 || sc.email) {
+        const existing = await client.query('SELECT contact_id FROM contacts WHERE email_1 = $1', [sc.email_1 || sc.email]);
         if (existing.rows.length > 0) existingId = existing.rows[0].contact_id;
       }
       let contactId;
@@ -1560,10 +1571,10 @@ app.post('/api/ai/sandbox/contacts/promote', async (req, res) => {
         contactId = existingId;
       } else {
         const insert = await client.query(
-          `INSERT INTO contacts (full_name, first_name, email, email_2, email_3, phone_1, phone_2, phone_3,
+          `INSERT INTO contacts (full_name, first_name, email_1, email_2, email_3, phone_1, phone_2, phone_3,
             home_address, work_address, work_city, work_state, work_zip, title, type, linkedin, data_source)
           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING contact_id`,
-          [sc.full_name, sc.first_name, sc.email, sc.email_2, sc.email_3, sc.phone_1, sc.phone_2, sc.phone_3,
+          [sc.full_name, sc.first_name, sc.email_1 || sc.email, sc.email_2, sc.email_3, sc.phone_1, sc.phone_2, sc.phone_3,
            sc.home_address, sc.work_address, sc.work_city, sc.work_state, sc.work_zip, sc.title, sc.type, sc.linkedin,
            sc.data_source || 'AI Agent: ' + sc.agent_name]
         );

@@ -113,7 +113,7 @@ export default function PropertyDetail({ propertyId, id, onClose, onSave, onRefr
 
   const priorityColors = { Hot: 'text-red-400', Warm: 'text-orange-400', Cold: 'text-blue-400', Dead: 'text-gray-400' };
 
-  const mapContact = (c) => ({ id: c.contact_id, label: c.full_name, secondary: c.email });
+  const mapContact = (c) => ({ id: c.contact_id, label: c.full_name, secondary: c.email_1 });
   const mapCompany = (co) => ({ id: co.company_id, label: co.company_name, secondary: co.city });
 
   // Role-specific filtering

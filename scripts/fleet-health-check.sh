@@ -4,7 +4,7 @@
 # SSHes into the 16GB Mac Mini and checks all systems
 
 SSH_KEY="$HOME/.ssh/houston_mini_16gb"
-MINI_HOST="houstonmudge@192.168.1.229"
+MINI_HOST="houstonmudge@100.64.122.123"
 LOG_DIR="$HOME/Desktop/Claude Custom CRM/logs"
 LOG_FILE="$LOG_DIR/fleet-health-$(date +%Y-%m-%d).log"
 BOT_TOKEN="$(cat "$HOME/.config/iecrm/telegram_bot_token" 2>/dev/null)"
@@ -39,33 +39,46 @@ else
     log "OpenClaw: running"
 fi
 
-# 3. Check Claude CLI process
-CLAUDE_CLI=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_HOST" "ps aux | grep '.local/bin/claude' | grep -v grep | wc -l" 2>/dev/null)
-if [ "$CLAUDE_CLI" -lt 1 ]; then
-    alert "⚠️ Claude CLI not running on 16GB Mini. Houston Command session may have ended."
+# 3. Check OpenClaw session is active (send test message to Telegram bot)
+# Houston Command runs via OpenClaw + setup token (1-year validity), NOT Claude CLI
+# We verify by checking if the openclaw-gateway process has an active session
+OPENCLAW_SESSIONS=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_HOST" "ps aux | grep -E 'node.*openclaw|openclaw' | grep -v grep | wc -l" 2>/dev/null)
+if [ "$OPENCLAW_SESSIONS" -lt 1 ]; then
+    alert "⚠️ No active OpenClaw sessions on 16GB Mini. Houston Command may need restart."
 else
-    log "Claude CLI: running"
+    log "OpenClaw sessions: ${OPENCLAW_SESSIONS} active"
 fi
 
-# 4. Check Claude OAuth token
-TOKEN_MIN=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_HOST" "
-security unlock-keychain -p '    ' ~/Library/Keychains/login.keychain-db 2>/dev/null
-CREDS=\$(security find-generic-password -s 'Claude Code-credentials' -a 'houstonmudge' -w 2>/dev/null)
-if [ -n \"\$CREDS\" ]; then
-    echo \"\$CREDS\" | python3 -c \"import json,sys,time; d=json.load(sys.stdin); exp=d.get('claudeAiOauth',{}).get('expiresAt',0); print(int((exp-time.time()*1000)/60000))\" 2>/dev/null
+# 4. Check setup token exists (1-year token, not OAuth)
+# Note: uses ~ which expands on the REMOTE machine, not $HOME which expands locally
+SETUP_TOKEN=$(ssh -i "$SSH_KEY" -o ConnectTimeout=5 "$MINI_HOST" '
+AUTH_FILE=$(find ~/.openclaw -name "auth-profiles.json" -o -name "credentials.json" -o -name "config.json" 2>/dev/null | head -1)
+if [ -n "$AUTH_FILE" ]; then
+    if grep -q "sk-ant" "$AUTH_FILE" 2>/dev/null; then
+        echo "OK"
+    else
+        echo "MISSING"
+    fi
 else
-    echo 'NO_CREDS'
+    # Check if openclaw-gateway is running and responding (alternative check)
+    if pgrep -f "openclaw-gateway" > /dev/null 2>&1; then
+        echo "GATEWAY_RUNNING"
+    else
+        echo "NO_FILE"
+    fi
 fi
-" 2>/dev/null)
+' 2>/dev/null)
 
-if [ "$TOKEN_MIN" = "NO_CREDS" ]; then
-    alert "🚨 No Claude credentials in keychain on 16GB Mini."
-elif [ "$TOKEN_MIN" -lt 0 ] 2>/dev/null; then
-    alert "🚨 Claude OAuth token EXPIRED (${TOKEN_MIN} min ago). Houston Command is down. Run /login on Mini."
-elif [ "$TOKEN_MIN" -lt 60 ] 2>/dev/null; then
-    alert "⚠️ Claude OAuth token expires in ${TOKEN_MIN} min. Watch for refresh."
+if [ "$SETUP_TOKEN" = "OK" ]; then
+    log "Setup token: present (1-year validity)"
+elif [ "$SETUP_TOKEN" = "GATEWAY_RUNNING" ]; then
+    log "Setup token: config file not found, but OpenClaw gateway is running (likely auth stored elsewhere)"
+elif [ "$SETUP_TOKEN" = "MISSING" ]; then
+    alert "⚠️ OpenClaw config found but no setup token detected. Houston Command may have auth issues."
+elif [ "$SETUP_TOKEN" = "NO_FILE" ]; then
+    alert "🚨 No OpenClaw auth config found on 16GB Mini. Houston Command cannot authenticate."
 else
-    log "Claude token: ${TOKEN_MIN} min remaining"
+    log "Setup token check: $SETUP_TOKEN"
 fi
 
 # 5. Check cron jobs exist

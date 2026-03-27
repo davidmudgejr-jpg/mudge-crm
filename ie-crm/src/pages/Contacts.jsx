@@ -50,7 +50,7 @@ const ALL_COLUMNS = [
     ) : <span className="text-crm-muted">--</span>,
   },
   { key: 'title', label: 'Title', defaultWidth: 140, type: 'text', filterable: true },
-  { key: 'email', label: 'Email', defaultWidth: 180, type: 'text', filterable: true, format: 'email' },
+  { key: 'email_1', label: 'Email', defaultWidth: 180, type: 'text', filterable: true, format: 'email' },
   { key: 'phone_1', label: 'Phone', defaultWidth: 120, type: 'text', filterable: true, format: 'phone' },
   { key: 'client_level', label: 'Level', defaultWidth: 80, type: 'select', filterable: true, format: 'level',
     editType: 'select', editOptions: ['A', 'B', 'C', 'D'],

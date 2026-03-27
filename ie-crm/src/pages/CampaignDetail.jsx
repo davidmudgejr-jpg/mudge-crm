@@ -58,7 +58,7 @@ export default function CampaignDetail({ campaignId, id, onClose, onSave, onRefr
   const contactRecords = linkedContacts.map((c) => ({
     id: c.contact_id,
     label: c.full_name,
-    secondary: c.email,
+    secondary: c.email_1,
   }));
 
   if (loading) {

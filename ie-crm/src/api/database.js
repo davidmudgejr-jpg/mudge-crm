@@ -44,10 +44,10 @@ const ALLOWED_COLS = {
   ]),
   contacts: new Set([
     'contact_id', 'airtable_id', 'full_name', 'first_name', 'type', 'title',
-    'email', 'email_2', 'email_3', 'phone_1', 'phone_2', 'phone_3',
+    'email_1', 'email_2', 'email_3', 'phone_1', 'phone_2', 'phone_3',
     'phone_hot', 'email_hot', 'email_kickback',
     'home_address', 'work_address', 'work_city', 'work_state', 'work_zip',
-    'born', 'age', 'client_level', 'active_need', 'notes', 'linkedin',
+    'date_of_birth', 'age', 'client_level', 'active_need', 'notes', 'linkedin',
     'follow_up', 'last_contacted', 'data_source',
     'white_pages_url', 'been_verified_url', 'zoom_info_url',
     'property_type_interest', 'lease_months_left', 'tenant_space_fit',
@@ -717,7 +717,7 @@ export async function getContactCampaigns(contactId) {
 
 export async function getCampaignContacts(campaignId) {
   return query(
-    `SELECT c.contact_id, c.full_name, c.type, c.phone_1, c.email
+    `SELECT c.contact_id, c.full_name, c.type, c.phone_1, c.email_1
      FROM contacts c
      JOIN campaign_contacts cc ON c.contact_id = cc.contact_id
      WHERE cc.campaign_id = $1
