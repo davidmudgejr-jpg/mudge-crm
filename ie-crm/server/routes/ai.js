@@ -4820,7 +4820,7 @@ router.get('/contacts/enrichment-queue', async (req, res) => {
       GROUP BY c.contact_id
       ORDER BY
         MAX(t.tpe_score) DESC NULLS LAST,
-        c.updated_at DESC
+        c.created_at DESC
       LIMIT $1 OFFSET $2
     `, [limit, offset]);
 
