@@ -66,7 +66,7 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
   const contactRecords = contacts.map((c) => ({
     id: c.contact_id,
     label: c.full_name,
-    secondary: c.email,
+    secondary: c.email_1,
   }));
 
   const propertyRecords = properties.map((p) => ({

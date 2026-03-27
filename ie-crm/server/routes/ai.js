@@ -4766,6 +4766,685 @@ router.patch('/proposals/:id/david-decision', async (req, res) => {
 });
 
 // ============================================================
+// ENRICHMENT PIPELINE — Ralph GPT endpoints
+// ============================================================
+
+/**
+ * GET /api/ai/contacts/enrichment-queue
+ * Returns contacts sorted by TPE × view_score that need enrichment (missing email).
+ * Respects Gold data rule: never returns contacts with data_source='manual' emails.
+ * Query params: limit (default 10), offset (default 0), type ('owner'|'tenant'|'all')
+ */
+router.get('/contacts/enrichment-queue', async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: 'Database not ready' });
+
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 10, 50);
+    const offset = parseInt(req.query.offset) || 0;
+    const contactType = req.query.type || 'all'; // 'owner', 'tenant', 'all'
+
+    let typeFilter = '';
+    if (contactType === 'owner') {
+      typeFilter = `AND c.type = 'owner'`;
+    } else if (contactType === 'tenant') {
+      typeFilter = `AND c.type = 'tenant'`;
+    }
+
+    const result = await pool.query(`
+      SELECT
+        c.contact_id,
+        c.full_name,
+        c.first_name,
+        c.type,
+        c.email_1,
+        c.email_2,
+        c.phone_1,
+        c.phone_2,
+        c.date_of_birth,
+        c.data_source,
+        c.enriched_by,
+        c.enrichment_decay_check,
+        MAX(t.tpe_score) as max_tpe_score
+      FROM contacts c
+      LEFT JOIN property_contacts pc ON pc.contact_id = c.contact_id
+      LEFT JOIN property_tpe_scores t ON t.property_id = pc.property_id
+      WHERE
+        -- Missing email = needs enrichment
+        (c.email_1 IS NULL OR c.email_1 = '')
+        -- Not already being enriched
+        AND c.enriched_by IS NULL
+        -- Not opted out
+        AND COALESCE(c.opted_out, FALSE) = FALSE
+        ${typeFilter}
+      GROUP BY c.contact_id
+      ORDER BY
+        MAX(t.tpe_score) DESC NULLS LAST,
+        c.updated_at DESC
+      LIMIT $1 OFFSET $2
+    `, [limit, offset]);
+
+    // Also get total count for pagination
+    const countResult = await pool.query(`
+      SELECT COUNT(*) as total
+      FROM contacts c
+      WHERE
+        (c.email_1 IS NULL OR c.email_1 = '')
+        AND c.enriched_by IS NULL
+        AND COALESCE(c.opted_out, FALSE) = FALSE
+        ${typeFilter}
+    `);
+
+    res.json({
+      ok: true,
+      contacts: result.rows,
+      total: parseInt(countResult.rows[0].total),
+      limit,
+      offset,
+    });
+  } catch (err) {
+    console.error('[AI API] GET /contacts/enrichment-queue error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch enrichment queue' });
+  }
+});
+
+/**
+ * POST /api/ai/command/enrich-contact
+ * Update a contact's enrichment fields. Enforces Gold data rules:
+ * - If data_source='manual' on existing email_1, enrichment goes to email_2
+ * - Never overwrites Gold data
+ * - Auto-sets enrichment_decay_check based on contact type
+ *
+ * Body: { contact_id, fields: { email_1, email_1_confidence, ... } }
+ */
+router.post('/command/enrich-contact', async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: 'Database not ready' });
+
+  try {
+    const { contact_id, fields } = req.body;
+    if (!contact_id) {
+      return res.status(400).json({ error: 'contact_id is required' });
+    }
+    if (!fields || typeof fields !== 'object' || Object.keys(fields).length === 0) {
+      return res.status(400).json({ error: 'fields object is required' });
+    }
+
+    // Fetch current contact to check Gold data rules
+    const existing = await pool.query(
+      `SELECT contact_id, email_1, data_source, opted_out FROM contacts WHERE contact_id = $1`,
+      [contact_id]
+    );
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+
+    const contact = existing.rows[0];
+
+    // Block enrichment of opted-out contacts
+    if (contact.opted_out) {
+      return res.status(403).json({ error: 'Contact has opted out — cannot enrich' });
+    }
+
+    // Gold data protection: if existing email_1 was manually entered, don't overwrite
+    if (contact.data_source === 'manual' && contact.email_1 && fields.email_1) {
+      // Move enriched email to email_2 instead
+      if (!fields.email_2) {
+        fields.email_2 = fields.email_1;
+        fields.email_2_confidence = fields.email_1_confidence || null;
+        fields.email_2_source = fields.email_1_source || null;
+        fields.email_2_verified = fields.email_1_verified || false;
+      }
+      // Remove email_1 fields — Gold data protected
+      delete fields.email_1;
+      delete fields.email_1_confidence;
+      delete fields.email_1_source;
+      delete fields.email_1_verified;
+    }
+
+    // Whitelist of allowed enrichment fields
+    const ALLOWED_FIELDS = new Set([
+      'email_1', 'email_2',
+      'email_1_confidence', 'email_2_confidence',
+      'email_1_source', 'email_2_source',
+      'email_1_verified', 'email_2_verified',
+      'phone_1', 'phone_2',
+      'phone_1_type', 'phone_2_type',
+      'phone_1_verified', 'phone_2_verified',
+      'phone_1_source', 'phone_2_source',
+      'date_of_birth',
+      'owner_name_verified',
+      'enrichment_source_trail',
+      'enriched_by',
+      'enrichment_notes',
+      'campaign_ready',
+      'company_name',
+      'first_name', 'last_name',
+    ]);
+
+    // Filter to only allowed fields
+    const safeFields = {};
+    for (const [key, value] of Object.entries(fields)) {
+      if (ALLOWED_FIELDS.has(key)) {
+        safeFields[key] = value;
+      }
+    }
+
+    if (Object.keys(safeFields).length === 0) {
+      return res.status(400).json({ error: 'No valid enrichment fields provided' });
+    }
+
+    // Always set enriched_at timestamp
+    safeFields.enriched_at = new Date().toISOString();
+
+    // Build parameterized UPDATE
+    const setClauses = [];
+    const values = [];
+    let paramIndex = 1;
+
+    for (const [key, value] of Object.entries(safeFields)) {
+      setClauses.push(`${key} = $${paramIndex}`);
+      values.push(value);
+      paramIndex++;
+    }
+
+    values.push(contact_id);
+    const updateSQL = `
+      UPDATE contacts
+      SET ${setClauses.join(', ')}
+      WHERE contact_id = $${paramIndex}
+      RETURNING contact_id, email_1, email_2, campaign_ready, enriched_by, enrichment_decay_check
+    `;
+
+    const result = await pool.query(updateSQL, values);
+
+    // Log to agent activity
+    const io = getIo();
+    if (io) {
+      io.emit('agent:enrichment', {
+        agent: req.agentName || 'unknown',
+        contact_id,
+        fields_updated: Object.keys(safeFields),
+        campaign_ready: result.rows[0]?.campaign_ready,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    res.json({
+      ok: true,
+      contact: result.rows[0],
+      gold_data_protected: contact.data_source === 'manual' && contact.email_1 ? true : false,
+      fields_updated: Object.keys(safeFields),
+    });
+  } catch (err) {
+    console.error('[AI API] POST /command/enrich-contact error:', err.message);
+    res.status(500).json({ error: 'Failed to enrich contact', detail: err.message });
+  }
+});
+
+/**
+ * POST /api/ai/command/log-enrichment-result
+ * Ralph logs the result of each lookup attempt (success or failure).
+ * This feeds the self-improvement loop — Houston reviews hit rates and patterns.
+ *
+ * Body: { contact_id, source, action, success, data, error?, notes? }
+ */
+router.post('/command/log-enrichment-result', async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: 'Database not ready' });
+
+  try {
+    const { contact_id, source, action, success, data, error: errorMsg, notes } = req.body;
+
+    if (!contact_id || !source || !action) {
+      return res.status(400).json({
+        error: 'contact_id, source, and action are required',
+      });
+    }
+
+    // Ensure the enrichment_logs table exists (created on first call)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS enrichment_logs (
+        id SERIAL PRIMARY KEY,
+        contact_id UUID REFERENCES contacts(contact_id) ON DELETE SET NULL,
+        agent_name TEXT DEFAULT 'unknown',
+        source TEXT NOT NULL,
+        action TEXT NOT NULL,
+        success BOOLEAN DEFAULT FALSE,
+        data JSONB,
+        error TEXT,
+        notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
+    const result = await pool.query(`
+      INSERT INTO enrichment_logs
+        (contact_id, agent_name, source, action, success, data, error, notes)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id, created_at
+    `, [
+      contact_id,
+      req.agentName || 'unknown',
+      source,     // 'whitepages', 'beenverified', 'hunter.io', 'twilio', 'ca_sos', 'google_maps'
+      action,     // 'lookup', 'verify_email', 'validate_phone', 'domain_search'
+      success,
+      data ? JSON.stringify(data) : null,
+      errorMsg || null,
+      notes || null,
+    ]);
+
+    res.json({
+      ok: true,
+      log_id: result.rows[0].id,
+      created_at: result.rows[0].created_at,
+    });
+  } catch (err) {
+    console.error('[AI API] POST /command/log-enrichment-result error:', err.message);
+    res.status(500).json({ error: 'Failed to log enrichment result' });
+  }
+});
+
+// ============================================================
+// VERIFICATION QUEUE (Human-in-the-Loop)
+// Houston / Ralph create requests → David resolves in CRM
+// ============================================================
+
+/**
+ * POST /api/ai/verification/request
+ * Houston or Ralph creates a new verification request for David.
+ * Body: { contact_id, request_type, request_details, suggested_data, research_trail?, requested_by, priority?, confidence_before? }
+ */
+router.post('/verification/request', async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: 'Database not ready' });
+
+  try {
+    const {
+      contact_id,
+      property_id,
+      request_type,
+      request_details,
+      suggested_data,
+      research_trail,
+      requested_by,
+      priority = 'normal',
+      confidence_before,
+    } = req.body;
+
+    if (!contact_id || !request_type || !request_details || !requested_by) {
+      return res.status(400).json({
+        error: 'contact_id, request_type, request_details, and requested_by are required',
+      });
+    }
+
+    const VALID_TYPES = ['verify_email', 'verify_phone', 'verify_identity', 'check_zoominfo', 'confirm_decision_maker', 'verify_address', 'other'];
+    if (!VALID_TYPES.includes(request_type)) {
+      return res.status(400).json({ error: `request_type must be one of: ${VALID_TYPES.join(', ')}` });
+    }
+
+    const VALID_REQUESTERS = ['ralph_gpt', 'houston_command', 'claude_code'];
+    if (!VALID_REQUESTERS.includes(requested_by)) {
+      return res.status(400).json({ error: `requested_by must be one of: ${VALID_REQUESTERS.join(', ')}` });
+    }
+
+    // Check contact exists and is not opted out
+    const contact = await pool.query(
+      `SELECT contact_id, full_name, opted_out FROM contacts WHERE contact_id = $1`,
+      [contact_id]
+    );
+    if (contact.rows.length === 0) {
+      return res.status(404).json({ error: 'Contact not found' });
+    }
+    if (contact.rows[0].opted_out) {
+      return res.status(403).json({ error: 'Contact has opted out — cannot create verification request' });
+    }
+
+    // Count pending requests for this contact — avoid flooding David
+    const pendingCount = await pool.query(
+      `SELECT COUNT(*) FROM verification_requests WHERE contact_id = $1 AND status IN ('pending', 'in_progress')`,
+      [contact_id]
+    );
+    if (parseInt(pendingCount.rows[0].count) >= 3) {
+      return res.status(409).json({
+        error: 'This contact already has 3 pending verification requests — resolve existing ones first',
+        pending_count: parseInt(pendingCount.rows[0].count),
+      });
+    }
+
+    const result = await pool.query(`
+      INSERT INTO verification_requests
+        (contact_id, property_id, requested_by, request_type, request_details,
+         suggested_data, research_trail, priority, confidence_before)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      RETURNING id, contact_id, status, created_at, expires_at
+    `, [
+      contact_id,
+      property_id || null,
+      requested_by,
+      request_type,
+      request_details,
+      suggested_data ? JSON.stringify(suggested_data) : null,
+      research_trail ? JSON.stringify(research_trail) : null,
+      priority,
+      confidence_before || null,
+    ]);
+
+    // Notify CRM via websocket
+    const io = getIo();
+    if (io) {
+      io.emit('verification:new_request', {
+        id: result.rows[0].id,
+        contact_id,
+        contact_name: contact.rows[0].full_name,
+        request_type,
+        requested_by,
+        priority,
+      });
+    }
+
+    res.status(201).json({
+      ok: true,
+      verification_request: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[AI API] POST /verification/request error:', err.message);
+    res.status(500).json({ error: 'Failed to create verification request', detail: err.message });
+  }
+});
+
+/**
+ * GET /api/ai/verification/queue
+ * Returns pending/in_progress verification requests for David to action.
+ * Params: status (default 'pending'), limit (default 25), offset (default 0)
+ */
+router.get('/verification/queue', async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: 'Database not ready' });
+
+  try {
+    const {
+      status = 'pending',
+      limit = 25,
+      offset = 0,
+    } = req.query;
+
+    const VALID_STATUSES = ['pending', 'in_progress', 'confirmed', 'rejected', 'updated', 'not_found', 'expired', 'all'];
+    if (!VALID_STATUSES.includes(status)) {
+      return res.status(400).json({ error: `status must be one of: ${VALID_STATUSES.join(', ')}` });
+    }
+
+    // Lazy expire any stale pending requests before returning queue
+    await pool.query(`
+      UPDATE verification_requests
+      SET status = 'expired', resolved_at = NOW()
+      WHERE status = 'pending' AND expires_at < NOW()
+    `);
+
+    const statusFilter = status === 'all'
+      ? ''
+      : `AND vr.status = $3`;
+
+    const params = status === 'all'
+      ? [parseInt(limit), parseInt(offset)]
+      : [parseInt(limit), parseInt(offset), status];
+
+    const result = await pool.query(`
+      SELECT
+        vr.id,
+        vr.contact_id,
+        vr.property_id,
+        vr.requested_by,
+        vr.request_type,
+        vr.request_details,
+        vr.suggested_data,
+        vr.research_trail,
+        vr.priority,
+        vr.status,
+        vr.david_response,
+        vr.updated_data,
+        vr.created_at,
+        vr.viewed_at,
+        vr.resolved_at,
+        vr.expires_at,
+        vr.confidence_before,
+        vr.confidence_after,
+        vr.resolution_time_seconds,
+        -- Contact context
+        c.full_name AS contact_name,
+        c.first_name AS contact_first_name,
+        c.type AS contact_type,
+        c.email_1,
+        c.phone_1,
+        c.email_1_confidence,
+        -- Property context (if linked)
+        p.address AS property_address,
+        p.city AS property_city
+      FROM verification_requests vr
+      JOIN contacts c ON c.contact_id = vr.contact_id
+      LEFT JOIN properties p ON p.id = vr.property_id
+      WHERE TRUE ${statusFilter}
+      ORDER BY
+        CASE vr.priority
+          WHEN 'urgent' THEN 1
+          WHEN 'high' THEN 2
+          WHEN 'normal' THEN 3
+          WHEN 'low' THEN 4
+          ELSE 5
+        END ASC,
+        vr.created_at DESC
+      LIMIT $1 OFFSET $2
+    `, params);
+
+    const countResult = await pool.query(`
+      SELECT COUNT(*) FROM verification_requests vr ${status !== 'all' ? 'WHERE status = $1' : ''}
+    `, status !== 'all' ? [status] : []);
+
+    res.json({
+      ok: true,
+      requests: result.rows,
+      total: parseInt(countResult.rows[0].count),
+      limit: parseInt(limit),
+      offset: parseInt(offset),
+    });
+  } catch (err) {
+    console.error('[AI API] GET /verification/queue error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch verification queue', detail: err.message });
+  }
+});
+
+/**
+ * POST /api/ai/verification/resolve
+ * David (or CRM UI) resolves a verification request.
+ * Body: { verification_id, status, david_response?, updated_data? }
+ *
+ * On confirmed/updated: DB trigger fn_verification_auto_promote fires
+ * and promotes data to Gold tier on the contact automatically.
+ */
+router.post('/verification/resolve', async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: 'Database not ready' });
+
+  try {
+    const { verification_id, status, david_response, updated_data } = req.body;
+
+    if (!verification_id || !status) {
+      return res.status(400).json({ error: 'verification_id and status are required' });
+    }
+
+    const VALID_RESOLUTION_STATUSES = ['confirmed', 'rejected', 'updated', 'not_found'];
+    if (!VALID_RESOLUTION_STATUSES.includes(status)) {
+      return res.status(400).json({
+        error: `status must be one of: ${VALID_RESOLUTION_STATUSES.join(', ')}`,
+      });
+    }
+
+    if (status === 'updated' && !updated_data) {
+      return res.status(400).json({ error: 'updated_data is required when status is "updated"' });
+    }
+
+    // Fetch current request
+    const existing = await pool.query(
+      `SELECT id, contact_id, status, request_type, suggested_data FROM verification_requests WHERE id = $1`,
+      [verification_id]
+    );
+    if (existing.rows.length === 0) {
+      return res.status(404).json({ error: 'Verification request not found' });
+    }
+    if (['confirmed', 'rejected', 'updated', 'not_found', 'expired'].includes(existing.rows[0].status)) {
+      return res.status(409).json({
+        error: 'This request has already been resolved',
+        current_status: existing.rows[0].status,
+      });
+    }
+
+    // Mark viewed_at if first touch
+    await pool.query(
+      `UPDATE verification_requests SET viewed_at = COALESCE(viewed_at, NOW()) WHERE id = $1`,
+      [verification_id]
+    );
+
+    // Resolve — DB trigger fn_verification_auto_promote handles contact promotion
+    const result = await pool.query(`
+      UPDATE verification_requests
+      SET
+        status = $2,
+        david_response = $3,
+        updated_data = $4,
+        resolved_at = NOW()
+      WHERE id = $1
+      RETURNING id, status, contact_id, resolved_at, resolution_time_seconds,
+                confidence_before, confidence_after
+    `, [
+      verification_id,
+      status,
+      david_response || null,
+      updated_data ? JSON.stringify(updated_data) : null,
+    ]);
+
+    const resolved = result.rows[0];
+
+    // Notify CRM
+    const io = getIo();
+    if (io) {
+      io.emit('verification:resolved', {
+        id: resolved.id,
+        status,
+        contact_id: resolved.contact_id,
+        auto_promoted: ['confirmed', 'updated'].includes(status),
+      });
+    }
+
+    res.json({
+      ok: true,
+      resolved: resolved,
+      auto_promoted: ['confirmed', 'updated'].includes(status),
+      message: ['confirmed', 'updated'].includes(status)
+        ? 'Contact data promoted to Gold tier automatically'
+        : `Request marked as ${status}`,
+    });
+  } catch (err) {
+    console.error('[AI API] POST /verification/resolve error:', err.message);
+    res.status(500).json({ error: 'Failed to resolve verification request', detail: err.message });
+  }
+});
+
+/**
+ * GET /api/ai/verification/stats
+ * Enrichment quality scorecard — confirmation rates, resolution times, agent accuracy.
+ * Params: days (default 30)
+ */
+router.get('/verification/stats', async (req, res) => {
+  const pool = getPool();
+  if (!pool) return res.status(503).json({ error: 'Database not ready' });
+
+  try {
+    const { days = 30 } = req.query;
+    const since = `NOW() - INTERVAL '${parseInt(days)} days'`;
+
+    const [totals, byType, byAgent, avgResolution] = await Promise.all([
+      // Overall totals
+      pool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE TRUE) AS total_requested,
+          COUNT(*) FILTER (WHERE status = 'confirmed') AS confirmed,
+          COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
+          COUNT(*) FILTER (WHERE status = 'updated') AS updated,
+          COUNT(*) FILTER (WHERE status = 'not_found') AS not_found,
+          COUNT(*) FILTER (WHERE status = 'expired') AS expired,
+          COUNT(*) FILTER (WHERE status IN ('pending', 'in_progress')) AS pending,
+          ROUND(
+            100.0 * COUNT(*) FILTER (WHERE status IN ('confirmed', 'updated')) /
+            NULLIF(COUNT(*) FILTER (WHERE status NOT IN ('pending', 'in_progress', 'expired')), 0),
+            1
+          ) AS confirmation_rate_pct
+        FROM verification_requests
+        WHERE created_at >= ${since}
+      `),
+
+      // By request type
+      pool.query(`
+        SELECT
+          request_type,
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE status IN ('confirmed', 'updated')) AS confirmed,
+          ROUND(
+            100.0 * COUNT(*) FILTER (WHERE status IN ('confirmed', 'updated')) /
+            NULLIF(COUNT(*) FILTER (WHERE status NOT IN ('pending', 'in_progress', 'expired')), 0),
+            1
+          ) AS confirmation_rate_pct
+        FROM verification_requests
+        WHERE created_at >= ${since}
+        GROUP BY request_type
+        ORDER BY total DESC
+      `),
+
+      // By requesting agent
+      pool.query(`
+        SELECT
+          requested_by,
+          COUNT(*) AS total,
+          COUNT(*) FILTER (WHERE status IN ('confirmed', 'updated')) AS confirmed,
+          COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
+          ROUND(
+            100.0 * COUNT(*) FILTER (WHERE status IN ('confirmed', 'updated')) /
+            NULLIF(COUNT(*) FILTER (WHERE status NOT IN ('pending', 'in_progress', 'expired')), 0),
+            1
+          ) AS accuracy_pct
+        FROM verification_requests
+        WHERE created_at >= ${since}
+        GROUP BY requested_by
+        ORDER BY total DESC
+      `),
+
+      // Average resolution time
+      pool.query(`
+        SELECT
+          ROUND(AVG(resolution_time_seconds) / 60.0, 1) AS avg_resolution_minutes,
+          MIN(resolution_time_seconds) AS fastest_seconds,
+          MAX(resolution_time_seconds) AS slowest_seconds
+        FROM verification_requests
+        WHERE status NOT IN ('pending', 'in_progress', 'expired')
+          AND resolution_time_seconds IS NOT NULL
+          AND created_at >= ${since}
+      `),
+    ]);
+
+    res.json({
+      ok: true,
+      period_days: parseInt(days),
+      totals: totals.rows[0],
+      by_request_type: byType.rows,
+      by_agent: byAgent.rows,
+      resolution_time: avgResolution.rows[0],
+    });
+  } catch (err) {
+    console.error('[AI API] GET /verification/stats error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch verification stats', detail: err.message });
+  }
+});
+
+// ============================================================
 // MOUNT FUNCTION — called from server/index.js
 // ============================================================
 

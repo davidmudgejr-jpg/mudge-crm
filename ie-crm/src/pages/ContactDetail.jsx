@@ -150,7 +150,7 @@ export default function ContactDetail({ contactId, id, onClose, onSave, onRefres
           <InlineField label="First Name" value={contact.first_name} field="first_name" onSave={saveField} />
           <InlineField label="Type" value={contact.type} field="type" type="select" options={CONTACT_TYPES} onSave={saveField} />
           <InlineField label="Title" value={contact.title} field="title" onSave={saveField} />
-          <InlineField label="Email" value={contact.email} field="email" type="email" onSave={saveField} />
+          <InlineField label="Email" value={contact.email_1} field="email_1" type="email" onSave={saveField} />
           <InlineField label="Email 2" value={contact.email_2} field="email_2" type="email" onSave={saveField} />
           <InlineField label="Phone 1" value={contact.phone_1} field="phone_1" type="phone" onSave={saveField} />
           <InlineField label="Phone 2" value={contact.phone_2} field="phone_2" type="phone" onSave={saveField} />

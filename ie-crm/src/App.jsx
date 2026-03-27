@@ -21,6 +21,7 @@ import Settings from './pages/Settings';
 import TPE from './pages/TPE';
 import TPEEnrichment from './pages/TPEEnrichment';
 import AIOps from './pages/AIOps';
+import VerificationQueue from './pages/VerificationQueue';
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
@@ -120,6 +121,7 @@ function AppShell() {
           <Route path="/deals" element={<Deals onCountChange={setRowCount} />} />
           <Route path="/tpe" element={<TPE onCountChange={setRowCount} />} />
           <Route path="/tpe-enrichment" element={<TPEEnrichment />} />
+          <Route path="/verification" element={<VerificationQueue />} />
           <Route path="/interactions" element={<Interactions onCountChange={setRowCount} />} />
           <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
           <Route path="/action-items" element={<ActionItems onCountChange={setRowCount} />} />

@@ -17,7 +17,7 @@ async function loadCaches(client) {
 
   // Load contacts with their company links for disambiguation
   const { rows: contacts } = await client.query(
-    `SELECT c.contact_id, c.full_name, c.email, c.phone_1,
+    `SELECT c.contact_id, c.full_name, c.email_1, c.phone_1,
             ARRAY_AGG(cc.company_id) FILTER (WHERE cc.company_id IS NOT NULL) AS company_ids
      FROM contacts c
      LEFT JOIN contact_companies cc ON c.contact_id = cc.contact_id
@@ -29,7 +29,7 @@ async function loadCaches(client) {
       const entry = {
         contact_id: c.contact_id,
         full_name: c.full_name,
-        email: c.email,
+        email_1: c.email_1,
         phone_1: c.phone_1,
         company_ids: new Set(c.company_ids || []),
       };
@@ -219,10 +219,10 @@ const CONTACT_FIELDS = {
   firstName: 'first_name',
   type: 'type',
   title: 'title',
-  born: 'born',
+  born: 'date_of_birth',
   workAddress: 'work_address',
   homeAddress: 'home_address',
-  email: 'email',
+  email: 'email_1',
   email2: 'email_2',
   email3: 'email_3',
   emailHot: 'email_hot',

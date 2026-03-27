@@ -162,7 +162,7 @@ const FIELD_MAPS = {
       'First Name': 'first_name',
       'Type': 'type',
       'Title': 'title',
-      'Email': 'email',
+      'Email': 'email_1',
       'Email 2': 'email_2',
       'Email 3': 'email_3',
       'Phone 1': 'phone_1',

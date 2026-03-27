@@ -1143,7 +1143,7 @@ Available actions:
    run_by: Dave Mudge, David Mudge Jr, Missy
 
 7. Create a contact (GUIDED):
-   <!--ACTION:{"type":"create_contact","params":{"full_name":"John Smith","first_name":"John","type":"Owner","email":"john@example.com","phone_1":"951-555-1234","company_name":"Smith LLC","client_level":"B","property_address":"1234 Main St"}}-->
+   <!--ACTION:{"type":"create_contact","params":{"full_name":"John Smith","first_name":"John","type":"Owner","email_1":"john@example.com","phone_1":"951-555-1234","company_name":"Smith LLC","client_level":"B","property_address":"1234 Main St"}}-->
 
    When user says "create a contact" or "add a new contact", guide them:
    Step 1: Full name
@@ -1385,7 +1385,7 @@ async function buildCrmContext(messageBody) {
         results.entitiesFound += contactResults.length;
         sections.push('MATCHING CONTACTS (' + contactResults.length + ' found):\n' +
           contactResults.map(c =>
-            '  - ' + (c.full_name || '?') + ' | ' + (c.type || '') + ' | ' + (c.title || '') + ' | ' + (c.email || 'no email') + ' | ' + (c.phone_1 || 'no phone') + ' | Level: ' + (c.client_level || '?')
+            '  - ' + (c.full_name || '?') + ' | ' + (c.type || '') + ' | ' + (c.title || '') + ' | ' + (c.email_1 || 'no email') + ' | ' + (c.phone_1 || 'no phone') + ' | Level: ' + (c.client_level || '?')
           ).join('\n'));
       }
     } catch (err) {
@@ -1500,7 +1500,7 @@ async function buildCrmContext(messageBody) {
         results.entitiesFound += contacts.rows.length;
         sections.push(`RECENT CONTACTS:\n` +
           contacts.rows.map(c =>
-            `  - ${c.full_name || '?'} | ${c.title || ''} | ${c.type || ''} | ${c.email || 'no email'}`
+            `  - ${c.full_name || '?'} | ${c.title || ''} | ${c.type || ''} | ${c.email_1 || 'no email'}`
           ).join('\n'));
       }
     } catch (err) {
@@ -1585,7 +1585,7 @@ async function buildCrmContext(messageBody) {
   if (foundPropertyIds.length > 0) {
     try {
       const linkedContacts = await pool.query(
-        `SELECT c.full_name, c.title, c.email, c.phone_1, c.type, p.property_address
+        `SELECT c.full_name, c.title, c.email_1, c.phone_1, c.type, p.property_address
          FROM contacts c
          JOIN property_contacts pc ON c.contact_id = pc.contact_id
          JOIN properties p ON p.property_id = pc.property_id
@@ -1604,7 +1604,7 @@ async function buildCrmContext(messageBody) {
         for (const [addr, contacts] of Object.entries(byProp)) {
           lines.push('  ' + addr + ':');
           for (const c of contacts) {
-            lines.push('    - ' + (c.full_name || '?') + ' | ' + (c.type || '') + ' | ' + (c.title || '') + ' | ' + (c.email || 'no email') + ' | ' + (c.phone_1 || 'no phone'));
+            lines.push('    - ' + (c.full_name || '?') + ' | ' + (c.type || '') + ' | ' + (c.title || '') + ' | ' + (c.email_1 || 'no email') + ' | ' + (c.phone_1 || 'no phone'));
           }
         }
         sections.push('LINKED CONTACTS FOR PROPERTIES:\n' + lines.join('\n'));
@@ -1764,7 +1764,7 @@ async function buildCrmContext(messageBody) {
         [foundDealIds]
       );
       const dealContacts = await pool.query(
-        `SELECT c.full_name, c.type, c.email, d.deal_name
+        `SELECT c.full_name, c.type, c.email_1, d.deal_name
          FROM contacts c
          JOIN deal_contacts dc ON c.contact_id = dc.contact_id
          JOIN deals d ON d.deal_id = dc.deal_id
@@ -2321,12 +2321,12 @@ async function executeSingleAction(action, userId) {
         if (p.contact_name) {
           const names = Array.isArray(p.contact_name) ? p.contact_name : [p.contact_name];
           for (const name of names) {
-            const result = await fuzzyMatch('contacts', 'full_name', name, 'type, email');
+            const result = await fuzzyMatch('contacts', 'full_name', name, 'type, email_1');
             if (result.ambiguous) {
               clarifications.push({
                 field: 'contact_name',
                 searchTerm: name,
-                options: result.matches.map(r => ({ id: r.contact_id, label: r.full_name, detail: [r.type, r.email].filter(Boolean).join(' \u00B7 ') }))
+                options: result.matches.map(r => ({ id: r.contact_id, label: r.full_name, detail: [r.type, r.email_1].filter(Boolean).join(' \u00B7 ') }))
               });
             } else if (result.match) {
               contactIds.push(result.match.contact_id);
@@ -2444,12 +2444,12 @@ async function executeSingleAction(action, userId) {
         if (p.contact_name) {
           const names = Array.isArray(p.contact_name) ? p.contact_name : [p.contact_name];
           for (const name of names) {
-            const result = await fuzzyMatch('contacts', 'full_name', name, 'type, email');
+            const result = await fuzzyMatch('contacts', 'full_name', name, 'type, email_1');
             if (result.ambiguous) {
               clarifications.push({
                 field: 'contact_name',
                 searchTerm: name,
-                options: result.matches.map(r => ({ id: r.contact_id, label: r.full_name, detail: [r.type, r.email].filter(Boolean).join(' \u00B7 ') }))
+                options: result.matches.map(r => ({ id: r.contact_id, label: r.full_name, detail: [r.type, r.email_1].filter(Boolean).join(' \u00B7 ') }))
               });
             } else if (result.match) {
               contactMatches.push(result.match);
@@ -2630,7 +2630,7 @@ async function executeSingleAction(action, userId) {
         if (p.contact_name) {
           const result = await fuzzyMatch('contacts', 'full_name', p.contact_name, 'type, email');
           if (result.ambiguous) {
-            clarifications.push({ field: 'contact_name', searchTerm: p.contact_name, options: result.matches.map(r => ({ id: r.contact_id, label: r.full_name, detail: [r.type, r.email].filter(Boolean).join(' \u00B7 ') })) });
+            clarifications.push({ field: 'contact_name', searchTerm: p.contact_name, options: result.matches.map(r => ({ id: r.contact_id, label: r.full_name, detail: [r.type, r.email_1].filter(Boolean).join(' \u00B7 ') })) });
           } else if (result.match) {
             contactId = result.match.contact_id;
             linked.push(result.match.full_name);
@@ -2740,11 +2740,11 @@ async function executeSingleAction(action, userId) {
 
         // Check for duplicate contact
         const dupeCheck = await pool.query(
-          `SELECT contact_id, full_name, email FROM contacts WHERE full_name ILIKE $1 LIMIT 3`,
+          `SELECT contact_id, full_name, email_1 FROM contacts WHERE full_name ILIKE $1 LIMIT 3`,
           ['%' + p.full_name + '%']
         );
         if (dupeCheck.rows.length > 0) {
-          const dupeNames = dupeCheck.rows.map(r => r.full_name + (r.email ? ' (' + r.email + ')' : '')).join(', ');
+          const dupeNames = dupeCheck.rows.map(r => r.full_name + (r.email_1 ? ' (' + r.email_1 + ')' : '')).join(', ');
           // Warn but still create — user confirmed
         }
 
@@ -2783,14 +2783,14 @@ async function executeSingleAction(action, userId) {
 
         // Create the contact
         const contactResult = await pool.query(
-          `INSERT INTO contacts (full_name, first_name, type, email, email_2, phone_1, phone_2, client_level, notes)
+          `INSERT INTO contacts (full_name, first_name, type, email_1, email_2, phone_1, phone_2, client_level, notes)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
            RETURNING contact_id`,
           [
             p.full_name,
             p.first_name || p.full_name.split(' ')[0] || null,
             p.type || null,
-            p.email || null,
+            p.email_1 || p.email || null,
             p.email_2 || null,
             p.phone_1 || null,
             p.phone_2 || null,

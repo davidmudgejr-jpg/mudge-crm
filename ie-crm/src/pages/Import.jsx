@@ -262,7 +262,7 @@ const COLUMN_MAPS = {
     'first name': 'first_name', first_name: 'first_name',
     type: 'type', 'contact type': 'type',
     title: 'title', 'job title': 'title',
-    email: 'email', 'email address': 'email', 'primary email': 'email',
+    email: 'email_1', 'email address': 'email_1', 'primary email': 'email_1', email_1: 'email_1',
     'email 2': 'email_2', 'secondary email': 'email_2', email_2: 'email_2',
     'email 3': 'email_3', email_3: 'email_3',
     'phone 1': 'phone_1', phone: 'phone_1', 'phone number': 'phone_1', phone_1: 'phone_1',
