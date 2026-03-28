@@ -163,91 +163,43 @@ export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, on
     }
   }, [onFieldChange]);
 
-  // After rendering, measure the full content height and split into pages
-  const [pageCount, setPageCount] = useState(1);
-  const measuredRef = useRef(null);
-
-  useEffect(() => {
-    if (!measuredRef.current) return;
-    // Measure the full-size content height and compute page count
-    const el = measuredRef.current;
-    const observe = () => {
-      const contentH = el.scrollHeight;
-      // Each page body area is ~9.5in tall (11in minus ~1.5in margins/footer)
-      const bodyH = 9.5 * 96; // ~912px
-      const count = Math.max(1, Math.ceil(contentH / bodyH));
-      setPageCount(count);
-    };
-    // Observe after render
-    const timer = setTimeout(observe, 100);
-    return () => clearTimeout(timer);
-  }, [xmlRoot, fieldValues]);
-
   if (!xmlRoot) {
     return <div className="text-crm-muted p-8 text-center">No document content to display</div>;
   }
 
-  const scaledW = PAGE_W * zoom;
-  const scaledH = PAGE_H * zoom;
-  const renderedContent = renderNode(xmlRoot, { fieldValues, onFieldBlur: handleFieldBlur, onCheckboxChange: handleCheckboxChange, editable, key: 'root' });
+  // Continuous scroll with zoom — scale the content and adjust the outer
+  // wrapper's height so the scrollbar reflects the visual (scaled) size.
+  const contentRef = useRef(null);
+  const [contentHeight, setContentHeight] = useState(0);
+
+  useEffect(() => {
+    if (!contentRef.current) return;
+    const measure = () => setContentHeight(contentRef.current.scrollHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(contentRef.current);
+    return () => observer.disconnect();
+  }, [xmlRoot, fieldValues]);
+
+  const scaledHeight = contentHeight * zoom;
 
   return (
-    <>
-      {/* Hidden full-size render for content measurement */}
+    <div className="air-zoom-outer" style={{ height: scaledHeight || 'auto', position: 'relative' }}>
       <div
-        ref={measuredRef}
-        style={{ position: 'absolute', left: '-9999px', width: '8.5in', visibility: 'hidden' }}
+        ref={(el) => { contentRef.current = el; docRef.current = el; }}
+        className="air-document"
+        id="air-document-root"
+        style={{
+          transform: `scale(${zoom})`,
+          transformOrigin: 'top center',
+          position: 'absolute',
+          left: '50%',
+          marginLeft: `${-PAGE_W / 2}px`,
+        }}
       >
-        {renderedContent}
+        {renderNode(xmlRoot, { fieldValues, onFieldBlur: handleFieldBlur, onCheckboxChange: handleCheckboxChange, editable, key: 'root' })}
       </div>
-
-      {/* Visible paginated spread */}
-      <div className="air-document" ref={docRef} id="air-document-root">
-        {Array.from({ length: pageCount }, (_, i) => {
-          // Each "page" is a viewport into the full content, offset by page index
-          const bodyHeight = 9.5 * 96; // usable area per page in px
-          const offsetY = i * bodyHeight;
-          return (
-            <div
-              key={`page-wrap-${i}`}
-              className="air-page-wrapper"
-              style={{ width: scaledW, height: scaledH }}
-            >
-              <div
-                className="air-page"
-                style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
-              >
-                {/* Page header area (first page gets the rendered content at offset 0) */}
-                <div className="air-page-body" style={{ height: bodyHeight + 'px', overflow: 'hidden' }}>
-                  <div style={{ marginTop: -offsetY + 'px' }}>
-                    {renderedContent}
-                  </div>
-                </div>
-                {/* Footer on every page */}
-                <div className="air-page-footer" style={{ padding: '0 0.5in 0.15in 0.5in', fontSize: '8pt', color: '#666' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
-                    <div>
-                      <div>________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ________</div>
-                      <div>________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ________</div>
-                      <div>INITIALS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; INITIALS</div>
-                    </div>
-                    <div style={{ textAlign: 'right' }}>
-                      <div>&nbsp;</div>
-                      <div>&nbsp;</div>
-                      <div>Page {i + 1} of {pageCount}</div>
-                    </div>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
-                    <span>© 2019 AIR CRE. All Rights Reserved.</span>
-                    <span>Last Edited: {new Date().toLocaleDateString()}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </>
+    </div>
   );
 }
 
