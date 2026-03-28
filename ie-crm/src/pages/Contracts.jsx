@@ -1,15 +1,10 @@
 /**
- * Contracts.jsx — AIR CRE Contracts list page
- *
- * Shows all contracts with status, form type, linked deal, and dates.
- * "New Contract" opens a modal to pick form type + deal.
- * Row click navigates to the full ContractEditor page.
+ * Contracts.jsx — Contract packages list page
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useToast } from '../components/shared/Toast';
-import EmptyState from '../components/shared/EmptyState';
 import NewContractModal from '../components/contracts/NewContractModal';
 
 const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
@@ -21,38 +16,18 @@ function getAuthHeaders() {
   return headers;
 }
 
-const STATUS_BADGE = {
-  Draft: 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/20',
-  Final: 'bg-green-500/15 text-green-400 border border-green-500/20',
-};
-
-const FORM_LABELS = {
-  OFA: 'Purchase (Improved)',
-  OFAL: 'Purchase (Vacant Land)',
-  STN: 'Single Tenant Net',
-  STG: 'Single Tenant Gross',
-  MTN: 'Multi-Tenant Net',
-  MTG: 'Multi-Tenant Gross',
-  BBE: 'Buyer-Broker Rep',
-  OA: 'Listing Agreement',
-  AD: 'Agency Disclosure',
-  ATL: 'Lease Amendment',
-  ATPA: 'Purchase Amendment',
-};
-
 export default function Contracts() {
   const navigate = useNavigate();
   const { addToast } = useToast();
-  const [contracts, setContracts] = useState([]);
+  const [packages, setPackages] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [showNewModal, setShowNewModal] = useState(false);
+  const [showModal, setShowModal] = useState(false);
 
-  const loadContracts = useCallback(async () => {
+  const loadPackages = useCallback(async () => {
     try {
       const res = await fetch(`${API}/api/contracts`, { headers: getAuthHeaders() });
-      if (!res.ok) throw new Error('Failed to load contracts');
       const data = await res.json();
-      setContracts(data.rows || []);
+      setPackages(data.rows || []);
     } catch (err) {
       addToast(err.message, 'error');
     } finally {
@@ -60,126 +35,129 @@ export default function Contracts() {
     }
   }, [addToast]);
 
-  useEffect(() => { loadContracts(); }, [loadContracts]);
+  useEffect(() => { loadPackages(); }, [loadPackages]);
 
-  const handleCreate = async (newContract) => {
+  const handleCreate = async (data) => {
     try {
       const res = await fetch(`${API}/api/contracts`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify(newContract),
+        body: JSON.stringify(data),
       });
-      if (!res.ok) throw new Error('Failed to create contract');
-      const data = await res.json();
-      addToast(`Contract created (${data.autoFilledCount} fields auto-filled)`, 'success');
-      setShowNewModal(false);
-      navigate(`/contracts/${data.contract.contract_id}`);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Create failed');
+      }
+      const result = await res.json();
+      setShowModal(false);
+      addToast(`Package created with ${result.forms?.length || 1} form(s)`, 'success');
+      navigate(`/contracts/${result.package.package_id}`);
     } catch (err) {
       addToast(err.message, 'error');
     }
   };
 
-  const handleDelete = async (id, e) => {
+  const handleDelete = async (pkgId, e) => {
     e.stopPropagation();
-    if (!confirm('Delete this draft contract?')) return;
+    if (!confirm('Delete this package and all its forms?')) return;
     try {
-      const res = await fetch(`${API}/api/contracts/${id}`, {
+      await fetch(`${API}/api/contracts/${pkgId}`, {
         method: 'DELETE',
         headers: getAuthHeaders(),
       });
-      if (!res.ok) throw new Error('Failed to delete');
-      setContracts(prev => prev.filter(c => c.contract_id !== id));
-      addToast('Contract deleted', 'success');
+      setPackages(prev => prev.filter(p => p.package_id !== pkgId));
+      addToast('Package deleted', 'success');
     } catch (err) {
       addToast(err.message, 'error');
     }
   };
 
-  const formatDate = (d) => {
-    if (!d) return '—';
-    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
-
   return (
-    <div className="p-6">
+    <div className="flex flex-col h-full">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-crm-border bg-crm-card">
         <div>
-          <h1 className="text-2xl font-semibold text-crm-text">Contracts</h1>
-          <p className="text-sm text-crm-muted mt-1">AIR CRE contract packages linked to your deals</p>
+          <h1 className="text-xl font-semibold text-crm-text">Contracts</h1>
+          <p className="text-sm text-crm-muted">AIR CRE contract packages linked to your deals</p>
         </div>
         <button
-          onClick={() => setShowNewModal(true)}
+          onClick={() => setShowModal(true)}
           className="px-4 py-2 bg-crm-accent hover:bg-crm-accent-hover text-white rounded-lg text-sm font-medium transition-colors"
         >
-          + New Contract
+          + New Package
         </button>
       </div>
 
-      {/* Contract list */}
-      {loading ? (
-        <div className="text-crm-muted text-center py-12">Loading contracts...</div>
-      ) : contracts.length === 0 ? (
-        <EmptyState
-          entity="deals"
-          entityLabel="contracts"
-          onAdd={() => setShowNewModal(true)}
-          addLabel="+ New Contract"
-        />
-      ) : (
-        <div className="space-y-2">
-          {/* Table header */}
-          <div className="grid grid-cols-[1fr_160px_180px_100px_120px_60px] gap-4 px-4 py-2 text-xs font-medium text-crm-muted uppercase tracking-wider border-b border-crm-border">
-            <div>Contract Name</div>
-            <div>Form Type</div>
-            <div>Deal</div>
-            <div>Status</div>
-            <div>Modified</div>
-            <div></div>
-          </div>
-
-          {/* Rows */}
-          {contracts.map((c, i) => (
-            <div
-              key={c.contract_id}
-              onClick={() => navigate(`/contracts/${c.contract_id}`)}
-              className="grid grid-cols-[1fr_160px_180px_100px_120px_60px] gap-4 px-4 py-3 rounded-lg bg-crm-card hover:bg-crm-hover cursor-pointer transition-colors border border-transparent hover:border-crm-border/50"
-              style={{ animationDelay: `${i * 30}ms` }}
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {loading ? (
+          <div className="flex items-center justify-center h-64 text-crm-muted">Loading...</div>
+        ) : packages.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-64 text-crm-muted">
+            <svg className="w-16 h-16 mb-4 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <p className="text-lg">No packages yet</p>
+            <p className="text-sm mt-1">Create your first contract package to get started</p>
+            <button
+              onClick={() => setShowModal(true)}
+              className="mt-4 px-4 py-2 bg-crm-accent hover:bg-crm-accent-hover text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
             >
-              <div className="text-crm-text font-medium truncate">{c.name}</div>
-              <div className="text-crm-muted text-sm">
-                <span className="font-mono text-xs bg-crm-bg px-1.5 py-0.5 rounded mr-1">{c.form_code}</span>
-                {FORM_LABELS[c.form_code] || c.form_code}
-              </div>
-              <div className="text-crm-muted text-sm truncate">{c.deal_name || '—'}</div>
-              <div>
-                <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_BADGE[c.status] || ''}`}>
-                  {c.status}
-                </span>
-              </div>
-              <div className="text-crm-muted text-sm">{formatDate(c.updated_at)}</div>
-              <div className="flex justify-end">
-                {c.status === 'Draft' && (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              + New Package
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {packages.map(pkg => (
+              <div
+                key={pkg.package_id}
+                onClick={() => navigate(`/contracts/${pkg.package_id}`)}
+                className="flex items-center justify-between px-5 py-4 bg-crm-card border border-crm-border rounded-lg hover:border-crm-accent/30 cursor-pointer transition-colors group"
+              >
+                <div className="min-w-0">
+                  <div className="font-medium text-crm-text truncate">{pkg.name}</div>
+                  <div className="flex items-center gap-2 text-xs text-crm-muted mt-1">
+                    <span>{pkg.deal_name}</span>
+                    <span>•</span>
+                    <span>{new Date(pkg.updated_at).toLocaleDateString()}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex gap-1">
+                    {(pkg.form_codes || []).map((code, i) => (
+                      <span key={i} className="font-mono text-[10px] bg-crm-bg border border-crm-border px-1.5 py-0.5 rounded text-crm-muted">
+                        {code}
+                      </span>
+                    ))}
+                  </div>
+
+                  <span className="text-xs text-crm-muted">
+                    {pkg.form_count || 0} form{(pkg.form_count || 0) !== 1 ? 's' : ''}
+                  </span>
+
                   <button
-                    onClick={(e) => handleDelete(c.contract_id, e)}
-                    className="text-crm-muted hover:text-red-400 transition-colors p-1"
-                    title="Delete draft"
+                    onClick={(e) => handleDelete(pkg.package_id, e)}
+                    className="opacity-0 group-hover:opacity-100 text-crm-muted hover:text-red-400 transition-all"
+                    title="Delete package"
                   >
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                     </svg>
                   </button>
-                )}
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
 
-      {/* New Contract Modal */}
-      {showNewModal && (
+      {showModal && (
         <NewContractModal
-          onClose={() => setShowNewModal(false)}
+          onClose={() => setShowModal(false)}
           onCreate={handleCreate}
         />
       )}

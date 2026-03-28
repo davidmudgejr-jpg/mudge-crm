@@ -1,5 +1,5 @@
 /**
- * NewContractModal.jsx — Pick a form type + deal to create a new contract
+ * NewContractModal.jsx — Create a new contract package with 1+ forms
  */
 
 import React, { useState, useEffect } from 'react';
@@ -22,9 +22,9 @@ const FORM_CATEGORIES = {
 export default function NewContractModal({ onClose, onCreate }) {
   const [templates, setTemplates] = useState([]);
   const [deals, setDeals] = useState([]);
-  const [selectedForm, setSelectedForm] = useState('');
+  const [selectedForms, setSelectedForms] = useState([]); // array of form codes
   const [selectedDeal, setSelectedDeal] = useState('');
-  const [contractName, setContractName] = useState('');
+  const [packageName, setPackageName] = useState('');
   const [dealSearch, setDealSearch] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -47,22 +47,28 @@ export default function NewContractModal({ onClose, onCreate }) {
     !dealSearch || d.deal_name?.toLowerCase().includes(dealSearch.toLowerCase())
   );
 
-  const selectedTemplate = templates.find(t => t.formCode === selectedForm);
   const selectedDealObj = deals.find(d => String(d.deal_id) === selectedDeal);
 
-  // Auto-generate contract name
+  // Auto-generate package name from deal + form codes
   useEffect(() => {
-    if (selectedDealObj && selectedTemplate) {
-      setContractName(`${selectedDealObj.deal_name} — ${selectedTemplate.name}`);
+    if (selectedDealObj && selectedForms.length > 0) {
+      const formLabel = selectedForms.join(' + ');
+      setPackageName(`${selectedDealObj.deal_name} — ${formLabel}`);
     }
-  }, [selectedDealObj, selectedTemplate]);
+  }, [selectedDealObj, selectedForms]);
+
+  const toggleForm = (code) => {
+    setSelectedForms(prev =>
+      prev.includes(code) ? prev.filter(c => c !== code) : [...prev, code]
+    );
+  };
 
   const handleCreate = () => {
-    if (!selectedForm || !selectedDeal || !contractName.trim()) return;
+    if (!selectedForms.length || !selectedDeal || !packageName.trim()) return;
     onCreate({
-      formCode: selectedForm,
+      formCodes: selectedForms,
       dealId: selectedDeal,
-      name: contractName.trim(),
+      name: packageName.trim(),
     });
   };
 
@@ -74,7 +80,7 @@ export default function NewContractModal({ onClose, onCreate }) {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-crm-border">
-          <h2 className="text-lg font-semibold text-crm-text">New Contract</h2>
+          <h2 className="text-lg font-semibold text-crm-text">New Contract Package</h2>
           <button onClick={onClose} className="text-crm-muted hover:text-crm-text transition-colors">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -118,9 +124,11 @@ export default function NewContractModal({ onClose, onCreate }) {
               </div>
             </div>
 
-            {/* Step 2: Select Form Type */}
+            {/* Step 2: Select Forms (multi-select) */}
             <div>
-              <label className="block text-sm font-medium text-crm-text mb-2">Form Type *</label>
+              <label className="block text-sm font-medium text-crm-text mb-2">
+                Forms * <span className="text-crm-muted font-normal">— select one or more</span>
+              </label>
               <div className="space-y-3">
                 {Object.entries(FORM_CATEGORIES).map(([cat, codes]) => (
                   <div key={cat}>
@@ -129,17 +137,23 @@ export default function NewContractModal({ onClose, onCreate }) {
                       {codes.map(code => {
                         const t = templates.find(t => t.formCode === code);
                         if (!t) return null;
+                        const selected = selectedForms.includes(code);
                         return (
                           <button
                             key={code}
-                            onClick={() => setSelectedForm(code)}
+                            onClick={() => toggleForm(code)}
                             className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors border ${
-                              selectedForm === code
+                              selected
                                 ? 'bg-crm-accent/20 border-crm-accent text-crm-accent'
                                 : 'bg-crm-bg border-crm-border text-crm-text hover:border-crm-accent/50'
                             }`}
                             title={t.name}
                           >
+                            {selected && (
+                              <svg className="w-3 h-3 inline mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                              </svg>
+                            )}
                             <span className="font-mono mr-1">{code}</span>
                             {t.fieldCount}f
                           </button>
@@ -149,19 +163,21 @@ export default function NewContractModal({ onClose, onCreate }) {
                   </div>
                 ))}
               </div>
-              {selectedTemplate && (
-                <p className="mt-2 text-xs text-crm-muted">{selectedTemplate.name} — {selectedTemplate.fieldCount} fields</p>
+              {selectedForms.length > 0 && (
+                <p className="mt-2 text-xs text-crm-muted">
+                  {selectedForms.length} form{selectedForms.length !== 1 ? 's' : ''} selected: {selectedForms.join(', ')}
+                </p>
               )}
             </div>
 
-            {/* Step 3: Contract Name */}
+            {/* Step 3: Package Name */}
             <div>
-              <label className="block text-sm font-medium text-crm-text mb-2">Contract Name</label>
+              <label className="block text-sm font-medium text-crm-text mb-2">Package Name</label>
               <input
                 type="text"
-                value={contractName}
-                onChange={e => setContractName(e.target.value)}
-                placeholder="Auto-generated from deal + form type"
+                value={packageName}
+                onChange={e => setPackageName(e.target.value)}
+                placeholder="Auto-generated from deal + forms"
                 className="w-full px-3 py-2 bg-crm-bg border border-crm-border rounded-lg text-crm-text text-sm focus:border-crm-accent outline-none"
               />
             </div>
@@ -175,10 +191,10 @@ export default function NewContractModal({ onClose, onCreate }) {
           </button>
           <button
             onClick={handleCreate}
-            disabled={!selectedForm || !selectedDeal || !contractName.trim()}
+            disabled={!selectedForms.length || !selectedDeal || !packageName.trim()}
             className="px-4 py-2 bg-crm-accent hover:bg-crm-accent-hover disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg text-sm font-medium transition-colors"
           >
-            Create Contract
+            Create Package ({selectedForms.length} form{selectedForms.length !== 1 ? 's' : ''})
           </button>
         </div>
       </div>

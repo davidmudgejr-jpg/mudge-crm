@@ -114,22 +114,45 @@ function htmlEncode(str) {
 }
 
 /**
- * Build the full WinAirFile XML envelope.
+ * Build a single AireaDocTemplate XML block for one form.
  */
-function buildWinAirFileXml(contract, template, fieldValues) {
+function buildFormXml(form, template) {
+  const filledXaml = injectFieldValues(template.xamlContent, form.field_values || {});
+  return `        <AireaDocTemplate>
+          <AireaDocTemplateID>${template.templateId}</AireaDocTemplateID>
+          <Name>${escapeXmlAttr(template.name)}</Name>
+          <Description>${escapeXmlAttr(template.description || '')}</Description>
+          <KeyWords>${escapeXmlAttr(template.keywords || '')}</KeyWords>
+          <RevisionDate>${template.revisionDate}T00:00:00</RevisionDate>
+          <RevisionVersion>${template.revisionVersion}</RevisionVersion>
+          <StateVersion>CA</StateVersion>
+          <FormCode>${template.formCode}</FormCode>
+          <Category>${escapeXmlAttr(template.category || '')}</Category>
+          <Credits>${template.credits || 6}</Credits>
+          <Status>${form.status || 'Draft'}</Status>
+          <Content>${htmlEncode(filledXaml)}</Content>
+        </AireaDocTemplate>`;
+}
+
+/**
+ * Build the full WinAirFile XML envelope with multiple forms.
+ */
+function buildWinAirFileXml(pkg, forms, templates) {
   const now = new Date().toISOString();
-  const filledXaml = injectFieldValues(template.xamlContent, fieldValues);
+  const author = pkg.author || 'david mudge';
+
+  const formsXml = forms.map((form, i) => buildFormXml(form, templates[i])).join('\n');
 
   return `<?xml version="1.0" encoding="utf-16"?>
 <WinAirFile xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <Author>${escapeXmlAttr(contract.author || 'david mudge')}</Author>
+  <Author>${escapeXmlAttr(author)}</Author>
   <PackageInfo>
-    <Name>${escapeXmlAttr(contract.name)}</Name>
-    <Author>${escapeXmlAttr(contract.author || 'david mudge')}</Author>
+    <Name>${escapeXmlAttr(pkg.name)}</Name>
+    <Author>${escapeXmlAttr(author)}</Author>
     <AuthorUniqueID>a96f69ff-6791-4d93-8798-e08b80ade250</AuthorUniqueID>
-    <CreatedDateTime>${contract.created_at || now}</CreatedDateTime>
+    <CreatedDateTime>${pkg.created_at || now}</CreatedDateTime>
     <DateModified>${now}</DateModified>
-    <Status>${contract.status}</Status>
+    <Status>${pkg.status}</Status>
     <Description />
     <OpenTime>${new Date().toLocaleString('en-US')}</OpenTime>
   </PackageInfo>
@@ -161,26 +184,13 @@ function buildWinAirFileXml(contract, template, fieldValues) {
   </PackageRolesConfig>
   <Versions>
     <VersionContent>
-      <Author>${escapeXmlAttr(contract.author || 'david mudge')}</Author>
+      <Author>${escapeXmlAttr(author)}</Author>
       <AuthorUniqueID>a96f69ff-6791-4d93-8798-e08b80ade250</AuthorUniqueID>
       <Date>${now}</Date>
       <VersionNumber>1</VersionNumber>
       <Description />
       <Forms>
-        <AireaDocTemplate>
-          <AireaDocTemplateID>${template.templateId}</AireaDocTemplateID>
-          <Name>${escapeXmlAttr(template.name)}</Name>
-          <Description>${escapeXmlAttr(template.description || '')}</Description>
-          <KeyWords>${escapeXmlAttr(template.keywords || '')}</KeyWords>
-          <RevisionDate>${template.revisionDate}T00:00:00</RevisionDate>
-          <RevisionVersion>${template.revisionVersion}</RevisionVersion>
-          <StateVersion>CA</StateVersion>
-          <FormCode>${template.formCode}</FormCode>
-          <Category>${escapeXmlAttr(template.category || '')}</Category>
-          <Credits>${template.credits || 6}</Credits>
-          <Status>${contract.status}</Status>
-          <Content>${htmlEncode(filledXaml)}</Content>
-        </AireaDocTemplate>
+${formsXml}
       </Forms>
     </VersionContent>
   </Versions>
@@ -188,22 +198,22 @@ function buildWinAirFileXml(contract, template, fieldValues) {
 }
 
 /**
- * Export a contract as WAFPKG (encrypted or plain XML).
+ * Export a package as WAFPKG (encrypted or plain XML).
  *
- * @param {Object} contract - Contract record from DB
- * @param {boolean} encrypt - Whether to AES-encrypt (default true for compatibility)
+ * @param {Object} pkg - Package record from contract_packages
+ * @param {Array} forms - Array of contract records (forms in the package)
+ * @param {boolean} encrypt - Whether to AES-encrypt (default true)
  * @returns {Buffer} The WAFPKG file content
  */
-function exportWafpkg(contract, encrypt = true) {
-  // Load template
-  const templatePath = path.join(PARSED_DIR, contract.form_code + '.json');
-  if (!fs.existsSync(templatePath)) {
-    throw new Error('Template not found: ' + contract.form_code);
-  }
-  const template = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
+function exportWafpkg(pkg, forms, encrypt = true) {
+  // Load template for each form
+  const templates = forms.map(form => {
+    const templatePath = path.join(PARSED_DIR, form.form_code + '.json');
+    if (!fs.existsSync(templatePath)) throw new Error('Template not found: ' + form.form_code);
+    return JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
+  });
 
-  // Build XML
-  const xml = buildWinAirFileXml(contract, template, contract.field_values || {});
+  const xml = buildWinAirFileXml(pkg, forms, templates);
 
   if (encrypt) {
     return encryptWafpkg(xml);

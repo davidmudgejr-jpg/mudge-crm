@@ -1,19 +1,21 @@
 /**
- * Contracts Routes — AIR CRE Contract Management
+ * Contracts Routes — AIR CRE Contract Package Management
  *
- * CRUD + auto-fill + export for AIR CRE contract packages.
- * All contracts are linked to deals and store field values as JSONB.
+ * Packages group multiple AIR CRE forms (e.g., OFA + BBE + AD) linked to a deal.
+ * Each form within a package has its own field values and template.
  *
  * Endpoints:
- *   GET    /api/contracts              — List all contracts
- *   GET    /api/contracts/:id          — Get single contract
- *   GET    /api/contracts/by-deal/:id  — Contracts for a deal
+ *   GET    /api/contracts              — List all packages (with form counts)
  *   GET    /api/contracts/templates    — Available form templates
- *   POST   /api/contracts              — Create new contract
- *   PATCH  /api/contracts/:id          — Update field values
- *   PATCH  /api/contracts/:id/finalize — Finalize contract
- *   DELETE /api/contracts/:id          — Delete draft contract
- *   GET    /api/contracts/:id/export/wafpkg — Export as WAFPKG
+ *   GET    /api/contracts/by-deal/:id  — Packages for a deal
+ *   GET    /api/contracts/:pkgId       — Get package + all forms + templates
+ *   POST   /api/contracts              — Create new package (with 1+ forms)
+ *   POST   /api/contracts/:pkgId/forms — Add a form to existing package
+ *   PATCH  /api/contracts/:pkgId/forms/:contractId — Update form field values
+ *   DELETE /api/contracts/:pkgId/forms/:contractId — Remove form from package
+ *   DELETE /api/contracts/:pkgId       — Delete entire package
+ *   GET    /api/contracts/:pkgId/export/pdf   — Export all forms as one PDF
+ *   GET    /api/contracts/:pkgId/export/wafpkg — Export as multi-form WAFPKG
  */
 
 const express = require('express');
@@ -28,22 +30,66 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
   const router = express.Router();
   router.use(requireAuth);
 
-  // Helper: get pool or 503
   function pool(req, res) {
     const p = getPool();
     if (!p) { res.status(503).json({ error: 'Database not configured' }); return null; }
     return p;
   }
 
-  // ── GET /api/contracts — List all ──
+  // Helper: load CRM data for auto-fill (deal + property + contacts)
+  async function loadCrmData(p, dealId) {
+    const { rows: deals } = await p.query('SELECT * FROM deals WHERE deal_id = $1', [dealId]);
+    if (!deals.length) return null;
+    const deal = deals[0];
+
+    const { rows: propLinks } = await p.query(`
+      SELECT p.* FROM properties p
+      JOIN deal_properties dp ON dp.property_id = p.property_id
+      WHERE dp.deal_id = $1 LIMIT 1
+    `, [dealId]);
+
+    const { rows: contactLinks } = await p.query(`
+      SELECT c.* FROM contacts c
+      JOIN deal_contacts dc ON dc.contact_id = c.contact_id
+      WHERE dc.deal_id = $1
+    `, [dealId]);
+
+    return {
+      deal,
+      property: propLinks[0] || null,
+      buyerContact: contactLinks[0] || null,
+      sellerContact: contactLinks[1] || null,
+    };
+  }
+
+  // Helper: create one form within a package, with auto-fill
+  async function createForm(p, packageId, dealId, formCode, formOrder, crmData, author) {
+    const templatePath = path.join(PARSED_DIR, formCode + '.json');
+    if (!fs.existsSync(templatePath)) throw new Error('Unknown form code: ' + formCode);
+    const template = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
+
+    const fieldValues = crmData ? autoFillFields(template.fields, crmData) : {};
+
+    const { rows } = await p.query(`
+      INSERT INTO contracts (package_id, deal_id, form_code, template_id, name, field_values, author, form_order)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING *
+    `, [packageId, dealId, formCode, template.templateId, template.name, JSON.stringify(fieldValues), author, formOrder]);
+
+    return { contract: rows[0], autoFilledCount: Object.keys(fieldValues).length };
+  }
+
+  // ── GET /api/contracts — List all packages ──
   router.get('/', async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
       const { rows } = await p.query(`
-        SELECT c.*, d.deal_name
-        FROM contracts c
-        LEFT JOIN deals d ON d.deal_id = c.deal_id
-        ORDER BY c.updated_at DESC
+        SELECT cp.*, d.deal_name,
+          (SELECT count(*) FROM contracts c WHERE c.package_id = cp.package_id) AS form_count,
+          (SELECT array_agg(c.form_code ORDER BY c.form_order) FROM contracts c WHERE c.package_id = cp.package_id) AS form_codes
+        FROM contract_packages cp
+        LEFT JOIN deals d ON d.deal_id = cp.deal_id
+        ORDER BY cp.updated_at DESC
       `);
       res.json({ rows });
     } catch (err) {
@@ -66,132 +112,141 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
     }
   });
 
-  // ── GET /api/contracts/by-deal/:dealId — Contracts for a deal ──
+  // ── GET /api/contracts/by-deal/:dealId — Packages for a deal ──
   router.get('/by-deal/:dealId', async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
-      const dealId = req.params.dealId;
-      if (!dealId) return res.status(400).json({ error: 'Invalid deal ID' });
-
       const { rows } = await p.query(`
-        SELECT contract_id, form_code, name, status, created_at, updated_at
-        FROM contracts
-        WHERE deal_id = $1
-        ORDER BY created_at DESC
-      `, [dealId]);
+        SELECT cp.*, d.deal_name,
+          (SELECT array_agg(c.form_code ORDER BY c.form_order) FROM contracts c WHERE c.package_id = cp.package_id) AS form_codes
+        FROM contract_packages cp
+        LEFT JOIN deals d ON d.deal_id = cp.deal_id
+        WHERE cp.deal_id = $1
+        ORDER BY cp.created_at DESC
+      `, [req.params.dealId]);
       res.json({ rows });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // ── GET /api/contracts/:id — Single contract ──
-  router.get('/:id', async (req, res) => {
+  // ── GET /api/contracts/:pkgId — Get package + all forms + templates ──
+  router.get('/:pkgId', async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) return res.status(400).json({ error: 'Invalid contract ID' });
+      const pkgId = parseInt(req.params.pkgId, 10);
+      if (isNaN(pkgId)) return res.status(400).json({ error: 'Invalid package ID' });
 
-      const { rows } = await p.query(`
-        SELECT c.*, d.deal_name
-        FROM contracts c
-        LEFT JOIN deals d ON d.deal_id = c.deal_id
-        WHERE c.contract_id = $1
-      `, [id]);
+      const { rows: pkgs } = await p.query(`
+        SELECT cp.*, d.deal_name
+        FROM contract_packages cp
+        LEFT JOIN deals d ON d.deal_id = cp.deal_id
+        WHERE cp.package_id = $1
+      `, [pkgId]);
+      if (!pkgs.length) return res.status(404).json({ error: 'Package not found' });
 
-      if (rows.length === 0) return res.status(404).json({ error: 'Contract not found' });
+      // Load all forms in this package
+      const { rows: forms } = await p.query(`
+        SELECT * FROM contracts WHERE package_id = $1 ORDER BY form_order, contract_id
+      `, [pkgId]);
 
-      // Load template fields for the editor
-      const templatePath = path.join(PARSED_DIR, rows[0].form_code + '.json');
-      let template = null;
-      if (fs.existsSync(templatePath)) {
-        template = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
-      }
+      // Load template for each form
+      const formsWithTemplates = forms.map(form => {
+        const templatePath = path.join(PARSED_DIR, form.form_code + '.json');
+        let template = null;
+        if (fs.existsSync(templatePath)) {
+          template = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
+        }
+        return { ...form, template };
+      });
 
-      res.json({ contract: rows[0], template });
+      res.json({ package: pkgs[0], forms: formsWithTemplates });
     } catch (err) {
+      console.error('GET /api/contracts/:pkgId error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
 
-  // ── POST /api/contracts — Create new contract ──
+  // ── POST /api/contracts — Create new package with 1+ forms ──
   router.post('/', async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
-      const { dealId, formCode, name } = req.body;
-      if (!dealId || !formCode || !name) {
-        return res.status(400).json({ error: 'dealId, formCode, and name are required' });
+      const { dealId, formCodes, name } = req.body;
+      // Support both old (formCode: string) and new (formCodes: string[]) API
+      const codes = formCodes || (req.body.formCode ? [req.body.formCode] : []);
+      if (!dealId || !codes.length || !name) {
+        return res.status(400).json({ error: 'dealId, formCodes (or formCode), and name are required' });
       }
-
-      // Load template
-      const templatePath = path.join(PARSED_DIR, formCode + '.json');
-      if (!fs.existsSync(templatePath)) {
-        return res.status(404).json({ error: 'Unknown form code: ' + formCode });
-      }
-      const template = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
-
-      // Load deal + linked records for auto-fill
-      const { rows: deals } = await p.query('SELECT * FROM deals WHERE deal_id = $1', [dealId]);
-      if (deals.length === 0) return res.status(404).json({ error: 'Deal not found' });
-      const deal = deals[0];
-
-      // Get linked property (first one)
-      const { rows: propLinks } = await p.query(`
-        SELECT p.* FROM properties p
-        JOIN deal_properties dp ON dp.property_id = p.property_id
-        WHERE dp.deal_id = $1
-        LIMIT 1
-      `, [dealId]);
-      const property = propLinks[0] || null;
-
-      // Get linked contacts (deal_contacts has no role column)
-      const { rows: contactLinks } = await p.query(`
-        SELECT c.* FROM contacts c
-        JOIN deal_contacts dc ON dc.contact_id = c.contact_id
-        WHERE dc.deal_id = $1
-      `, [dealId]);
-
-      // Determine buyer/seller: first contact as buyer, second as seller
-      let buyerContact = contactLinks.length > 0 ? contactLinks[0] : null;
-      let sellerContact = contactLinks.length > 1 ? contactLinks[1] : null;
-
-      // full_name already exists on contacts table — no need to build it
-
-      // Auto-fill fields from CRM data
-      const fieldValues = autoFillFields(template.fields, {
-        deal, property, buyerContact, sellerContact,
-      });
 
       const author = req.user?.username || req.user?.email || 'david mudge';
+      const crmData = await loadCrmData(p, dealId);
+      if (!crmData) return res.status(404).json({ error: 'Deal not found' });
 
-      const { rows: inserted } = await p.query(`
-        INSERT INTO contracts (deal_id, form_code, template_id, name, field_values, author)
-        VALUES ($1, $2, $3, $4, $5, $6)
+      // Create the package
+      const { rows: pkgRows } = await p.query(`
+        INSERT INTO contract_packages (deal_id, name, author)
+        VALUES ($1, $2, $3)
         RETURNING *
-      `, [dealId, formCode, template.templateId, name, JSON.stringify(fieldValues), author]);
+      `, [dealId, name, author]);
+      const pkg = pkgRows[0];
 
-      res.status(201).json({ contract: inserted[0], autoFilledCount: Object.keys(fieldValues).length });
+      // Create each form within the package
+      const createdForms = [];
+      for (let i = 0; i < codes.length; i++) {
+        const result = await createForm(p, pkg.package_id, dealId, codes[i], i, crmData, author);
+        createdForms.push(result);
+      }
+
+      res.status(201).json({
+        package: pkg,
+        forms: createdForms.map(f => f.contract),
+        autoFilledCounts: createdForms.map(f => f.autoFilledCount),
+      });
     } catch (err) {
       console.error('POST /api/contracts error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });
 
-  // ── PATCH /api/contracts/:id — Update field values ──
-  router.patch('/:id', async (req, res) => {
+  // ── POST /api/contracts/:pkgId/forms — Add a form to existing package ──
+  router.post('/:pkgId/forms', async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) return res.status(400).json({ error: 'Invalid contract ID' });
+      const pkgId = parseInt(req.params.pkgId, 10);
+      if (isNaN(pkgId)) return res.status(400).json({ error: 'Invalid package ID' });
 
-      // Check contract exists and is draft
-      const { rows: existing } = await p.query(
-        'SELECT status FROM contracts WHERE contract_id = $1', [id]
+      const { formCode } = req.body;
+      if (!formCode) return res.status(400).json({ error: 'formCode is required' });
+
+      // Get package info
+      const { rows: pkgs } = await p.query('SELECT * FROM contract_packages WHERE package_id = $1', [pkgId]);
+      if (!pkgs.length) return res.status(404).json({ error: 'Package not found' });
+
+      // Get current max form_order
+      const { rows: maxOrder } = await p.query(
+        'SELECT COALESCE(MAX(form_order), -1) + 1 AS next_order FROM contracts WHERE package_id = $1', [pkgId]
       );
-      if (existing.length === 0) return res.status(404).json({ error: 'Contract not found' });
-      if (existing[0].status === 'Final') {
-        return res.status(403).json({ error: 'Cannot edit a finalized contract' });
-      }
+
+      const author = req.user?.username || req.user?.email || 'david mudge';
+      const crmData = await loadCrmData(p, pkgs[0].deal_id);
+      const result = await createForm(p, pkgId, pkgs[0].deal_id, formCode, maxOrder[0].next_order, crmData, author);
+
+      // Touch package updated_at
+      await p.query('UPDATE contract_packages SET updated_at = NOW() WHERE package_id = $1', [pkgId]);
+
+      res.status(201).json(result);
+    } catch (err) {
+      console.error('POST /api/contracts/:pkgId/forms error:', err.message);
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── PATCH /api/contracts/:pkgId/forms/:contractId — Update form field values ──
+  router.patch('/:pkgId/forms/:contractId', async (req, res) => {
+    const p = pool(req, res); if (!p) return;
+    try {
+      const contractId = parseInt(req.params.contractId, 10);
+      if (isNaN(contractId)) return res.status(400).json({ error: 'Invalid contract ID' });
 
       const { fieldValues, name, notes } = req.body;
       const updates = [];
@@ -199,31 +254,26 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
       let idx = 1;
 
       if (fieldValues) {
-        // Merge new field values into existing JSONB
         updates.push(`field_values = field_values || $${idx}::jsonb`);
         params.push(JSON.stringify(fieldValues));
         idx++;
       }
-      if (name !== undefined) {
-        updates.push(`name = $${idx}`);
-        params.push(name);
-        idx++;
-      }
-      if (notes !== undefined) {
-        updates.push(`notes = $${idx}`);
-        params.push(notes);
-        idx++;
-      }
+      if (name !== undefined) { updates.push(`name = $${idx}`); params.push(name); idx++; }
+      if (notes !== undefined) { updates.push(`notes = $${idx}`); params.push(notes); idx++; }
 
-      if (updates.length === 0) {
-        return res.status(400).json({ error: 'No fields to update' });
-      }
+      if (!updates.length) return res.status(400).json({ error: 'No fields to update' });
 
-      params.push(id);
+      params.push(contractId);
       const { rows } = await p.query(
         `UPDATE contracts SET ${updates.join(', ')} WHERE contract_id = $${idx} RETURNING *`,
         params
       );
+      if (!rows.length) return res.status(404).json({ error: 'Form not found' });
+
+      // Touch package updated_at
+      if (rows[0].package_id) {
+        await p.query('UPDATE contract_packages SET updated_at = NOW() WHERE package_id = $1', [rows[0].package_id]);
+      }
 
       res.json({ contract: rows[0] });
     } catch (err) {
@@ -231,61 +281,57 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
     }
   });
 
-  // ── PATCH /api/contracts/:id/finalize — Set status to Final ──
-  router.patch('/:id/finalize', async (req, res) => {
+  // ── DELETE /api/contracts/:pkgId/forms/:contractId — Remove form from package ──
+  router.delete('/:pkgId/forms/:contractId', async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) return res.status(400).json({ error: 'Invalid contract ID' });
+      const contractId = parseInt(req.params.contractId, 10);
+      if (isNaN(contractId)) return res.status(400).json({ error: 'Invalid contract ID' });
 
-      const { rows } = await p.query(
-        `UPDATE contracts SET status = 'Final' WHERE contract_id = $1 AND status = 'Draft' RETURNING *`,
-        [id]
-      );
-      if (rows.length === 0) {
-        return res.status(404).json({ error: 'Contract not found or already finalized' });
-      }
-      res.json({ contract: rows[0] });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  });
+      const { rowCount } = await p.query('DELETE FROM contracts WHERE contract_id = $1', [contractId]);
+      if (rowCount === 0) return res.status(404).json({ error: 'Form not found' });
 
-  // ── DELETE /api/contracts/:id — Delete draft contract ──
-  router.delete('/:id', async (req, res) => {
-    const p = pool(req, res); if (!p) return;
-    try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) return res.status(400).json({ error: 'Invalid contract ID' });
-
-      const { rowCount } = await p.query(
-        `DELETE FROM contracts WHERE contract_id = $1 AND status = 'Draft'`,
-        [id]
-      );
-      if (rowCount === 0) {
-        return res.status(404).json({ error: 'Contract not found or is finalized (cannot delete)' });
-      }
       res.json({ deleted: true });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // ── GET /api/contracts/:id/export/wafpkg — Export as WAFPKG ──
-  router.get('/:id/export/wafpkg', async (req, res) => {
+  // ── DELETE /api/contracts/:pkgId — Delete entire package ──
+  router.delete('/:pkgId', async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
-      const id = parseInt(req.params.id, 10);
-      if (isNaN(id)) return res.status(400).json({ error: 'Invalid contract ID' });
+      const pkgId = parseInt(req.params.pkgId, 10);
+      if (isNaN(pkgId)) return res.status(400).json({ error: 'Invalid package ID' });
 
-      const { rows } = await p.query('SELECT * FROM contracts WHERE contract_id = $1', [id]);
-      if (rows.length === 0) return res.status(404).json({ error: 'Contract not found' });
+      // CASCADE deletes forms too
+      const { rowCount } = await p.query('DELETE FROM contract_packages WHERE package_id = $1', [pkgId]);
+      if (rowCount === 0) return res.status(404).json({ error: 'Package not found' });
 
-      const contract = rows[0];
-      const encrypted = req.query.encrypt !== 'false'; // default: encrypted
-      const buffer = exportWafpkg(contract, encrypted);
+      res.json({ deleted: true });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  });
 
-      const filename = (contract.name || 'contract').replace(/[^a-zA-Z0-9 _-]/g, '') + '.wafpkg';
+  // ── GET /api/contracts/:pkgId/export/wafpkg — Export as multi-form WAFPKG ──
+  router.get('/:pkgId/export/wafpkg', async (req, res) => {
+    const p = pool(req, res); if (!p) return;
+    try {
+      const pkgId = parseInt(req.params.pkgId, 10);
+      if (isNaN(pkgId)) return res.status(400).json({ error: 'Invalid package ID' });
+
+      const { rows: pkgs } = await p.query('SELECT * FROM contract_packages WHERE package_id = $1', [pkgId]);
+      if (!pkgs.length) return res.status(404).json({ error: 'Package not found' });
+
+      const { rows: forms } = await p.query(
+        'SELECT * FROM contracts WHERE package_id = $1 ORDER BY form_order', [pkgId]
+      );
+
+      const encrypted = req.query.encrypt !== 'false';
+      const buffer = exportWafpkg(pkgs[0], forms, encrypted);
+
+      const filename = (pkgs[0].name || 'package').replace(/[^a-zA-Z0-9 _-]/g, '') + '.wafpkg';
       res.setHeader('Content-Type', 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
       res.send(buffer);
@@ -295,7 +341,6 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
     }
   });
 
-  // Mount under /api/contracts
   app.use('/api/contracts', router);
 }
 
