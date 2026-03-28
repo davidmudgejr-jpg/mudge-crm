@@ -29,11 +29,13 @@ export default function ContractEditor() {
   const [activeFormIdx, setActiveFormIdx] = useState(0);
   const [fieldValues, setFieldValues] = useState({}); // { contractId: { annotationId: value } }
   const [strikeouts, setStrikeouts] = useState({}); // { contractId: { paraId: true } }
+  const [addedText, setAddedText] = useState({}); // { contractId: { paraId: 'inserted text' } }
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [zoom, setZoom] = useState(0.35);
   const [showAddForm, setShowAddForm] = useState(false);
   const [templates, setTemplates] = useState([]);
+  const [addTextMode, setAddTextMode] = useState(false);
   const saveTimer = useRef(null);
 
   // Load package + all forms
@@ -45,15 +47,29 @@ export default function ContractEditor() {
         const data = await res.json();
         setPkg(data.package);
         setForms(data.forms || []);
-        // Initialize field values + strikeouts per form
+        // Initialize field values, strikeouts, and added text per form
+        // __addtext__<paraId> keys in field_values are added-text insertions (not real fields)
         const fv = {};
         const so = {};
+        const at = {};
         for (const f of (data.forms || [])) {
-          fv[f.contract_id] = f.field_values || {};
+          const raw = f.field_values || {};
+          const cleanFv = {};
+          const extractedAt = {};
+          for (const [k, v] of Object.entries(raw)) {
+            if (k.startsWith('__addtext__')) {
+              extractedAt[k.slice(11)] = v; // strip prefix, key = paraId
+            } else {
+              cleanFv[k] = v;
+            }
+          }
+          fv[f.contract_id] = cleanFv;
           so[f.contract_id] = f.strikeouts || {};
+          at[f.contract_id] = extractedAt;
         }
         setFieldValues(fv);
         setStrikeouts(so);
+        setAddedText(at);
       } catch (err) {
         addToast(err.message, 'error');
         navigate('/contracts');
@@ -125,6 +141,23 @@ export default function ContractEditor() {
         body: JSON.stringify({ strikeouts: formSo }),
       }).catch(() => {});
       return { ...prev, [activeContractId]: formSo };
+    });
+  }, [activeContractId, id]);
+
+  // Insert red addendum text after a paragraph
+  const activeAddedText = activeContractId ? (addedText[activeContractId] || {}) : {};
+
+  const handleAddText = useCallback((paraId, text) => {
+    if (!activeContractId) return;
+    const key = `__addtext__${paraId}`;
+    setAddedText(prev => {
+      const formAt = { ...prev[activeContractId], [paraId]: text };
+      fetch(`${API}/api/contracts/${id}/forms/${activeContractId}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ fieldValues: { [key]: text } }),
+      }).catch(() => {});
+      return { ...prev, [activeContractId]: formAt };
     });
   }, [activeContractId, id]);
 
@@ -258,18 +291,46 @@ export default function ContractEditor() {
 
           {/* Strikeout count */}
           {Object.keys(activeStrikeouts).length > 0 && (
-            <span className="text-xs text-red-400 border-r border-crm-border pr-3 mr-1">
+            <span className="text-xs text-red-400">
               {Object.keys(activeStrikeouts).length} struck
             </span>
           )}
 
-          <span className="text-xs text-crm-muted">
+          {/* Added text count */}
+          {Object.keys(activeAddedText).length > 0 && (
+            <span className="text-xs text-red-400">
+              {Object.keys(activeAddedText).length} added
+            </span>
+          )}
+
+          <span className="text-xs text-crm-muted border-l border-crm-border pl-3">
             {saving ? 'Saving...' : `${filledCount}/${editableFields.length} fields`}
           </span>
 
-          <span className="text-[10px] text-crm-muted/50 hidden lg:inline" title="Double-click any paragraph to strike it out">
-            dbl-click = strike
-          </span>
+          {/* Add Text mode toggle */}
+          <button
+            onClick={() => setAddTextMode(m => !m)}
+            title={addTextMode ? 'Exit add-text mode (click to cancel)' : 'Add Text — click a paragraph to insert red addendum text after it'}
+            className={`px-2.5 py-1.5 rounded-lg text-sm font-bold border transition-colors ${
+              addTextMode
+                ? 'bg-red-500/20 border-red-500 text-red-400'
+                : 'bg-crm-bg hover:bg-crm-hover border-crm-border text-crm-muted hover:text-crm-text'
+            }`}
+          >
+            T+
+          </button>
+
+          {addTextMode && (
+            <span className="text-[10px] text-red-400/70 hidden lg:inline">
+              click paragraph to insert
+            </span>
+          )}
+
+          {!addTextMode && (
+            <span className="text-[10px] text-crm-muted/50 hidden lg:inline">
+              dbl-click = strike
+            </span>
+          )}
 
           <button
             onClick={handleExportPDF}
@@ -390,6 +451,9 @@ export default function ContractEditor() {
               zoom={zoom}
               strikeouts={activeStrikeouts}
               onStrikeoutToggle={handleStrikeoutToggle}
+              addTextMode={addTextMode}
+              addedText={activeAddedText}
+              onAddText={handleAddText}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-crm-muted">

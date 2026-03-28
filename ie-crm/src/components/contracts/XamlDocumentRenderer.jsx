@@ -12,6 +12,51 @@
 import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import './contracts.css';
 
+/**
+ * Inline editor that appears below a paragraph in add-text mode.
+ * Renders as red Georgia bold text matching AIR CRE addendum convention.
+ */
+function AddTextEditor({ onConfirm, onCancel, initialValue = '' }) {
+  const [text, setText] = useState(initialValue);
+  const ref = useRef(null);
+  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
+
+  return (
+    <div style={{ margin: '2pt 0 4pt', display: 'flex', alignItems: 'center', gap: '6px' }}>
+      <input
+        ref={ref}
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') { e.preventDefault(); if (text.trim()) onConfirm(text.trim()); }
+          if (e.key === 'Escape') onCancel();
+        }}
+        placeholder="Type addendum text…"
+        style={{
+          flex: 1,
+          color: '#FF0000',
+          fontFamily: 'Georgia, Times New Roman, serif',
+          fontSize: '13pt',
+          fontWeight: 'bold',
+          border: 'none',
+          borderBottom: '1px dashed #FF0000',
+          background: 'rgba(255,0,0,0.04)',
+          outline: 'none',
+          padding: '2px 4px',
+        }}
+      />
+      <button
+        onClick={() => text.trim() && onConfirm(text.trim())}
+        style={{ color: '#FF0000', fontSize: '10px', padding: '2px 6px', border: '1px solid #FF0000', borderRadius: '3px', background: 'transparent', cursor: 'pointer', fontWeight: 'bold' }}
+      >Insert</button>
+      <button
+        onClick={onCancel}
+        style={{ color: '#999', fontSize: '10px', padding: '2px 6px', border: '1px solid #ccc', borderRadius: '3px', background: 'transparent', cursor: 'pointer' }}
+      >✕</button>
+    </div>
+  );
+}
+
 // Style name → CSS class mapping
 const PARA_STYLE_MAP = {
   // Indent levels
@@ -137,12 +182,15 @@ function fullName(node) {
  *   editable      — whether fields can be edited (false for Final/export)
  *   zoom          — scale factor (0.35–1.0, default 0.5 for 2-up spread)
  */
-export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, onFieldChange, editable = true, zoom = 0.5, strikeouts = {}, onStrikeoutToggle }) {
+export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, onFieldChange, editable = true, zoom = 0.5, strikeouts = {}, onStrikeoutToggle, addTextMode = false, addedText = {}, onAddText }) {
+  // All hooks must be called unconditionally before any early return
   const docRef = useRef(null);
+  const contentRef = useRef(null);
+  const [insertingAt, setInsertingAt] = useState(null); // paraId where inline editor is shown
+  const [contentHeight, setContentHeight] = useState(0);
 
   // Page dimensions at full size (8.5in × 11in at 96dpi)
   const PAGE_W = 816; // 8.5 * 96
-  const PAGE_H = 1056; // 11 * 96
 
   // Parse XAML once (memoized)
   const xmlRoot = useMemo(() => {
@@ -163,15 +211,8 @@ export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, on
     }
   }, [onFieldChange]);
 
-  if (!xmlRoot) {
-    return <div className="text-crm-muted p-8 text-center">No document content to display</div>;
-  }
-
   // Continuous scroll with zoom — scale the content and adjust the outer
   // wrapper's height so the scrollbar reflects the visual (scaled) size.
-  const contentRef = useRef(null);
-  const [contentHeight, setContentHeight] = useState(0);
-
   useEffect(() => {
     if (!contentRef.current) return;
     const measure = () => setContentHeight(contentRef.current.scrollHeight);
@@ -180,6 +221,10 @@ export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, on
     observer.observe(contentRef.current);
     return () => observer.disconnect();
   }, [xmlRoot, fieldValues]);
+
+  if (!xmlRoot) {
+    return <div className="text-crm-muted p-8 text-center">No document content to display</div>;
+  }
 
   const scaledHeight = contentHeight * zoom;
 
@@ -197,7 +242,7 @@ export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, on
           marginLeft: `${-PAGE_W / 2}px`,
         }}
       >
-        {renderNode(xmlRoot, { fieldValues, onFieldBlur: handleFieldBlur, onCheckboxChange: handleCheckboxChange, editable, strikeouts, onStrikeoutToggle, key: 'root' })}
+        {renderNode(xmlRoot, { fieldValues, onFieldBlur: handleFieldBlur, onCheckboxChange: handleCheckboxChange, editable, strikeouts, onStrikeoutToggle, addTextMode, addedText, onAddText, insertingAt, setInsertingAt, key: 'root' })}
       </div>
     </div>
   );
@@ -289,6 +334,8 @@ function renderNode(node, ctx, index = 0) {
     const spacingBefore = node.getAttribute('SpacingBefore');
     const paraId = `p-${key}`;
     const isStruck = ctx.strikeouts?.[paraId];
+    const addedTextValue = ctx.addedText?.[paraId];
+    const isInserting = ctx.insertingAt === paraId;
 
     let classes = 'air-para';
     if (PARA_STYLE_MAP[styleName]) {
@@ -298,6 +345,7 @@ function renderNode(node, ctx, index = 0) {
     else if (textAlign === 'Right') classes += ' air-align-right';
     else if (textAlign === 'Justify') classes += ' air-align-justify';
     if (isStruck) classes += ' air-para-struck';
+    if (ctx.addTextMode) classes += ' air-para-add-mode';
 
     const style = {};
     if (spacingBefore && parseFloat(spacingBefore) > 0) {
@@ -306,20 +354,57 @@ function renderNode(node, ctx, index = 0) {
 
     const children = renderParagraphChildren(node, { ...ctx, key });
 
-    return (
+    const handleClick = ctx.addTextMode
+      ? (e) => { e.preventDefault(); e.stopPropagation(); ctx.setInsertingAt?.(paraId); }
+      : undefined;
+    const handleDoubleClick = !ctx.addTextMode && ctx.onStrikeoutToggle
+      ? (e) => { e.preventDefault(); ctx.onStrikeoutToggle(paraId); }
+      : undefined;
+
+    const para = (
       <p
         key={key}
         className={classes}
         style={Object.keys(style).length ? style : undefined}
         data-para-id={paraId}
-        onDoubleClick={ctx.onStrikeoutToggle ? (e) => {
-          e.preventDefault();
-          ctx.onStrikeoutToggle(paraId);
-        } : undefined}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
       >
         {children}
       </p>
     );
+
+    // If there's added text or an active inline editor, wrap in a fragment
+    if (addedTextValue || isInserting) {
+      return (
+        <React.Fragment key={key + '-group'}>
+          {para}
+          {addedTextValue && !isInserting && (
+            <p
+              key={key + '-added'}
+              className="air-added-text air-para"
+              title={ctx.addTextMode ? 'Click to edit' : undefined}
+              onClick={ctx.addTextMode ? (e) => { e.preventDefault(); ctx.setInsertingAt?.(paraId); } : undefined}
+            >
+              {addedTextValue}
+            </p>
+          )}
+          {isInserting && (
+            <AddTextEditor
+              key={key + '-editor'}
+              initialValue={addedTextValue || ''}
+              onConfirm={(text) => {
+                ctx.onAddText?.(paraId, text);
+                ctx.setInsertingAt?.(null);
+              }}
+              onCancel={() => ctx.setInsertingAt?.(null)}
+            />
+          )}
+        </React.Fragment>
+      );
+    }
+
+    return para;
   }
 
   // Table

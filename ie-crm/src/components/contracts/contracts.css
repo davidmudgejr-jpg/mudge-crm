@@ -269,6 +269,17 @@
   user-select: text;
 }
 
+/* Add-text mode: paragraphs highlight on hover to indicate clickability */
+.air-para-add-mode {
+  cursor: crosshair;
+}
+
+.air-para-add-mode:hover {
+  background: rgba(255, 0, 0, 0.04);
+  outline: 1px dashed rgba(255, 0, 0, 0.25);
+  outline-offset: 1px;
+}
+
 /* Page break for PDF export */
 .air-page-break {
   page-break-after: always;
