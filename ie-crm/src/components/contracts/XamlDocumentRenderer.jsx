@@ -201,27 +201,51 @@ function renderNode(node, ctx, index = 0) {
     return renderChildren(node, { ...ctx, key });
   }
 
-  // Section — page
+  // Section — page with footer
   if (name === 'Section') {
     const margin = node.getAttribute('PageMargin') || '48,48,48,48';
     const [top, right, bottom, left] = margin.split(',').map(v => (parseFloat(v) / 96).toFixed(2) + 'in');
+
+    // Extract footer content from Section.Footers → Footers → Footers.Default → Footer → Footer.Body → RadDocument → Section
+    let footerNode = null;
+    const footersEl = Array.from(node.childNodes).find(c => localName(c) === 'Section.Footers');
+    if (footersEl) {
+      // Walk: Footers → Footers.Default → Footer → Footer.Body → RadDocument → Section
+      const walk = (n, names) => {
+        if (!names.length) return n;
+        for (const child of n.childNodes) {
+          if (child.nodeType === 1 && localName(child) === names[0]) {
+            return walk(child, names.slice(1));
+          }
+        }
+        return null;
+      };
+      footerNode = walk(footersEl, ['Footers', 'Footers.Default', 'Footer', 'Footer.Body', 'RadDocument', 'Section']);
+    }
+
     return (
       <div key={key} className="air-page">
         <div className="air-page-body" style={{ padding: `${top} ${right} ${bottom} ${left}` }}>
           {renderChildren(node, { ...ctx, key }, /* skipHeaders */ true)}
         </div>
+        {footerNode && (
+          <div className="air-page-footer" style={{ padding: `0 ${left} 0.15in ${left}` }}>
+            {renderChildren(footerNode, { ...ctx, key: key + '-footer' })}
+          </div>
+        )}
       </div>
     );
   }
 
-  // Headers and Footers — render at top/bottom of page
+  // Headers — skip (AIR logo, mostly visual)
   if (name === 'Section.Headers' || name === 'Headers' || name === 'Headers.Default' ||
       name === 'Header' || name === 'Header.Body') {
-    return null; // Skip headers for now (AIR logo, mostly visual)
+    return null;
   }
+  // Footers — handled above in Section renderer
   if (name === 'Section.Footers' || name === 'Footers' || name === 'Footers.Default' ||
       name === 'Footer' || name === 'Footer.Body') {
-    return null; // Skip footers (page numbers, initials — not needed for editor)
+    return null;
   }
 
   // Paragraph
@@ -401,6 +425,8 @@ function renderParagraphChildren(paraNode, ctx) {
       const fontWeight = node.getAttribute('FontWeight');
       const fontStyle = node.getAttribute('FontStyle');
       const fontSize = node.getAttribute('FontSize');
+      const strikethrough = node.getAttribute('Strikethrough');
+      const foreColor = node.getAttribute('ForeColor');
 
       if (!text && !node.childNodes.length) { i++; continue; }
 
@@ -413,11 +439,24 @@ function renderParagraphChildren(paraNode, ctx) {
       }
       if (fontWeight === 'Bold') classes += ' air-span-bold';
       if (fontStyle === 'Italic') classes += ' air-span-italic';
+      if (strikethrough === 'True') classes += ' air-span-strikethrough';
 
       const style = {};
       if (fontSize) {
         const pt = parseFloat(fontSize);
         if (pt > 14) style.fontSize = pt + 'pt'; // Only override for larger text
+      }
+      // Red text (AIR CRE addendum/rider text is typically red)
+      if (foreColor && foreColor !== '#FF000000') {
+        // Convert #AARRGGBB to CSS rgba
+        const hex = foreColor.replace('#', '');
+        if (hex.length === 8) {
+          const a = parseInt(hex.substring(0, 2), 16) / 255;
+          const r = parseInt(hex.substring(2, 4), 16);
+          const g = parseInt(hex.substring(4, 6), 16);
+          const b = parseInt(hex.substring(6, 8), 16);
+          style.color = `rgba(${r},${g},${b},${a})`;
+        }
       }
 
       children.push(

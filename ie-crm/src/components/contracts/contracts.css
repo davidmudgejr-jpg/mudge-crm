@@ -21,10 +21,40 @@
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
   position: relative;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.air-page + .air-page {
+  break-before: page;
 }
 
 .air-page-body {
   padding: 0.5in;
+  flex: 1;
+}
+
+/* Page footer — initials + copyright at bottom of each page */
+.air-page-footer {
+  border-top: 1px solid #ccc;
+  margin-top: auto;
+  font-size: 8pt;
+  color: #666;
+  line-height: 1.4;
+}
+
+.air-page-footer .air-para {
+  margin: 0;
+  font-size: 8pt;
+}
+
+.air-page-footer .air-field-signature {
+  display: inline-block;
+  width: 1.5in;
+  border-bottom: 1px solid #999;
+  font-family: 'Courier New', monospace;
+  font-size: 8pt;
+  color: #999;
 }
 
 /* Paragraph styles */
@@ -74,6 +104,25 @@
 
 .air-span-italic {
   font-style: italic;
+}
+
+/* Strikethrough — AIR CRE convention: struck text renders in red with line-through.
+   The AIR desktop app applies this visually even though the XAML only stores Strikethrough="True".
+   Matching the exact look from the PDF output. */
+.air-span-strikethrough {
+  text-decoration: line-through;
+  text-decoration-color: #FF0000;
+  text-decoration-thickness: 1.5px;
+  color: #FF0000;
+}
+
+/* User-added text — AIR CRE convention: red, bold, larger (Georgia 16pt).
+   Text added by users during negotiations appears in red to distinguish from boilerplate. */
+.air-added-text {
+  color: #FF0000;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 16px;
+  font-weight: bold;
 }
 
 /* Editable field (user-entered data) */
