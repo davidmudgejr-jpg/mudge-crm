@@ -129,6 +129,29 @@
   text-decoration-color: #0000FF;
 }
 
+/* Struck paragraph — entire paragraph struck through (double-click to toggle).
+   Boilerplate text turns red; blue field content stays blue. */
+.air-para-struck,
+.air-para-struck .air-span,
+.air-para-struck .air-span-original,
+.air-para-struck .air-span-bold {
+  text-decoration: line-through;
+  text-decoration-color: #FF0000;
+  text-decoration-thickness: 1.5px;
+  color: #FF0000;
+}
+
+.air-para-struck .air-field-editable {
+  text-decoration: line-through;
+  text-decoration-color: #0000FF;
+  text-decoration-thickness: 1.5px;
+}
+
+.air-para[data-para-id]:hover {
+  cursor: pointer;
+  background: rgba(255, 255, 255, 0.03);
+}
+
 /* User-added text — AIR CRE convention: red, bold, larger (Georgia 16pt).
    Text added by users during negotiations appears in red to distinguish from boilerplate. */
 .air-added-text {

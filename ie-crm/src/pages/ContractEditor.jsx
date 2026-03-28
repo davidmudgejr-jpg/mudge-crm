@@ -28,6 +28,7 @@ export default function ContractEditor() {
   const [forms, setForms] = useState([]);
   const [activeFormIdx, setActiveFormIdx] = useState(0);
   const [fieldValues, setFieldValues] = useState({}); // { contractId: { annotationId: value } }
+  const [strikeouts, setStrikeouts] = useState({}); // { contractId: { paraId: true } }
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [zoom, setZoom] = useState(0.35);
@@ -44,12 +45,15 @@ export default function ContractEditor() {
         const data = await res.json();
         setPkg(data.package);
         setForms(data.forms || []);
-        // Initialize field values per form
+        // Initialize field values + strikeouts per form
         const fv = {};
+        const so = {};
         for (const f of (data.forms || [])) {
           fv[f.contract_id] = f.field_values || {};
+          so[f.contract_id] = f.strikeouts || {};
         }
         setFieldValues(fv);
+        setStrikeouts(so);
       } catch (err) {
         addToast(err.message, 'error');
         navigate('/contracts');
@@ -101,6 +105,28 @@ export default function ContractEditor() {
       return { ...prev, [activeContractId]: formFv };
     });
   }, [activeContractId, saveFieldValues]);
+
+  // Strikeout toggle — double-click a paragraph to strike/unstrike it
+  const activeStrikeouts = activeContractId ? (strikeouts[activeContractId] || {}) : {};
+
+  const handleStrikeoutToggle = useCallback((paraId) => {
+    if (!activeContractId) return;
+    setStrikeouts(prev => {
+      const formSo = { ...prev[activeContractId] };
+      if (formSo[paraId]) {
+        delete formSo[paraId];
+      } else {
+        formSo[paraId] = true;
+      }
+      // Save to server (no debounce — strikeout is an intentional action)
+      fetch(`${API}/api/contracts/${id}/forms/${activeContractId}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ strikeouts: formSo }),
+      }).catch(() => {});
+      return { ...prev, [activeContractId]: formSo };
+    });
+  }, [activeContractId, id]);
 
   // Add a form to the package
   const handleAddForm = async (formCode) => {
@@ -230,8 +256,19 @@ export default function ContractEditor() {
             <span className="text-xs text-crm-muted w-8 text-center font-mono">{Math.round(zoom * 100)}%</span>
           </div>
 
+          {/* Strikeout count */}
+          {Object.keys(activeStrikeouts).length > 0 && (
+            <span className="text-xs text-red-400 border-r border-crm-border pr-3 mr-1">
+              {Object.keys(activeStrikeouts).length} struck
+            </span>
+          )}
+
           <span className="text-xs text-crm-muted">
             {saving ? 'Saving...' : `${filledCount}/${editableFields.length} fields`}
+          </span>
+
+          <span className="text-[10px] text-crm-muted/50 hidden lg:inline" title="Double-click any paragraph to strike it out">
+            dbl-click = strike
           </span>
 
           <button
@@ -351,6 +388,8 @@ export default function ContractEditor() {
               onFieldChange={handleFieldChange}
               editable={true}
               zoom={zoom}
+              strikeouts={activeStrikeouts}
+              onStrikeoutToggle={handleStrikeoutToggle}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-crm-muted">

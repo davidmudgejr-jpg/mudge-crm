@@ -137,7 +137,7 @@ function fullName(node) {
  *   editable      — whether fields can be edited (false for Final/export)
  *   zoom          — scale factor (0.35–1.0, default 0.5 for 2-up spread)
  */
-export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, onFieldChange, editable = true, zoom = 0.5 }) {
+export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, onFieldChange, editable = true, zoom = 0.5, strikeouts = {}, onStrikeoutToggle }) {
   const docRef = useRef(null);
 
   // Page dimensions at full size (8.5in × 11in at 96dpi)
@@ -197,7 +197,7 @@ export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, on
           marginLeft: `${-PAGE_W / 2}px`,
         }}
       >
-        {renderNode(xmlRoot, { fieldValues, onFieldBlur: handleFieldBlur, onCheckboxChange: handleCheckboxChange, editable, key: 'root' })}
+        {renderNode(xmlRoot, { fieldValues, onFieldBlur: handleFieldBlur, onCheckboxChange: handleCheckboxChange, editable, strikeouts, onStrikeoutToggle, key: 'root' })}
       </div>
     </div>
   );
@@ -287,6 +287,8 @@ function renderNode(node, ctx, index = 0) {
     const styleName = node.getAttribute('StyleName') || '';
     const textAlign = node.getAttribute('TextAlignment');
     const spacingBefore = node.getAttribute('SpacingBefore');
+    const paraId = `p-${key}`;
+    const isStruck = ctx.strikeouts?.[paraId];
 
     let classes = 'air-para';
     if (PARA_STYLE_MAP[styleName]) {
@@ -295,6 +297,7 @@ function renderNode(node, ctx, index = 0) {
     if (textAlign === 'Center') classes += ' air-align-center';
     else if (textAlign === 'Right') classes += ' air-align-right';
     else if (textAlign === 'Justify') classes += ' air-align-justify';
+    if (isStruck) classes += ' air-para-struck';
 
     const style = {};
     if (spacingBefore && parseFloat(spacingBefore) > 0) {
@@ -304,7 +307,16 @@ function renderNode(node, ctx, index = 0) {
     const children = renderParagraphChildren(node, { ...ctx, key });
 
     return (
-      <p key={key} className={classes} style={Object.keys(style).length ? style : undefined}>
+      <p
+        key={key}
+        className={classes}
+        style={Object.keys(style).length ? style : undefined}
+        data-para-id={paraId}
+        onDoubleClick={ctx.onStrikeoutToggle ? (e) => {
+          e.preventDefault();
+          ctx.onStrikeoutToggle(paraId);
+        } : undefined}
+      >
         {children}
       </p>
     );

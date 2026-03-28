@@ -248,7 +248,7 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
       const contractId = parseInt(req.params.contractId, 10);
       if (isNaN(contractId)) return res.status(400).json({ error: 'Invalid contract ID' });
 
-      const { fieldValues, name, notes } = req.body;
+      const { fieldValues, strikeouts, name, notes } = req.body;
       const updates = [];
       const params = [];
       let idx = 1;
@@ -256,6 +256,11 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
       if (fieldValues) {
         updates.push(`field_values = field_values || $${idx}::jsonb`);
         params.push(JSON.stringify(fieldValues));
+        idx++;
+      }
+      if (strikeouts !== undefined) {
+        updates.push(`strikeouts = $${idx}::jsonb`);
+        params.push(JSON.stringify(strikeouts));
         idx++;
       }
       if (name !== undefined) { updates.push(`name = $${idx}`); params.push(name); idx++; }
