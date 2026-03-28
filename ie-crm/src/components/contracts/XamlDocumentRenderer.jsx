@@ -9,7 +9,7 @@
  * FieldRangeStart/End) become contentEditable spans or checkboxes.
  */
 
-import React, { useMemo, useCallback, useRef } from 'react';
+import React, { useMemo, useCallback, useRef, useState, useEffect } from 'react';
 import './contracts.css';
 
 // Style name → CSS class mapping
@@ -135,9 +135,14 @@ function fullName(node) {
  *   fieldValues   — { [annotationId]: value } object
  *   onFieldChange — (annotationId, newValue) => void
  *   editable      — whether fields can be edited (false for Final/export)
+ *   zoom          — scale factor (0.35–1.0, default 0.5 for 2-up spread)
  */
-export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, onFieldChange, editable = true }) {
+export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, onFieldChange, editable = true, zoom = 0.5 }) {
   const docRef = useRef(null);
+
+  // Page dimensions at full size (8.5in × 11in at 96dpi)
+  const PAGE_W = 816; // 8.5 * 96
+  const PAGE_H = 1056; // 11 * 96
 
   // Parse XAML once (memoized)
   const xmlRoot = useMemo(() => {
@@ -158,14 +163,91 @@ export default function XamlDocumentRenderer({ xamlContent, fieldValues = {}, on
     }
   }, [onFieldChange]);
 
+  // After rendering, measure the full content height and split into pages
+  const [pageCount, setPageCount] = useState(1);
+  const measuredRef = useRef(null);
+
+  useEffect(() => {
+    if (!measuredRef.current) return;
+    // Measure the full-size content height and compute page count
+    const el = measuredRef.current;
+    const observe = () => {
+      const contentH = el.scrollHeight;
+      // Each page body area is ~9.5in tall (11in minus ~1.5in margins/footer)
+      const bodyH = 9.5 * 96; // ~912px
+      const count = Math.max(1, Math.ceil(contentH / bodyH));
+      setPageCount(count);
+    };
+    // Observe after render
+    const timer = setTimeout(observe, 100);
+    return () => clearTimeout(timer);
+  }, [xmlRoot, fieldValues]);
+
   if (!xmlRoot) {
     return <div className="text-crm-muted p-8 text-center">No document content to display</div>;
   }
 
+  const scaledW = PAGE_W * zoom;
+  const scaledH = PAGE_H * zoom;
+  const renderedContent = renderNode(xmlRoot, { fieldValues, onFieldBlur: handleFieldBlur, onCheckboxChange: handleCheckboxChange, editable, key: 'root' });
+
   return (
-    <div className="air-document" ref={docRef} id="air-document-root">
-      {renderNode(xmlRoot, { fieldValues, onFieldBlur: handleFieldBlur, onCheckboxChange: handleCheckboxChange, editable, key: 'root' })}
-    </div>
+    <>
+      {/* Hidden full-size render for content measurement */}
+      <div
+        ref={measuredRef}
+        style={{ position: 'absolute', left: '-9999px', width: '8.5in', visibility: 'hidden' }}
+      >
+        {renderedContent}
+      </div>
+
+      {/* Visible paginated spread */}
+      <div className="air-document" ref={docRef} id="air-document-root">
+        {Array.from({ length: pageCount }, (_, i) => {
+          // Each "page" is a viewport into the full content, offset by page index
+          const bodyHeight = 9.5 * 96; // usable area per page in px
+          const offsetY = i * bodyHeight;
+          return (
+            <div
+              key={`page-wrap-${i}`}
+              className="air-page-wrapper"
+              style={{ width: scaledW, height: scaledH }}
+            >
+              <div
+                className="air-page"
+                style={{ transform: `scale(${zoom})`, transformOrigin: 'top left' }}
+              >
+                {/* Page header area (first page gets the rendered content at offset 0) */}
+                <div className="air-page-body" style={{ height: bodyHeight + 'px', overflow: 'hidden' }}>
+                  <div style={{ marginTop: -offsetY + 'px' }}>
+                    {renderedContent}
+                  </div>
+                </div>
+                {/* Footer on every page */}
+                <div className="air-page-footer" style={{ padding: '0 0.5in 0.15in 0.5in', fontSize: '8pt', color: '#666' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #ccc', paddingTop: '4px' }}>
+                    <div>
+                      <div>________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ________</div>
+                      <div>________ &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; ________</div>
+                      <div>INITIALS &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; INITIALS</div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div>&nbsp;</div>
+                      <div>&nbsp;</div>
+                      <div>Page {i + 1} of {pageCount}</div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '2px' }}>
+                    <span>© 2019 AIR CRE. All Rights Reserved.</span>
+                    <span>Last Edited: {new Date().toLocaleDateString()}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }
 

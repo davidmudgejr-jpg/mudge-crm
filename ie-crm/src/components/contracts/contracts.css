@@ -1,12 +1,27 @@
 /* AIR CRE Contracts — Document Preview Styles */
 
-/* Document container */
+/* Document container — flex-wrap grid for multi-page spread layout.
+   Pages are scaled via CSS transform; the wrapper uses scaled dimensions
+   so flex-wrap flows correctly. */
 .air-document {
   display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1.5rem;
-  padding: 1.5rem 0;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-content: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem;
+}
+
+/* Page wrapper — holds the real page at full size, then scales it.
+   Width/height are set inline based on zoom level so layout wraps correctly. */
+.air-page-wrapper {
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.air-page-wrapper .air-page {
+  transform-origin: top left;
+  /* transform: scale(N) set inline by React */
 }
 
 /* Page — letter size with white background */
@@ -106,14 +121,22 @@
   font-style: italic;
 }
 
-/* Strikethrough — AIR CRE convention: struck text renders in red with line-through.
-   The AIR desktop app applies this visually even though the XAML only stores Strikethrough="True".
-   Matching the exact look from the PDF output. */
+/* Strikethrough — AIR CRE convention:
+   - Original/boilerplate text: turns red with red line-through
+   - Blue field content: stays blue with blue line-through
+   The AIR app renders this visually — XAML only stores Strikethrough="True". */
 .air-span-strikethrough {
   text-decoration: line-through;
   text-decoration-color: #FF0000;
   text-decoration-thickness: 1.5px;
   color: #FF0000;
+}
+
+/* Field content that's struck through stays blue */
+.air-field-editable.air-span-strikethrough,
+.air-span-strikethrough.air-field-readonly {
+  color: #0000FF;
+  text-decoration-color: #0000FF;
 }
 
 /* User-added text — AIR CRE convention: red, bold, larger (Georgia 16pt).

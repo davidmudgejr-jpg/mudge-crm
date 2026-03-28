@@ -29,6 +29,7 @@ export default function ContractEditor() {
   const [fieldValues, setFieldValues] = useState({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [zoom, setZoom] = useState(0.35); // 35% = 2-up spread in sidebar layout
   const saveTimer = useRef(null);
 
   // Load contract + template
@@ -147,7 +148,6 @@ export default function ContractEditor() {
     return <div className="flex items-center justify-center h-full text-crm-muted">Contract not found</div>;
   }
 
-  const isDraft = contract.status === 'Draft';
   const fields = template.fields || [];
   const editableFields = fields.filter(f => f.dataType === 1 || f.dataType === 3);
   const filledCount = editableFields.filter(f => {
@@ -180,40 +180,42 @@ export default function ContractEditor() {
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Zoom controls */}
+          <div className="flex items-center gap-1.5 border-r border-crm-border pr-3 mr-1">
+            <button
+              onClick={() => setZoom(z => Math.max(0.2, +(z - 0.05).toFixed(2)))}
+              className="w-6 h-6 flex items-center justify-center rounded text-crm-muted hover:text-crm-text hover:bg-crm-hover transition-colors text-sm"
+              title="Zoom out"
+            >−</button>
+            <input
+              type="range"
+              min="20"
+              max="100"
+              step="5"
+              value={Math.round(zoom * 100)}
+              onChange={e => setZoom(parseInt(e.target.value) / 100)}
+              className="w-24 h-1 accent-crm-accent cursor-pointer"
+              title={`${Math.round(zoom * 100)}%`}
+            />
+            <button
+              onClick={() => setZoom(z => Math.min(1.0, +(z + 0.05).toFixed(2)))}
+              className="w-6 h-6 flex items-center justify-center rounded text-crm-muted hover:text-crm-text hover:bg-crm-hover transition-colors text-sm"
+              title="Zoom in"
+            >+</button>
+            <span className="text-xs text-crm-muted w-8 text-center font-mono">{Math.round(zoom * 100)}%</span>
+          </div>
+
           {/* Save indicator */}
           <span className="text-xs text-crm-muted">
             {saving ? 'Saving...' : `${filledCount}/${editableFields.length} fields`}
           </span>
 
-          {/* Status badge */}
-          <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-            isDraft
-              ? 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/20'
-              : 'bg-green-500/15 text-green-400 border border-green-500/20'
-          }`}>
-            {contract.status}
-          </span>
-
-          {/* Actions */}
-          {isDraft && (
-            <button
-              onClick={handleFinalize}
-              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm font-medium transition-colors"
-            >
-              Finalize
-            </button>
-          )}
+          {/* Export PDF */}
           <button
             onClick={handleExportPDF}
             className="px-3 py-1.5 bg-crm-bg hover:bg-crm-hover border border-crm-border text-crm-text rounded-lg text-sm transition-colors"
           >
             Export PDF
-          </button>
-          <button
-            onClick={handleExportWafpkg}
-            className="px-3 py-1.5 bg-crm-bg hover:bg-crm-hover border border-crm-border text-crm-text rounded-lg text-sm transition-colors"
-          >
-            Export WAFPKG
           </button>
         </div>
       </div>
@@ -263,13 +265,14 @@ export default function ContractEditor() {
           </div>
         </div>
 
-        {/* Document preview */}
-        <div className="flex-1 overflow-y-auto bg-[#2a2a2e] p-6">
+        {/* Document preview — scrollable area with zoom-scaled pages */}
+        <div className="flex-1 overflow-auto bg-[#2a2a2e]">
           <XamlDocumentRenderer
             xamlContent={template.xamlContent}
             fieldValues={fieldValues}
             onFieldChange={handleFieldChange}
-            editable={isDraft}
+            editable={true}
+            zoom={zoom}
           />
         </div>
       </div>
