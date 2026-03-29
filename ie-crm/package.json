@@ -12,8 +12,7 @@
     "build": "vite build && electron-builder",
     "build:web": "vite build",
     "start": "node server/index.js",
-    "preview": "vite preview",
-    "audit:schema-columns": "node scripts/audit-schema-columns.js"
+    "preview": "vite preview"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

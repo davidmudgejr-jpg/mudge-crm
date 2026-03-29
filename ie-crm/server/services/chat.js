@@ -3210,7 +3210,7 @@ function registerChatRoutes(app) {
         FROM chat_channels c
         JOIN chat_channel_members cm ON cm.channel_id = c.id
         WHERE cm.user_id = $1
-        ORDER BY c.last_activity DESC
+        ORDER BY c.updated_at DESC
       `, [userId]);
       res.json(result.rows);
     } catch (err) {
