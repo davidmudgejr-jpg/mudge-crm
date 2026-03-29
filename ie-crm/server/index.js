@@ -2582,6 +2582,151 @@ app.post('/api/chat/upload', upload.single('file'), async (req, res) => {
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // ============================================================
+// DATA TRUST TIERS ENDPOINTS
+// ============================================================
+
+const TRUST_TIER_SQL = `CASE
+  WHEN data_source ILIKE '%Own%' THEN 'gold'
+  WHEN data_source LIKE '%,%,%' THEN 'gold'
+  WHEN data_source LIKE '%,%' THEN 'silver'
+  WHEN data_source IS NOT NULL AND data_source != '' THEN 'bronze'
+  ELSE 'untracked'
+END`;
+
+// GET /api/data-trust/overview — aggregate counts
+app.get('/api/data-trust/overview', requireAuth, async (req, res) => {
+  try {
+    const { rows: tiers } = await pool.query(`
+      SELECT ${TRUST_TIER_SQL} AS tier, count(*)::int AS count
+      FROM contacts GROUP BY tier ORDER BY count DESC
+    `);
+    const { rows: [enrichment] } = await pool.query(`
+      SELECT
+        count(*)::int AS total,
+        count(email_1)::int AS has_email,
+        count(CASE WHEN campaign_ready THEN 1 END)::int AS campaign_ready,
+        count(CASE WHEN enrichment_status != 'not_started' THEN 1 END)::int AS enrichment_started
+      FROM contacts
+    `);
+    const { rows: [suggestions] } = await pool.query(`
+      SELECT count(*)::int AS pending FROM suggested_updates WHERE status = 'pending'
+    `);
+    res.json({
+      tiers: Object.fromEntries(tiers.map(r => [r.tier, r.count])),
+      enrichment,
+      pendingSuggestions: suggestions.pending,
+    });
+  } catch (err) {
+    console.error('[data-trust] overview error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/data-trust/contacts — paginated contacts with computed tier
+app.get('/api/data-trust/contacts', requireAuth, async (req, res) => {
+  try {
+    const tier = req.query.tier || 'all';
+    const page = parseInt(req.query.page) || 1;
+    const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+    const offset = (page - 1) * limit;
+
+    const tierFilter = tier !== 'all'
+      ? `WHERE (${TRUST_TIER_SQL}) = $3`
+      : '';
+    const params = tier !== 'all' ? [limit, offset, tier] : [limit, offset];
+
+    const { rows } = await pool.query(`
+      SELECT contact_id, full_name, type, email_1, phone_1,
+             data_source, enrichment_status, campaign_ready,
+             ${TRUST_TIER_SQL} AS trust_tier
+      FROM contacts
+      ${tierFilter}
+      ORDER BY
+        CASE ${TRUST_TIER_SQL}
+          WHEN 'gold' THEN 1 WHEN 'silver' THEN 2
+          WHEN 'bronze' THEN 3 ELSE 4
+        END,
+        full_name ASC NULLS LAST
+      LIMIT $1 OFFSET $2
+    `, params);
+
+    const { rows: [{ count }] } = await pool.query(`
+      SELECT count(*)::int FROM contacts ${tierFilter}
+    `, tier !== 'all' ? [tier] : []);
+
+    res.json({ rows, total: count, page, limit });
+  } catch (err) {
+    console.error('[data-trust] contacts error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/data-trust/suggestions — list suggested updates
+app.get('/api/data-trust/suggestions', requireAuth, async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const { rows } = await pool.query(`
+      SELECT * FROM suggested_updates
+      WHERE status = $1
+      ORDER BY confidence DESC, created_at DESC
+      LIMIT 100
+    `, [status]);
+    res.json({ rows, total: rows.length });
+  } catch (err) {
+    console.error('[data-trust] suggestions error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/data-trust/suggestions/:id/resolve — accept or reject
+app.post('/api/data-trust/suggestions/:id/resolve', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { action, notes } = req.body; // action: 'accepted' or 'rejected'
+    if (!['accepted', 'rejected'].includes(action)) {
+      return res.status(400).json({ error: 'Action must be accepted or rejected' });
+    }
+
+    await client.query('BEGIN');
+
+    // Update the suggestion
+    const { rows: [suggestion] } = await client.query(`
+      UPDATE suggested_updates
+      SET status = $1, reviewed_by = $2, reviewed_at = NOW(), review_notes = $3, updated_at = NOW()
+      WHERE id = $4 RETURNING *
+    `, [action, req.user?.email || 'user', notes || null, id]);
+
+    if (!suggestion) throw new Error('Suggestion not found');
+
+    // If accepted, apply the change to the actual record
+    if (action === 'accepted') {
+      const table = { contact: 'contacts', property: 'properties', company: 'companies' }[suggestion.entity_type];
+      const idCol = { contact: 'contact_id', property: 'property_id', company: 'company_id' }[suggestion.entity_type];
+      if (table && idCol) {
+        await client.query(
+          `UPDATE ${table} SET ${suggestion.field_name} = $1, updated_at = NOW() WHERE ${idCol} = $2`,
+          [suggestion.suggested_value, suggestion.entity_id]
+        );
+        await client.query(
+          `UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1`,
+          [id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    res.json({ ok: true, applied: action === 'accepted' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[data-trust] resolve error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
 // DEDUP REVIEW ENDPOINTS
 // ============================================================
 
