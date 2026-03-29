@@ -4,9 +4,8 @@
 import { io, Socket } from 'socket.io-client';
 import { getToken } from './api';
 
-// TODO: switch back to Railway when deploy is fixed
-// const API_BASE = 'https://mudge-crm-production.up.railway.app';
-const API_BASE = 'http://192.168.1.35:3001';
+// Railway production URL — works everywhere
+const API_BASE = 'https://mudge-crm-production.up.railway.app';
 
 let socket: Socket | null = null;
 

@@ -3,10 +3,8 @@
 
 import * as SecureStore from 'expo-secure-store';
 
-// Railway production URL — same backend the web CRM uses
-// TODO: switch back to Railway when deploy is fixed
-// const API_BASE = 'https://mudge-crm-production.up.railway.app';
-const API_BASE = 'http://192.168.1.35:3001';
+// Railway production URL — works everywhere (home wifi, mobile data, anywhere)
+const API_BASE = 'https://mudge-crm-production.up.railway.app';
 
 const TOKEN_KEY = 'crm-auth-token';
 
