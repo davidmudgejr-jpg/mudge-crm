@@ -1,9 +1,10 @@
 // API client — fetch wrapper with JWT auth headers
-// Connects to the same Railway-hosted Express backend as the web CRM
+// Connects to Railway (production) by default, falls back to local for dev
 
 import * as SecureStore from 'expo-secure-store';
 
-// Railway production URL — works everywhere (home wifi, mobile data, anywhere)
+// Use Railway production URL — works on any network
+// To use local dev server instead, change to: 'http://192.168.1.35:3001'
 const API_BASE = 'https://mudge-crm-production.up.railway.app';
 
 const TOKEN_KEY = 'crm-auth-token';

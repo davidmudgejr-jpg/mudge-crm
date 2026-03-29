@@ -560,10 +560,26 @@ const aiLimiter = rateLimit({
   message: { error: 'AI rate limit reached. Try again in a minute.' },
 });
 
-function getOAuthToken() {
-  const token = process.env.ANTHROPIC_OAUTH_TOKEN;
-  if (!token) return null;
-  return token;
+// Get auth credentials — prefers API key, falls back to OAuth token
+function getAnthropicAuth() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (apiKey) return { type: 'api-key', token: apiKey };
+  const oauthToken = process.env.ANTHROPIC_OAUTH_TOKEN;
+  if (oauthToken) return { type: 'oauth', token: oauthToken };
+  return null;
+}
+
+function buildAnthropicHeaders(auth) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01',
+  };
+  if (auth.type === 'api-key') {
+    headers['x-api-key'] = auth.token;
+  } else {
+    headers['Authorization'] = `Bearer ${auth.token}`;
+  }
+  return headers;
 }
 
 function buildAnthropicPayload(body) {
@@ -588,8 +604,8 @@ function handleAnthropicError(status, data) {
 
 // POST /api/ai/chat — SSE streaming proxy
 app.post('/api/ai/chat', aiLimiter, async (req, res) => {
-  const token = getOAuthToken();
-  if (!token) return res.status(503).json({ error: 'AI not configured. Set ANTHROPIC_OAUTH_TOKEN on Railway.' });
+  const auth = getAnthropicAuth();
+  if (!auth) return res.status(503).json({ error: 'AI not configured. Set ANTHROPIC_API_KEY on Railway.' });
 
   const payload = buildAnthropicPayload(req.body);
   if (payload.error) return res.status(400).json({ error: payload.error });
@@ -604,11 +620,7 @@ app.post('/api/ai/chat', aiLimiter, async (req, res) => {
   try {
     const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: { ...buildAnthropicHeaders(auth) },
       body: JSON.stringify({ ...payload, stream: true }),
     });
 
@@ -641,8 +653,8 @@ app.post('/api/ai/chat', aiLimiter, async (req, res) => {
 
 // POST /api/ai/chat/sync — non-streaming JSON response
 app.post('/api/ai/chat/sync', aiLimiter, async (req, res) => {
-  const token = getOAuthToken();
-  if (!token) return res.status(503).json({ error: 'AI not configured. Set ANTHROPIC_OAUTH_TOKEN on Railway.' });
+  const auth = getAnthropicAuth();
+  if (!auth) return res.status(503).json({ error: 'AI not configured. Set ANTHROPIC_API_KEY on Railway.' });
 
   const payload = buildAnthropicPayload(req.body);
   if (payload.error) return res.status(400).json({ error: payload.error });
@@ -650,11 +662,7 @@ app.post('/api/ai/chat/sync', aiLimiter, async (req, res) => {
   try {
     const response = await fetch(ANTHROPIC_API_URL, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: { ...buildAnthropicHeaders(auth) },
       body: JSON.stringify(payload),
     });
 
@@ -683,13 +691,12 @@ app.post('/api/ai/chat/sync', aiLimiter, async (req, res) => {
   }
 });
 
-// GET /api/ai/status — health check (checks OAuth token exists)
+// GET /api/ai/status — health check
 app.get('/api/ai/status', async (_req, res) => {
-  const token = getOAuthToken();
-  if (!token) return res.json({ status: 'not_configured', configured: false, message: 'ANTHROPIC_OAUTH_TOKEN not set' });
+  const auth = getAnthropicAuth();
+  if (!auth) return res.json({ status: 'not_configured', configured: false, message: 'ANTHROPIC_API_KEY not set' });
 
-  // Token exists — report as configured (don't waste a real API call on status check)
-  return res.json({ status: 'connected', configured: true, model: AI_MODEL, auth: 'oauth' });
+  return res.json({ status: 'connected', configured: true, model: AI_MODEL, auth: auth.type });
 
   /* Legacy validation code — kept for reference but disabled to avoid unnecessary API calls
   try {
