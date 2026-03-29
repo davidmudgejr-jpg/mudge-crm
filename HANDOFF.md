@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-25 (Phase 11: AIR Pipeline + Instantly.ai + Brain Sessions + Dedup Scanner)
-> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) Fleet operations: SSH access, directive pipeline via Telegram, health monitoring, agent fixes. (9) Security + workflow: Codex connected, 7 vulnerabilities fixed, PR workflow established, Forum Debate + roadmap additions. (10) Oracle + Infrastructure: Monte Carlo prediction engine designed, Migration 025, AGENT-SYSTEM.md expanded. (11) **Massive multi-day session**: Houston Command stabilized (1-year setup token, stale Ralph profiles removed), Tailscale mesh network (all machines connected from anywhere), AIR super sheet pipeline live (parser + ingest + field normalizer), Instantly.ai API wired (13 endpoints), property dedup scanner (3 matching strategies + one-click merge), Brain Session system built (three-way team meetings recorded to Council), pre-call briefs for Houston Sonnet, Data Trust Tiers + Deal Dossiers + David Filter scoring, 3D Command Center integrated, Council of Minds meetings + improvement proposals with David approval.
-> Next tasks: **Build data trust tiers UI** (safety layer before enrichment), **Re-run dedup scan** (table name fix deployed, need clean results), **48GB Mac Mini arrives April 14-21** (deploy Tier 3 agents — Enricher first), **M1 Mac Mini setup** (Ralphs for contact research), **David: share active deals with Houston Command** (for dossiers + pre-call briefs), **Fireflies.ai integration** (API key needed), **Native PWA app setup**, **Agent instruction files** (Postmaster + Campaign Manager).
+> Updated: 2026-03-29 (Phase 12: Database Health — Houston Audit Fixes)
+> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) Fleet operations: SSH access, directive pipeline via Telegram, health monitoring, agent fixes. (9) Security + workflow: Codex connected, 7 vulnerabilities fixed, PR workflow established, Forum Debate + roadmap additions. (10) Oracle + Infrastructure: Monte Carlo prediction engine designed, Migration 025, AGENT-SYSTEM.md expanded. (11) **Massive multi-day session**: Houston Command stabilized (1-year setup token, stale Ralph profiles removed), Tailscale mesh network (all machines connected from anywhere), AIR super sheet pipeline live (parser + ingest + field normalizer), Instantly.ai API wired (13 endpoints), property dedup scanner (3 matching strategies + one-click merge), Brain Session system built (three-way team meetings recorded to Council), pre-call briefs for Houston Sonnet, Data Trust Tiers + Deal Dossiers + David Filter scoring, 3D Command Center integrated, Council of Minds meetings + improvement proposals with David approval. (12) **Database health audit response**: Houston Command ran full Neon DB audit (March 28), Claude Code executed 3 migrations (039-041) fixing critical data consistency issues, backfilling data gaps, and adding CHECK constraints.
+> Next tasks: **Reclassify 890 "interaction" type records** (David to decide: reclassify as "Note" or audit individually), **Build deal-property linking UI** (deal_properties junction table is empty, can't auto-match — needs manual linking), **Build data trust tiers UI** (safety layer before enrichment), **Re-run dedup scan** (227 pending candidates, need review UI), **Trigger Oracle scoring job** (infrastructure ready, nothing running — decide if cron or manual), **Recalculate debt_stress months_to_* from origination dates** (currently stale from import), **Wire up campaign_ready flag logic** (2,896 contacts in campaigns but 0 flagged ready), **Audit 2,116 interactions missing contact links** (fuzzy match from notes/subject), **48GB Mac Mini arrives April 14-21** (deploy Tier 3 agents — Enricher first), **M1 Mac Mini setup** (Ralphs for contact research), **Fireflies.ai integration** (API key needed), **Native PWA app setup**, **Agent instruction files** (Postmaster + Campaign Manager).
 
 ---
 
@@ -23,6 +23,44 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 ---
 
 ## Completed Work (all committed & pushed to GitHub)
+
+### Phase 12 — Database Health Audit Fixes ✅ (2026-03-29)
+
+Houston Command ran a full Neon DB audit on March 28 (via shared file drop on mini16). Claude Code executed fixes:
+
+**Migration 039 — Data Consistency Normalization:**
+- [x] Contact types normalized to Title Case (4,113 "owner"→"Owner", 2,238 "tenant"→"Tenant", 2,083 "broker"→"Broker")
+- [x] Multi-value contact types sorted alphabetically ("Tenant,Owner"→"Owner,Tenant")
+- [x] Company types cleaned: Office/Industrial/Trucking moved from company_type to industry_type
+- [x] Company types normalized to match quickAddFields.js (tenant→Tenant, brokerage→Brokerage, owner→Owner/Operator)
+- [x] Interaction types normalized (3,562 "note"→"Note")
+- [x] Action item status normalized ("pending"→"Pending")
+- [x] Lease comp rent_type consolidated (G→GRS, MG→MGR)
+- [x] Client level multi-values sorted alphabetically
+
+**Migration 040 — Data Gap Backfills:**
+- [x] 8,985 lease comps backfilled with city + property_address from linked properties
+- [x] 3,786 sale comps backfilled with city + property_address from linked properties
+- [x] 2,367 junk company names flagged (Inc., LLC, LP, etc.) via data_quality_flag column
+- [x] 17 orphan contacts matched to companies by email domain (corporate domains only, single-match confidence)
+- [ ] deal_properties auto-population skipped — deals have no address column (address embedded in deal_name free text)
+
+**Migration 041 — CHECK Constraints:**
+- [x] contacts.type — validated function (allows single + multi-value combos)
+- [x] companies.company_type — enum (Owner/Operator, Tenant, Brokerage, Developer, Investor, Lender, Vendor, Other)
+- [x] interactions.type — enum (17 active types + 5 legacy types + "interaction" temporarily)
+- [x] action_items.status — enum (Todo, Reminders, In progress, Done, Dead, Email, Needs and Wants, Pending)
+- [x] deals.status — enum (Lead, Prospect, Active, Under Contract, Closed, Dead, On Hold, Pending, Dead Lead, Deal fell through, Long Leads)
+- [x] deals.deal_type — enum (Lease, Sale, Buy, Sublease, Investment, Other)
+- [x] lease_comps.rent_type — enum (GRS, NNN, MGR, IG, FSG)
+
+**Houston's Remaining Questions (need David's answers):**
+1. Is Oracle scoring supposed to run on a cron or manual trigger?
+2. The 890 interactions typed "interaction" — reclassify as "Note" or audit individually?
+3. Debt stress `months_to_*` — auto-recalculate or static from import?
+4. Sale comps missing buyer/seller — was that data ever in CoStar export?
+5. What criteria make a contact `campaign_ready`?
+6. Should we verify FK cascade behavior?
 
 ### Infrastructure ✅
 - [x] Column menu fix — Rename/Hide/Delete with system field protection (commit `f0e4f7d`)
