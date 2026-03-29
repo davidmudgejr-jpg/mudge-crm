@@ -22,6 +22,7 @@ import TPE from './pages/TPE';
 import TPEEnrichment from './pages/TPEEnrichment';
 import AIOps from './pages/AIOps';
 import VerificationQueue from './pages/VerificationQueue';
+import DedupReview from './pages/DedupReview';
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
@@ -128,6 +129,7 @@ function AppShell() {
           <Route path="/comps" element={<Comps onCountChange={setRowCount} />} />
           <Route path="/ai-ops" element={<AIOps />} />
           <Route path="/import" element={<Import />} />
+          <Route path="/dedup" element={<DedupReview onCountChange={setRowCount} />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>

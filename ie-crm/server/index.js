@@ -2582,6 +2582,171 @@ app.post('/api/chat/upload', upload.single('file'), async (req, res) => {
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 // ============================================================
+// DEDUP REVIEW ENDPOINTS
+// ============================================================
+
+// GET /api/dedup/candidates — list dedup candidates with optional status filter
+app.get('/api/dedup/candidates', requireAuth, async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const { rows } = await pool.query(`
+      SELECT dc.*,
+             pa.property_address AS addr_a, pa.city AS city_a, pa.property_type AS type_a, pa.rba AS rba_a,
+             pb.property_address AS addr_b, pb.city AS city_b, pb.property_type AS type_b, pb.rba AS rba_b
+      FROM dedup_candidates dc
+      JOIN properties pa ON pa.property_id = dc.property_a_id
+      JOIN properties pb ON pb.property_id = dc.property_b_id
+      WHERE dc.status = $1
+      ORDER BY
+        CASE dc.confidence WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+        dc.created_at DESC
+    `, [status]);
+    res.json({ rows, total: rows.length });
+  } catch (err) {
+    console.error('[dedup] list error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/dedup/stats — quick counts by status
+app.get('/api/dedup/stats', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT status, count(*)::int AS count FROM dedup_candidates GROUP BY status
+    `);
+    const stats = { pending: 0, merged: 0, dismissed: 0, deferred: 0 };
+    rows.forEach(r => { stats[r.status] = r.count; });
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dedup/resolve — dismiss or defer a candidate
+app.post('/api/dedup/resolve', requireAuth, async (req, res) => {
+  try {
+    const { candidateId, status, notes } = req.body;
+    if (!['dismissed', 'deferred'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be dismissed or deferred' });
+    }
+    await pool.query(`
+      UPDATE dedup_candidates
+      SET status = $1, resolved_by = $2, resolved_at = NOW(), merge_notes = $3, updated_at = NOW()
+      WHERE id = $4
+    `, [status, req.user?.username || 'user', notes || null, candidateId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[dedup] resolve error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dedup/merge — merge two properties (keep one, absorb the other)
+app.post('/api/dedup/merge', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { candidateId, keepId, removeId } = req.body;
+    if (!keepId || !removeId || keepId === removeId) {
+      return res.status(400).json({ error: 'Invalid keepId/removeId' });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Merge data: fill NULL fields in keeper with data from duplicate
+    const { rows: [keeper] } = await client.query('SELECT * FROM properties WHERE property_id = $1', [keepId]);
+    const { rows: [dupe] } = await client.query('SELECT * FROM properties WHERE property_id = $1', [removeId]);
+    if (!keeper || !dupe) throw new Error('Property not found');
+
+    // Build SET clause for NULL fields in keeper that have values in dupe
+    const skipCols = new Set(['property_id', 'created_at', 'updated_at', 'normalized_address']);
+    const fills = [];
+    const vals = [];
+    let paramIdx = 1;
+    for (const [col, val] of Object.entries(dupe)) {
+      if (skipCols.has(col)) continue;
+      if (val != null && val !== '' && (keeper[col] == null || keeper[col] === '')) {
+        fills.push(`${col} = $${paramIdx}`);
+        vals.push(val);
+        paramIdx++;
+      }
+    }
+    if (fills.length > 0) {
+      vals.push(keepId);
+      await client.query(`UPDATE properties SET ${fills.join(', ')}, updated_at = NOW() WHERE property_id = $${paramIdx}`, vals);
+    }
+
+    // 2. Reassign all junction table references from removeId to keepId
+    const junctions = [
+      { table: 'property_contacts', col: 'property_id' },
+      { table: 'property_companies', col: 'property_id' },
+      { table: 'property_deals', col: 'property_id' },
+      { table: 'deal_properties', col: 'property_id' },
+      { table: 'interaction_properties', col: 'property_id' },
+      { table: 'action_item_properties', col: 'property_id' },
+    ];
+    let movedLinks = 0;
+    for (const { table, col } of junctions) {
+      // Delete rows that would conflict (same entity already linked to keeper)
+      try {
+        const otherCols = (await client.query(
+          `SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND column_name != $2 AND column_name != 'role'`,
+          [table, col]
+        )).rows.map(r => r.column_name);
+
+        if (otherCols.length > 0) {
+          // Delete conflicting rows where the other entity is already linked to keepId
+          for (const oc of otherCols) {
+            await client.query(
+              `DELETE FROM ${table} WHERE ${col} = $1 AND ${oc} IN (SELECT ${oc} FROM ${table} WHERE ${col} = $2)`,
+              [removeId, keepId]
+            );
+          }
+        }
+        // Move remaining rows
+        const { rowCount } = await client.query(`UPDATE ${table} SET ${col} = $1 WHERE ${col} = $2`, [keepId, removeId]);
+        movedLinks += rowCount;
+      } catch (e) {
+        // Table might not exist or column mismatch — skip silently
+      }
+    }
+
+    // 3. Also reassign lease_comps and sale_comps
+    const { rowCount: lc } = await client.query('UPDATE lease_comps SET property_id = $1 WHERE property_id = $2', [keepId, removeId]);
+    const { rowCount: sc } = await client.query('UPDATE sale_comps SET property_id = $1 WHERE property_id = $2', [keepId, removeId]);
+    movedLinks += lc + sc;
+
+    // 4. Delete the duplicate property
+    await client.query('DELETE FROM properties WHERE property_id = $1', [removeId]);
+
+    // 5. Update dedup_candidates record
+    const direction = keepId === req.body.propertyAId ? 'a_absorbs_b' : 'b_absorbs_a';
+    await client.query(`
+      UPDATE dedup_candidates
+      SET status = 'merged', resolved_by = $1, resolved_at = NOW(),
+          merge_direction = $2, merge_notes = $3, updated_at = NOW()
+      WHERE id = $4
+    `, [req.user?.username || 'user', direction, `Merged. ${fills.length} fields filled, ${movedLinks} links moved.`, candidateId]);
+
+    // 6. Dismiss any other candidates referencing the removed property
+    await client.query(`
+      UPDATE dedup_candidates
+      SET status = 'dismissed', resolved_by = 'auto', resolved_at = NOW(),
+          merge_notes = 'Auto-dismissed: property was merged in another candidate', updated_at = NOW()
+      WHERE status = 'pending' AND (property_a_id = $1 OR property_b_id = $1)
+    `, [removeId]);
+
+    await client.query('COMMIT');
+    res.json({ ok: true, fieldsFilled: fills.length, linksMoved: movedLinks });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[dedup] merge error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
 // SERVE STATIC FRONTEND (production)
 // ============================================================
 const distPath = path.join(__dirname, '..', 'dist');
