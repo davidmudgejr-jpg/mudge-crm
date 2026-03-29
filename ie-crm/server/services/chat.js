@@ -4,48 +4,61 @@
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
-const Anthropic = require('@anthropic-ai/sdk');
 
 // ============================================================
-// CLAUDE SDK CLIENT — uses OAuth token or API key
+// CLAUDE API — raw fetch with OAuth Bearer or API key
+// Uses Authorization: Bearer for OAuth tokens (Claude Max),
+// falls back to x-api-key for paid API keys.
 // ============================================================
 const HOUSTON_MODEL = 'claude-sonnet-4-20250514';
-let claudeClient = null;
-
-function getClaudeClient() {
-  if (claudeClient) return claudeClient;
-  // Prefer OAuth token (authToken param), fall back to API key
-  const oauthToken = process.env.ANTHROPIC_OAUTH_TOKEN;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (oauthToken) {
-    claudeClient = new Anthropic({ authToken: oauthToken });
-  } else if (apiKey) {
-    claudeClient = new Anthropic({ apiKey });
-  }
-  return claudeClient;
-}
+const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
 function isClaudeAvailable() {
   return Boolean(process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY);
 }
 
 /**
- * Call Claude API via SDK (handles OAuth + API key auth)
+ * Call Claude API via raw fetch (supports OAuth Bearer tokens)
  * @param {object} opts - { system, messages, max_tokens }
  * @returns {string} response text
  */
 async function callClaude({ system, messages, max_tokens = 500 }) {
-  const client = getClaudeClient();
-  if (!client) return null;
+  const oauthToken = process.env.ANTHROPIC_OAUTH_TOKEN;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!oauthToken && !apiKey) return null;
 
-  const response = await client.messages.create({
+  // Build headers — OAuth uses Bearer, API key uses x-api-key
+  const headers = {
+    'Content-Type': 'application/json',
+    'anthropic-version': '2023-06-01',
+  };
+  if (oauthToken) {
+    headers['Authorization'] = `Bearer ${oauthToken}`;
+  } else {
+    headers['x-api-key'] = apiKey;
+  }
+
+  const body = {
     model: HOUSTON_MODEL,
     max_tokens,
     messages,
     ...(system ? { system } : {}),
+  };
+
+  const response = await fetch(ANTHROPIC_API_URL, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
   });
 
-  return response.content?.[0]?.text || null;
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    console.error('[chat/houston] Claude API error:', response.status, err.error?.message || '');
+    return null;
+  }
+
+  const data = await response.json();
+  return data.content?.[0]?.text || null;
 }
 
 // ============================================================

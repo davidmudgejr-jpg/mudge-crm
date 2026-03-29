@@ -1,7 +1,8 @@
-// Native chat input bar — frosted glass effect
-// Messages scroll behind the blur, Telegram-style
+// Floating glass pill input — NOT a footer bar
+// Hovers over chat content with blur-through effect
+// [+]  [____Message...____  📷/⬆]  — independent elements
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View,
   TextInput,
@@ -11,6 +12,7 @@ import {
   ActivityIndicator,
   Keyboard,
 } from 'react-native';
+// Animated import removed — using conditional render for send/camera swap
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -35,35 +37,28 @@ export default function ChatInput({ onSend, onSendImage, onTypingStart, onTyping
   const insets = useSafeAreaInsets();
   const [keyboardOpen, setKeyboardOpen] = useState(false);
   const [text, setText] = useState('');
-
-  // Track keyboard state to toggle safe area padding
-  useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardWillShow', () => setKeyboardOpen(true));
-    const hideSub = Keyboard.addListener('keyboardWillHide', () => setKeyboardOpen(false));
-    return () => { showSub.remove(); hideSub.remove(); };
-  }, []);
   const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
   const [uploading, setUploading] = useState(false);
   const inputRef = useRef<TextInput>(null);
   const typingRef = useRef(false);
   const typingTimer = useRef<ReturnType<typeof setTimeout>>();
 
-  const handleSend = async () => {
+  const hasContent = text.trim().length > 0 || pendingImage !== null;
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardWillShow', () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener('keyboardWillHide', () => setKeyboardOpen(false));
+    return () => { show.remove(); hide.remove(); };
+  }, []);
+
+  const handleSend = useCallback(async () => {
     if (pendingImage) {
       setUploading(true);
-      try {
-        await onSendImage(pendingImage, text.trim());
-      } finally {
-        setUploading(false);
-        setPendingImage(null);
-        setText('');
-        typingRef.current = false;
-        onTypingStop();
-      }
+      try { await onSendImage(pendingImage, text.trim()); }
+      finally { setUploading(false); setPendingImage(null); setText(''); typingRef.current = false; onTypingStop(); }
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       return;
     }
-
     const trimmed = text.trim();
     if (!trimmed) return;
     onSend(trimmed);
@@ -71,67 +66,45 @@ export default function ChatInput({ onSend, onSendImage, onTypingStart, onTyping
     typingRef.current = false;
     onTypingStop();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  };
+  }, [text, pendingImage, onSend, onSendImage, onTypingStop]);
 
-  const handleChangeText = (value: string) => {
+  const handleChangeText = useCallback((value: string) => {
     setText(value);
-    if (!typingRef.current) {
-      typingRef.current = true;
-      onTypingStart();
-    }
+    if (!typingRef.current) { typingRef.current = true; onTypingStart(); }
     clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() => {
-      typingRef.current = false;
-      onTypingStop();
-    }, 2000);
-  };
+    typingTimer.current = setTimeout(() => { typingRef.current = false; onTypingStop(); }, 2000);
+  }, [onTypingStart, onTypingStop]);
 
   const pickCamera = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') return;
-    const result = await ImagePicker.launchCameraAsync({
-      quality: 0.8,
-      allowsEditing: false,
-    });
-    if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      setPendingImage({
-        uri: asset.uri,
-        filename: asset.fileName || `photo_${Date.now()}.jpg`,
-        mimeType: asset.mimeType || 'image/jpeg',
-      });
+    const r = await ImagePicker.launchCameraAsync({ quality: 0.8 });
+    if (!r.canceled && r.assets[0]) {
+      const a = r.assets[0];
+      setPendingImage({ uri: a.uri, filename: a.fileName || `photo_${Date.now()}.jpg`, mimeType: a.mimeType || 'image/jpeg' });
     }
   };
 
   const pickLibrary = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') return;
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'],
-      quality: 0.8,
-    });
-    if (!result.canceled && result.assets[0]) {
-      const asset = result.assets[0];
-      setPendingImage({
-        uri: asset.uri,
-        filename: asset.fileName || `image_${Date.now()}.jpg`,
-        mimeType: asset.mimeType || 'image/jpeg',
-      });
+    const r = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.8 });
+    if (!r.canceled && r.assets[0]) {
+      const a = r.assets[0];
+      setPendingImage({ uri: a.uri, filename: a.fileName || `image_${Date.now()}.jpg`, mimeType: a.mimeType || 'image/jpeg' });
     }
   };
 
-  const cancelImage = () => setPendingImage(null);
-
-  const hasContent = text.trim().length > 0 || pendingImage !== null;
+  const bottomPad = keyboardOpen ? 4 : Math.max(insets.bottom, 8);
 
   return (
-    <BlurView intensity={80} tint="dark" style={[styles.container, !keyboardOpen && { paddingBottom: insets.bottom }]}>
-      {/* Image preview strip */}
+    <View style={[styles.floatingContainer, { paddingBottom: bottomPad }]}>
+      {/* Image preview */}
       {pendingImage && (
         <View style={styles.previewRow}>
           <View style={styles.previewWrap}>
-            <Image source={{ uri: pendingImage.uri }} style={styles.previewImage} />
-            <Pressable onPress={cancelImage} style={styles.cancelBtn}>
+            <Image source={{ uri: pendingImage.uri }} style={styles.previewImg} />
+            <Pressable onPress={() => setPendingImage(null)} style={styles.cancelBtn}>
               <Ionicons name="close" size={14} color="#fff" />
             </Pressable>
             {uploading && (
@@ -143,69 +116,83 @@ export default function ChatInput({ onSend, onSendImage, onTypingStart, onTyping
         </View>
       )}
 
-      {/* Input row */}
       <View style={styles.inputRow}>
-        <Pressable onPress={pickLibrary} style={styles.iconBtn} hitSlop={8}>
-          <Ionicons name="add-circle-outline" size={28} color="#007AFF" />
+        {/* + button — floating independently */}
+        <Pressable onPress={pickLibrary} style={styles.floatingIcon} hitSlop={8}>
+          <Ionicons name="add-circle" size={30} color="#007AFF" />
         </Pressable>
 
-        <TextInput
-          ref={inputRef}
-          value={text}
-          onChangeText={handleChangeText}
-          onSubmitEditing={handleSend}
-          placeholder={placeholder || 'Message...'}
-          placeholderTextColor="#636366"
-          style={styles.input}
-          returnKeyType="send"
-          blurOnSubmit={false}
-          autoCorrect
-          multiline={false}
-        />
+        {/* Glass pill */}
+        <BlurView intensity={40} tint="dark" style={styles.pill}>
+          <TextInput
+            ref={inputRef}
+            value={text}
+            onChangeText={handleChangeText}
+            onSubmitEditing={handleSend}
+            placeholder={placeholder || 'Message...'}
+            placeholderTextColor="#636366"
+            style={styles.input}
+            returnKeyType="send"
+            blurOnSubmit={false}
+            autoCorrect
+            multiline
+            maxLength={4000}
+            textAlignVertical="center"
+          />
 
-        {hasContent ? (
-          <Pressable
-            onPress={handleSend}
-            disabled={uploading}
-            style={[styles.sendBtn, uploading && styles.sendBtnDisabled]}
-          >
-            <Ionicons name="arrow-up" size={20} color="#fff" />
-          </Pressable>
-        ) : (
-          <Pressable onPress={pickCamera} style={styles.iconBtn} hitSlop={8}>
-            <Ionicons name="camera-outline" size={24} color="#8e8e93" />
-          </Pressable>
-        )}
+          {/* Right action inside the pill — only ONE visible at a time */}
+          <View style={styles.pillAction}>
+            {hasContent ? (
+              <Pressable
+                onPress={handleSend}
+                disabled={uploading}
+                style={styles.sendBtn}
+              >
+                <Ionicons name="arrow-up" size={16} color="#fff" />
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={pickCamera}
+                style={styles.cameraBtn}
+                hitSlop={8}
+              >
+                <Ionicons name="camera-outline" size={22} color="#8e8e93" />
+              </Pressable>
+            )}
+          </View>
+        </BlurView>
       </View>
-    </BlurView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    overflow: 'hidden',
+  floatingContainer: {
+    // No background — transparent, floats over content
+    paddingHorizontal: 8,
+    paddingTop: 6,
+    paddingBottom: 6,
   },
   previewRow: {
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    paddingBottom: 4,
+    paddingHorizontal: 44, // align with pill
+    paddingBottom: 6,
   },
   previewWrap: {
     position: 'relative',
     alignSelf: 'flex-start',
   },
-  previewImage: {
-    width: 96,
-    height: 96,
-    borderRadius: 16,
+  previewImg: {
+    width: 72,
+    height: 72,
+    borderRadius: 12,
   },
   cancelBtn: {
     position: 'absolute',
-    top: -6,
-    right: -6,
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    top: -5,
+    right: -5,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
     backgroundColor: '#ff3b30',
     alignItems: 'center',
     justifyContent: 'center',
@@ -213,43 +200,66 @@ const styles = StyleSheet.create({
   uploadOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.4)',
-    borderRadius: 16,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   inputRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 6,
+    alignItems: 'flex-end',
     gap: 6,
   },
-  iconBtn: {
-    width: 36,
+  floatingIcon: {
+    width: 34,
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  pill: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    borderRadius: 22,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
   },
   input: {
     flex: 1,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    minHeight: 38,
+    maxHeight: 100,
     paddingHorizontal: 16,
+    paddingTop: 9,
+    paddingBottom: 9,
     fontSize: 16,
     color: '#e5e5e5',
+    lineHeight: 22,
+  },
+  pillAction: {
+    width: 34,
+    height: 38,
+    position: 'relative',
+    marginRight: 4,
   },
   sendBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: '#007AFF',
     alignItems: 'center',
     justifyContent: 'center',
+    position: 'absolute',
+    right: 0,
+    bottom: 5,
   },
-  sendBtnDisabled: {
-    opacity: 0.4,
+  cameraBtn: {
+    width: 34,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'absolute',
+    right: -2,
+    bottom: 0,
   },
 });

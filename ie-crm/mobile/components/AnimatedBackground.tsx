@@ -1,11 +1,57 @@
-// Space-themed ambient background — nebula blobs + drifting star field
-// Barely perceptible animation, like floating through a nebula
+// Telegram-style animated wallpaper — slowly shifting dark gradient
+// with subtle star field overlay for depth
 
 import React, { useEffect, useMemo, useRef } from 'react';
-import { StyleSheet, Animated, Easing, useWindowDimensions } from 'react-native';
+import { StyleSheet, Animated, Easing, useWindowDimensions, View } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
-// ── Layer 1: Nebula blobs ──────────────────────────────────────
-interface NebulaBlobConfig {
+// ── Gradient layer — slowly rotating color stops ──────────────
+function GradientLayer() {
+  const opacity1 = useRef(new Animated.Value(1)).current;
+  const opacity2 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    // Crossfade between two gradients for smooth color transition
+    Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(opacity1, { toValue: 0, duration: 12000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(opacity2, { toValue: 1, duration: 12000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+        Animated.parallel([
+          Animated.timing(opacity1, { toValue: 1, duration: 12000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          Animated.timing(opacity2, { toValue: 0, duration: 12000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+        ]),
+      ])
+    ).start();
+  }, []);
+
+  return (
+    <>
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: opacity1 }]}>
+        <LinearGradient
+          colors={['#0a0e1a', '#0f1628', '#0d1320', '#080c14']}
+          locations={[0, 0.35, 0.7, 1]}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
+      <Animated.View style={[StyleSheet.absoluteFill, { opacity: opacity2 }]}>
+        <LinearGradient
+          colors={['#0d0f1e', '#0a1525', '#10162a', '#090d16']}
+          locations={[0, 0.3, 0.65, 1]}
+          start={{ x: 1, y: 0 }}
+          end={{ x: 0, y: 1 }}
+          style={StyleSheet.absoluteFill}
+        />
+      </Animated.View>
+    </>
+  );
+}
+
+// ── Nebula blobs — subtle color splashes ──────────────────────
+interface BlobConfig {
   color: string;
   size: number;
   startX: number;
@@ -15,44 +61,19 @@ interface NebulaBlobConfig {
   duration: number;
 }
 
-function NebulaBlob({ blob }: { blob: NebulaBlobConfig }) {
-  const translateX = useRef(new Animated.Value(blob.startX)).current;
-  const translateY = useRef(new Animated.Value(blob.startY)).current;
+function NebulaBlob({ blob }: { blob: BlobConfig }) {
+  const x = useRef(new Animated.Value(blob.startX)).current;
+  const y = useRef(new Animated.Value(blob.startY)).current;
 
   useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(translateX, {
-          toValue: blob.endX,
-          duration: blob.duration,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateX, {
-          toValue: blob.startX,
-          duration: blob.duration,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(translateY, {
-          toValue: blob.endY,
-          duration: blob.duration * 1.15,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: blob.startY,
-          duration: blob.duration * 1.15,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
+    Animated.loop(Animated.sequence([
+      Animated.timing(x, { toValue: blob.endX, duration: blob.duration, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      Animated.timing(x, { toValue: blob.startX, duration: blob.duration, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ])).start();
+    Animated.loop(Animated.sequence([
+      Animated.timing(y, { toValue: blob.endY, duration: blob.duration * 1.15, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      Animated.timing(y, { toValue: blob.startY, duration: blob.duration * 1.15, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ])).start();
   }, []);
 
   return (
@@ -63,69 +84,36 @@ function NebulaBlob({ blob }: { blob: NebulaBlobConfig }) {
         height: blob.size,
         borderRadius: blob.size / 2,
         backgroundColor: blob.color,
-        transform: [{ translateX }, { translateY }],
+        transform: [{ translateX: x }, { translateY: y }],
       }}
     />
   );
 }
 
-const NEBULA_BLOBS: NebulaBlobConfig[] = [
-  { color: 'rgba(88, 28, 135, 0.12)', size: 320, startX: -60, startY: -40, endX: 100, endY: 140, duration: 24000 },
-  { color: 'rgba(30, 58, 138, 0.10)', size: 280, startX: 180, startY: 120, endX: 40, endY: 320, duration: 28000 },
-  { color: 'rgba(20, 83, 96, 0.08)', size: 300, startX: 60, startY: 500, endX: -30, endY: 280, duration: 22000 },
+const BLOBS: BlobConfig[] = [
+  { color: 'rgba(59, 40, 120, 0.08)', size: 350, startX: -80, startY: -60, endX: 120, endY: 160, duration: 26000 },
+  { color: 'rgba(20, 60, 130, 0.06)', size: 300, startX: 200, startY: 140, endX: 20, endY: 340, duration: 30000 },
+  { color: 'rgba(16, 80, 90, 0.05)', size: 280, startX: 40, startY: 520, endX: -40, endY: 300, duration: 24000 },
 ];
 
-// ── Layer 2: Star field ────────────────────────────────────────
+// ── Stars — tiny dots with occasional twinkle ────────────────
 interface StarConfig {
   x: number;
+  y: number;
   size: number;
   opacity: number;
-  speed: number; // seconds to cross screen
-  startY: number;
   twinkle: boolean;
 }
 
-function Star({ star, screenHeight }: { star: StarConfig; screenHeight: number }) {
-  const translateY = useRef(new Animated.Value(star.startY)).current;
-  const twinkleOpacity = useRef(new Animated.Value(star.opacity)).current;
+function Star({ star }: { star: StarConfig }) {
+  const anim = useRef(new Animated.Value(star.opacity)).current;
 
   useEffect(() => {
-    // Slow upward drift
-    Animated.loop(
-      Animated.timing(translateY, {
-        toValue: -20,
-        duration: star.speed * 1000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      })
-    ).start();
-
-    // Reset position when off screen (approximation via loop)
-    const resetInterval = setInterval(() => {
-      translateY.setValue(screenHeight + 20);
-    }, star.speed * 1000);
-
-    // Twinkle animation for select stars
-    if (star.twinkle) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.timing(twinkleOpacity, {
-            toValue: 0.5,
-            duration: 1500 + Math.random() * 2000,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-          Animated.timing(twinkleOpacity, {
-            toValue: 0.15,
-            duration: 1500 + Math.random() * 2000,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-        ])
-      ).start();
-    }
-
-    return () => clearInterval(resetInterval);
+    if (!star.twinkle) return;
+    Animated.loop(Animated.sequence([
+      Animated.timing(anim, { toValue: 0.5, duration: 2000 + Math.random() * 2000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+      Animated.timing(anim, { toValue: 0.1, duration: 2000 + Math.random() * 2000, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+    ])).start();
   }, []);
 
   return (
@@ -133,46 +121,40 @@ function Star({ star, screenHeight }: { star: StarConfig; screenHeight: number }
       style={{
         position: 'absolute',
         left: star.x,
+        top: star.y,
         width: star.size,
         height: star.size,
         borderRadius: star.size / 2,
         backgroundColor: '#fff',
-        opacity: star.twinkle ? twinkleOpacity : star.opacity,
-        transform: [{ translateY }],
+        opacity: star.twinkle ? anim : star.opacity,
       }}
     />
   );
 }
 
-// ── Combined background ────────────────────────────────────────
+// ── Combined background ──────────────────────────────────────
 export default function AnimatedBackground() {
   const { width, height } = useWindowDimensions();
 
   const stars = useMemo(() => {
     const result: StarConfig[] = [];
-    for (let i = 0; i < 45; i++) {
+    for (let i = 0; i < 35; i++) {
       result.push({
         x: Math.random() * width,
-        size: 1 + Math.random() * 2,
-        opacity: 0.1 + Math.random() * 0.3,
-        speed: 60 + Math.random() * 30, // 60-90 seconds
-        startY: Math.random() * height,
-        twinkle: i < 7, // first 7 stars twinkle
+        y: Math.random() * height,
+        size: 1 + Math.random() * 1.5,
+        opacity: 0.05 + Math.random() * 0.2,
+        twinkle: i < 6,
       });
     }
     return result;
   }, [width, height]);
 
   return (
-    <Animated.View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {/* Layer 1: Nebula */}
-      {NEBULA_BLOBS.map((blob, i) => (
-        <NebulaBlob key={`nebula-${i}`} blob={blob} />
-      ))}
-      {/* Layer 2: Stars */}
-      {stars.map((star, i) => (
-        <Star key={`star-${i}`} star={star} screenHeight={height} />
-      ))}
-    </Animated.View>
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <GradientLayer />
+      {BLOBS.map((blob, i) => <NebulaBlob key={`b-${i}`} blob={blob} />)}
+      {stars.map((star, i) => <Star key={`s-${i}`} star={star} />)}
+    </View>
   );
 }

@@ -1,20 +1,24 @@
-// Telegram-style chat bubble — gradient outgoing, dark incoming
-// Consecutive bubble grouping: tail corner only on last in group
+// Telegram-style chat bubble — edge-to-edge layout
+// Gradient outgoing, glass incoming, timestamps inside bubble
+// Robot avatar for Houston, grouped clustering
 
 import React from 'react';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import { View, Text, Image, StyleSheet, useWindowDimensions } from 'react-native';
+import Animated, { FadeIn } from 'react-native-reanimated';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Message } from '../hooks/useChat';
+
+const HOUSTON_AVATAR = require('../assets/images/icon.png');
 
 interface Props {
   message: Message;
   isOwn: boolean;
   showAvatar: boolean;
   showName: boolean;
-  isLastInGroup: boolean;  // tail corner only on last bubble in a consecutive group
+  isLastInGroup: boolean;
+  isNew?: boolean;
 }
 
-// Determine if this message starts a new group (different sender or >5min gap)
 export function shouldShowAvatar(messages: Message[], msg: Message, index: number): boolean {
   if (index === 0) return true;
   const prev = messages[index - 1];
@@ -24,7 +28,6 @@ export function shouldShowAvatar(messages: Message[], msg: Message, index: numbe
   return gap > 5 * 60 * 1000;
 }
 
-// Determine if this is the last message before a sender change or gap
 export function isLastInGroup(messages: Message[], msg: Message, index: number): boolean {
   if (index === messages.length - 1) return true;
   const next = messages[index + 1];
@@ -34,7 +37,6 @@ export function isLastInGroup(messages: Message[], msg: Message, index: number):
   return gap > 5 * 60 * 1000;
 }
 
-// Check if we need a date separator before this message
 export function needsDateSeparator(messages: Message[], index: number): string | null {
   const msg = messages[index];
   if (index === 0) return formatDate(msg.created_at);
@@ -51,7 +53,7 @@ function formatDate(iso: string): string {
   const diffDays = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60 * 24));
   if (diffDays === 0) return 'Today';
   if (diffDays === 1) return 'Yesterday';
-  return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString([], { month: 'long', day: 'numeric' });
 }
 
 function formatTime(iso: string): string {
@@ -62,7 +64,6 @@ function getInitials(name: string): string {
   return name.split(' ').map((w) => w[0]).join('').toUpperCase().slice(0, 2);
 }
 
-// Simple bold rendering
 function renderText(text: string, isOwn: boolean) {
   const parts = text.split(/\*\*(.*?)\*\*/g);
   if (parts.length === 1) {
@@ -87,11 +88,11 @@ export function DateSeparator({ label }: { label: string }) {
   );
 }
 
-export default function MessageBubble({ message, isOwn, showAvatar, showName, isLastInGroup: lastInGroup }: Props) {
+function MessageBubbleInner({ message, isOwn, showAvatar, showName, isLastInGroup: lastInGroup }: Omit<Props, 'isNew'>) {
   const isHouston = message.sender_type === 'houston';
   const hasImage = message.message_type === 'image' && message.attachments?.length > 0;
 
-  // Corner radii — tail only on last bubble in group
+  // Tail corners — Telegram style
   const ownRadii = lastInGroup
     ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomRightRadius: 4, borderBottomLeftRadius: 18 }
     : { borderRadius: 18 };
@@ -99,40 +100,61 @@ export default function MessageBubble({ message, isOwn, showAvatar, showName, is
     ? { borderTopLeftRadius: 18, borderTopRightRadius: 18, borderBottomRightRadius: 18, borderBottomLeftRadius: 4 }
     : { borderRadius: 18 };
 
+  // Timestamp + read receipts inline at bottom-right
+  const meta = (
+    <View style={s.metaRow}>
+      <Text style={[s.time, isOwn && s.timeOwn]}>{formatTime(message.created_at)}</Text>
+      {isOwn && <Text style={s.readReceipt}>✓✓</Text>}
+    </View>
+  );
+
   const inner = (
     <>
       {showName && !isOwn && (
         <Text style={[s.sender, isHouston && s.houstonSender]}>
-          {isHouston ? '⚡ Houston' : message.sender_name}
+          {isHouston ? 'Houston' : message.sender_name}
         </Text>
       )}
       {hasImage && (
         <Image source={{ uri: message.attachments[0].url }} style={s.image} resizeMode="cover" />
       )}
-      {message.body ? renderText(message.body, isOwn) : null}
-      {lastInGroup && (
-        <Text style={[s.time, isOwn && s.timeOwn]}>{formatTime(message.created_at)}</Text>
+      {message.body ? (
+        <View style={s.textWithMeta}>
+          {renderText(message.body, isOwn)}
+          {meta}
+        </View>
+      ) : (
+        meta
       )}
     </>
   );
 
   return (
-    <View style={[s.row, isOwn ? s.rowOwn : s.rowOther, showAvatar && { marginTop: 10 }]}>
-      {/* Avatar — only on first message in group */}
+    <View style={[
+      s.row,
+      isOwn ? s.rowOwn : s.rowOther,
+      showAvatar && { marginTop: 8 },
+      !lastInGroup && { marginBottom: 1 },
+    ]}>
+      {/* Avatar — only on last message in group */}
       {!isOwn && lastInGroup ? (
-        <View style={[s.avatar, isHouston && s.avatarHouston]}>
-          <Text style={s.avatarText}>{isHouston ? '⚡' : getInitials(message.sender_name || '?')}</Text>
-        </View>
+        isHouston ? (
+          <Image source={HOUSTON_AVATAR} style={s.avatarImage} />
+        ) : (
+          <View style={s.avatar}>
+            <Text style={s.avatarText}>{getInitials(message.sender_name || '?')}</Text>
+          </View>
+        )
       ) : !isOwn ? (
         <View style={s.avatarSpace} />
       ) : null}
 
       {isOwn ? (
         <LinearGradient
-          colors={['#3B82F6', '#6366F1']}
+          colors={['#2D7CF6', '#5856D6']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
-          style={[s.bubble, ownRadii]}
+          style={[s.bubble, s.bubbleOwn, ownRadii]}
         >
           {inner}
         </LinearGradient>
@@ -145,42 +167,68 @@ export default function MessageBubble({ message, isOwn, showAvatar, showName, is
   );
 }
 
+export default function MessageBubble(props: Props) {
+  const { isNew, ...rest } = props;
+
+  if (isNew) {
+    return (
+      <Animated.View entering={FadeIn.duration(150)}>
+        <MessageBubbleInner {...rest} />
+      </Animated.View>
+    );
+  }
+
+  return <MessageBubbleInner {...rest} />;
+}
+
 const s = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    marginHorizontal: 12,
+    marginHorizontal: 8, // Tight — 8px from edges like Telegram
     marginBottom: 2,
   },
   rowOwn: { justifyContent: 'flex-end' },
   rowOther: { justifyContent: 'flex-start' },
   avatar: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#3a3a3c',
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: '#2c2c2e',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 6,
     alignSelf: 'flex-end',
   },
-  avatarHouston: { backgroundColor: 'rgba(16,185,129,0.2)' },
+  avatarImage: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    marginRight: 6,
+    alignSelf: 'flex-end',
+  },
   avatarText: { fontSize: 11, fontWeight: '600', color: '#e5e5e5' },
-  avatarSpace: { width: 34 },
+  avatarSpace: { width: 36 }, // avatar width + margin
   bubble: {
-    maxWidth: '78%',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    maxWidth: '85%', // Wider — Telegram style
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  bubbleOwn: {
+    // gradient applied via LinearGradient
   },
   bubbleOther: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.06)',
   },
   bubbleHouston: {
-    backgroundColor: 'rgba(16,185,129,0.1)',
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    borderColor: 'rgba(16,185,129,0.08)',
   },
   sender: {
     fontSize: 13,
     fontWeight: '600',
-    color: 'rgba(255,255,255,0.6)',
+    color: 'rgba(255,255,255,0.55)',
     marginBottom: 2,
   },
   houstonSender: { color: '#10b981' },
@@ -191,27 +239,42 @@ const s = StyleSheet.create({
   },
   ownText: { color: '#fff' },
   bold: { fontWeight: '700' },
+  textWithMeta: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'flex-end',
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 8,
+    gap: 3,
+    alignSelf: 'flex-end',
+    paddingTop: 2,
+  },
   time: {
     fontSize: 11,
     color: 'rgba(255,255,255,0.35)',
-    marginTop: 3,
   },
   timeOwn: {
-    alignSelf: 'flex-end',
-    color: 'rgba(255,255,255,0.5)',
+    color: 'rgba(255,255,255,0.55)',
+  },
+  readReceipt: {
+    fontSize: 11,
+    color: 'rgba(100,180,255,0.7)',
   },
   image: {
-    width: 220,
-    height: 220,
+    width: 240,
+    height: 240,
     borderRadius: 14,
     marginBottom: 4,
   },
   dateSepWrap: {
     alignItems: 'center',
-    marginVertical: 12,
+    marginVertical: 10,
   },
   dateSepPill: {
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: 'rgba(0,0,0,0.35)',
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 4,
@@ -219,6 +282,6 @@ const s = StyleSheet.create({
   dateSepText: {
     fontSize: 13,
     fontWeight: '500',
-    color: 'rgba(255,255,255,0.45)',
+    color: 'rgba(255,255,255,0.5)',
   },
 });

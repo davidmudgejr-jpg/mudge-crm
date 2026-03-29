@@ -9,6 +9,7 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import 'react-native-reanimated';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 import { AuthProvider, useAuth } from '../hooks/useAuth';
 import LoginScreen from './login';
@@ -81,9 +82,11 @@ function RootLayoutInner() {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <RootLayoutInner />
-    </AuthProvider>
+    <KeyboardProvider>
+      <AuthProvider>
+        <RootLayoutInner />
+      </AuthProvider>
+    </KeyboardProvider>
   );
 }
 
