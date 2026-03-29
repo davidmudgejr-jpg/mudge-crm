@@ -13,7 +13,6 @@ import NewInteractionModal from '../components/shared/NewInteractionModal';
 import ActivitySection from '../components/shared/ActivitySection';
 import TasksSection from '../components/shared/TasksSection';
 import LeadsSection from '../components/shared/LeadsSection';
-import DealContractsSection from '../components/contracts/DealContractsSection';
 
 export const STATUSES = ['Prospecting', 'Active', 'Under Contract', 'Closed', 'Dead'];
 export const DEAL_TYPES = ['Lease', 'Sale', 'Acquisition', 'Disposition', 'Investment', 'Development'];
@@ -187,8 +186,6 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
       )}
 
       <NotesSection entityType="deal" entityId={resolvedId} onRefresh={loadData} />
-
-      <DealContractsSection dealId={resolvedId} dealName={deal?.deal_name} />
 
       <LinkedRecordSection title="Properties" entityType="property" records={propertyRecords} defaultOpen={linkedProperties.length > 0} sourceType="deal" sourceId={resolvedId} onRefresh={loadData} />
       <LinkedRecordSection title="Contacts" entityType="contact" records={contactRecords} defaultOpen={linkedContacts.length > 0} sourceType="deal" sourceId={resolvedId} onRefresh={loadData} />

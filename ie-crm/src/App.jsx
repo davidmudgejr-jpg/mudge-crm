@@ -22,8 +22,6 @@ import TPE from './pages/TPE';
 import TPEEnrichment from './pages/TPEEnrichment';
 import AIOps from './pages/AIOps';
 import VerificationQueue from './pages/VerificationQueue';
-import Contracts from './pages/Contracts';
-import ContractEditor from './pages/ContractEditor';
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
@@ -121,8 +119,6 @@ function AppShell() {
           <Route path="/contacts" element={<Contacts onCountChange={setRowCount} />} />
           <Route path="/companies" element={<Companies onCountChange={setRowCount} />} />
           <Route path="/deals" element={<Deals onCountChange={setRowCount} />} />
-          <Route path="/contracts" element={<Contracts />} />
-          <Route path="/contracts/:id" element={<ContractEditor />} />
           <Route path="/tpe" element={<TPE onCountChange={setRowCount} />} />
           <Route path="/tpe-enrichment" element={<TPEEnrichment />} />
           <Route path="/verification" element={<VerificationQueue />} />

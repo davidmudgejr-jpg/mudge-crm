@@ -73,7 +73,6 @@ export default function AIOpsPage3D({
   onProposalsClick,
   onMeetingsClick,
   onSchedulesClick,
-  onDedupClick,
   apiBaseUrl = '',
 }) {
   const containerRef = useRef(null);
@@ -280,25 +279,6 @@ export default function AIOpsPage3D({
             <polyline points="12 6 12 12 16 14" />
           </svg>
           SCHEDULES
-        </button>
-        <button
-          style={{
-            ...proposalsBtnStyle,
-            background: 'rgba(239,68,68,0.15)',
-            border: '1px solid rgba(239,68,68,0.3)',
-            color: '#ef4444',
-          }}
-          onClick={onDedupClick}
-          onMouseEnter={(e) => { e.currentTarget.style.transform = 'scale(1.05)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
-          title="Property Dedup Queue"
-        >
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="8" y="2" width="8" height="4" rx="1" ry="1" />
-            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" />
-            <path d="m9 14 2 2 4-4" />
-          </svg>
-          DEDUP
         </button>
       </div>
     </div>

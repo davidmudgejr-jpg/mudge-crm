@@ -1,8 +1,8 @@
 # Session Handoff — IE CRM Build Status
 
-> Updated: 2026-03-28 (Phase 14: Contracts Polish — Strikeout, Add Text, Package Import)
-> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) Fleet operations: SSH access, directive pipeline via Telegram, health monitoring, agent fixes. (9) Security + workflow: Codex connected, 7 vulnerabilities fixed, PR workflow established, Forum Debate + roadmap additions. (10) Oracle + Infrastructure: Monte Carlo prediction engine designed, Migration 025, AGENT-SYSTEM.md expanded. (11) **Massive multi-day session**: Houston Command stabilized, Tailscale mesh, AIR super sheet pipeline, Instantly.ai, dedup scanner, Brain Sessions, Data Trust Tiers, 3D Command Center, Council of Minds. (12) **AIR CRE Contracts reverse engineering + module build**: SSH into Windows PC via Tailscale, decompiled all 6 AIR CRE DLLs (ILSpy), cracked AES-128 encryption (hardcoded keys found), decrypted 5 contract packages + 73-form master template library (18MB), built PowerShell decrypter, SCP'd everything to Mac, built full Contracts module (9 phases). (13) **Contracts live testing + multi-form packages**: Live-tested contract creation (4 bugs fixed), multi-form packages (OFA+BBE+AD tabs), WAFPKG multi-form export, Telegram bot setup. (14) **Contracts polish**: Paragraph strikeout (double-click, red CSS, stored in strikeouts JSONB), imported 5 real AIR CRE packages, **Add Text button** (T+ mode, click paragraph → inline editor, red Georgia 16pt bold, stored as __addtext__ in field_values JSONB), fixed Rules of Hooks violation in XamlDocumentRenderer.
-> Next tasks: **WAFPKG round-trip** (export from CRM → open in AIR desktop app on Windows PC via Tailscale), **Find/Replace** in documents, **48GB Mac Mini arrives April 14-21** (deploy Tier 3 agents).
+> Updated: 2026-03-25 (Phase 11: AIR Pipeline + Instantly.ai + Brain Sessions + Dedup Scanner)
+> Previous sessions: (1-3) AI fleet, Team Chat, Git cleanup + OAuth. (4) Views, light mode, testing, docs. (5) PWA mobile chat, Houston write actions, image analysis. (6) Houston Command on Mac Mini (OpenClaw/Opus), Council channel in AI Ops, directive cascade system. (7) Full AI agent system architecture designed and built. (8) Fleet operations: SSH access, directive pipeline via Telegram, health monitoring, agent fixes. (9) Security + workflow: Codex connected, 7 vulnerabilities fixed, PR workflow established, Forum Debate + roadmap additions. (10) Oracle + Infrastructure: Monte Carlo prediction engine designed, Migration 025, AGENT-SYSTEM.md expanded. (11) **Massive multi-day session**: Houston Command stabilized (1-year setup token, stale Ralph profiles removed), Tailscale mesh network (all machines connected from anywhere), AIR super sheet pipeline live (parser + ingest + field normalizer), Instantly.ai API wired (13 endpoints), property dedup scanner (3 matching strategies + one-click merge), Brain Session system built (three-way team meetings recorded to Council), pre-call briefs for Houston Sonnet, Data Trust Tiers + Deal Dossiers + David Filter scoring, 3D Command Center integrated, Council of Minds meetings + improvement proposals with David approval.
+> Next tasks: **Build data trust tiers UI** (safety layer before enrichment), **Re-run dedup scan** (table name fix deployed, need clean results), **48GB Mac Mini arrives April 14-21** (deploy Tier 3 agents — Enricher first), **M1 Mac Mini setup** (Ralphs for contact research), **David: share active deals with Houston Command** (for dossiers + pre-call briefs), **Fireflies.ai integration** (API key needed), **Native PWA app setup**, **Agent instruction files** (Postmaster + Campaign Manager).
 
 ---
 
@@ -529,72 +529,6 @@ Building the IE CRM through Phase 1 of the ROADMAP.md — completing Airtable pa
 **Reference Materials Saved:**
 - [x] `reference/mirofish/` — Full MiroFish source code (persona generation, simulation engine, knowledge graph memory, report agent)
 - [x] `reference/bettafish/` — Full BettaFish source code (forum debate engine, sentiment analysis model)
-
-### AIR CRE Contracts Module ✅ (2026-03-27, Phase 12)
-
-**Reverse Engineering (via SSH to Windows PC `mini-air12` over Tailscale):**
-- [x] **Decompiled all 6 DLLs** — Encrypter, Encryption, Model, Core, Dal, ServerCommunication via ILSpy CLI. Source in `C:\Decompiled\` on PC.
-- [x] **Cracked file encryption** — AES-128-CBC with Rfc2898DeriveBytes. Hardcoded password `W1n41r-f0rMs-3.0`, 3 static byte arrays for key/IV derivation. All local files (.wafpkg, .aircfg, .airfrm) decrypt to clean XML.
-- [x] **Built PowerShell decrypter** — `C:\Decompiled\Decrypt.ps1` on PC, works on any AIR CRE encrypted file.
-- [x] **Decrypted 5 contract packages** — Cajalco Rd (937K), Mike Hire Plastics (427K), Dr Sandu (412K), NewPackage1 (269K), 977 Main St Amendment (204K). All clean XML.
-- [x] **Decrypted master forms library** — `MasterForms_California.airfrm` → 18MB XML with 73 form templates (entire AIR CRE California library).
-- [x] **SCP'd to Mac** — master forms + 5 packages now at `ie-crm/air-cre-data/`.
-- [x] **StringCipher also cracked** — separate AES-256-CBC layer for string encryption (IV: `tu89geji340t89u2`, passphrase: `SharedKey`).
-
-**Module Build (9 phases, all complete):**
-- [x] **Phase 1: Template parser** (`scripts/parse-air-templates.js`) — extracts 11 core forms (OFA, OFAL, STN, STG, MTN, MTG, BBE, OA, AD, ATL, ATPA) into per-form JSON files at `air-cre-data/parsed/`. Each includes field definitions + raw XAML content. 997 total fields extracted.
-- [x] **Phase 2: Migration 039** — `contracts` table with UUID deal FK, JSONB `field_values`, status constraint (Draft/Final), auto-updated_at trigger. Applied to Neon.
-- [x] **Phase 3: API routes** (`server/routes/contracts.js`) — 9 REST endpoints: list, get, by-deal, templates, create (with auto-fill), update, finalize, delete, WAFPKG export. Auto-fill mapping in `server/utils/airFieldMapping.js`.
-- [x] **Phase 4: XAML renderer** (`src/components/contracts/XamlDocumentRenderer.jsx`) — converts Telerik RadDocument XAML to React/HTML. Handles: sections (pages), paragraphs (indent levels), spans, tables, images, FieldRangeStart/End (editable spans), checkboxes, digital signature placeholders. CSS in `contracts.css`.
-- [x] **Phase 5: Contracts list page** (`src/pages/Contracts.jsx`) — table view with status badges, form codes, deal names, delete (drafts only). EmptyState for first-time UX.
-- [x] **Phase 6: Contract editor** (`src/pages/ContractEditor.jsx`) — full-page editor: left field checklist (filled/empty indicators, click-to-scroll), center WYSIWYG document preview, top toolbar (status, finalize, export PDF, export WAFPKG). Auto-save on field blur (800ms debounce).
-- [x] **Phase 7: PDF export** — `html2pdf.js` installed, client-side rendering from document container.
-- [x] **Phase 8: WAFPKG export** (`server/utils/wafpkgExporter.js`) — injects field values into XAML, wraps in WinAirFile XML envelope, AES-128 re-encryption matching original AIR CRE format exactly. Produces files the Windows app can open.
-- [x] **Phase 9: Deal integration** (`src/components/contracts/DealContractsSection.jsx`) — collapsible contracts section in DealDetail, shows linked contracts with status badges, click navigates to editor.
-- [x] **Routing + sidebar** — `/contracts` and `/contracts/:id` routes in App.jsx, Contracts nav item in Sidebar.jsx (document icon, between Deals and TPE).
-- [x] **NewContractModal** — form type picker (grouped by Purchase/Lease/Agency) + deal search + auto-generated name.
-
-**Live Testing + Polish (2026-03-28, Phase 13):**
-- [x] **Live-tested contract creation** — created OFA linked to 890 Ontario Blvd deal, verified auto-fill + XAML rendering
-- [x] **Fixed 4 bugs during testing:**
-  - UUID vs `parseInt` in NewContractModal — deal_id is UUID, not integer
-  - `deal_contacts` junction table has no `role` column — removed from query
-  - `contacts` table has `full_name` directly — no `last_name` column to concatenate
-  - XAML parse error from unescaped `"` in .NET attribute values — built `isClosingQuote()` context-aware sanitizer
-- [x] **Expanded auto-fill mapping** — corrected FieldTypeIDs (1201=Name, 1202=Title, 1203=Phone, 1205=Email), added property fields (county, APN, legal desc, type), financial fields (purchase price), date fields. 69/120 fields auto-populated.
-- [x] **Page footers** — extracted from XAML Section.Footers, rendered at bottom of each page with initial lines, copyright, page numbers
-- [x] **Red strikethrough CSS** — AIR CRE convention: `Strikethrough="True"` renders as red text+line on boilerplate, blue on field content. Color handling for `ForeColor` attribute (ARGB → CSS rgba).
-- [x] **Zoom slider** (20-100%) with continuous scroll layout. CSS `transform: scale()` preserves all native spacing. Default 35% for overview.
-- [x] **Multi-form packages** — `contract_packages` parent table (Migration 040), `package_id` + `form_order` on contracts. Package-first API (POST creates package with N forms, GET returns package + all forms + templates). Tabbed editor: horizontal form tabs (OFA | BBE | AD), click to switch, "+" to add forms, X to remove. NewContractModal: multi-select with checkboxes. Contracts list shows packages with form code badges + counts. WAFPKG exporter loops all forms in package.
-- [x] **Telegram bot** — Claude Code Channels plugin installed (Bun required), paired with David's Telegram account, allowlist locked down.
-- [x] **SCP'd decompiled source** — all 219 C# files from AIR CRE desktop app now at `ie-crm/air-cre-data/decompiled/`
-
-**Still needs work:**
-- Strike Out / Un-Strike toolbar buttons (red strikethrough on selected text)
-- Add Text button (insert red addendum language like "SIGNATURE PAGE FOLLOWS")
-- Import existing 5 decrypted packages as contracts
-- WAFPKG round-trip verification (export from CRM → open in AIR desktop app)
-- Find/Replace in documents
-- Highlight with color picker
-
-**Key files created/modified (Phase 13):**
-- `ie-crm/migrations/040_contract_packages.sql` — NEW
-- `ie-crm/server/routes/contracts.js` — rewritten for package-first architecture
-- `ie-crm/server/utils/airFieldMapping.js` — expanded FieldTypeID mappings
-- `ie-crm/server/utils/wafpkgExporter.js` — multi-form export
-- `ie-crm/src/pages/ContractEditor.jsx` — form tabs, zoom, package loading
-- `ie-crm/src/pages/Contracts.jsx` — package list view
-- `ie-crm/src/components/contracts/NewContractModal.jsx` — multi-form selection
-- `ie-crm/src/components/contracts/XamlDocumentRenderer.jsx` — quote sanitizer, footer rendering, zoom scaling
-- `ie-crm/src/components/contracts/contracts.css` — footer, strikethrough, zoom styles
-- `ie-crm/src/components/contracts/NewContractModal.jsx`
-- `ie-crm/src/components/contracts/DealContractsSection.jsx`
-- `ie-crm/air-cre-data/parsed/*.json` (11 templates + index)
-
-**RE data on Windows PC (`mini-air12` via Tailscale 100.96.4.92):**
-- Decompiled source: `C:\Decompiled\` (Encrypter, Encryption, Model, Core, Dal, ServerCommunication, parser scripts)
-- Decrypter: `C:\Decompiled\Decrypt.ps1`
-- Tools: ILSpy CLI (`ilspycmd` in PATH), dnSpy GUI (`C:\Tools\dnSpy\dnSpy.exe`)
 
 ### Lease Comp Import Wizard ⬜ (next priority)
 - [ ] **Receive Excel examples from David** — need actual lease comp spreadsheet structure before designing

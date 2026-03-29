@@ -3205,7 +3205,14 @@ function registerChatRoutes(app) {
         console.warn('[chat] SECURITY: GET /channels using query userId instead of JWT — update frontend');
       }
       if (!userId) return res.status(400).json({ error: 'Authentication required' });
-      res.json(channels);
+      const result = await pool.query(`
+        SELECT c.*, cm.last_read_at
+        FROM chat_channels c
+        JOIN chat_channel_members cm ON cm.channel_id = c.id
+        WHERE cm.user_id = $1
+        ORDER BY c.last_activity DESC
+      `, [userId]);
+      res.json(result.rows);
     } catch (err) {
       console.error('[chat] GET /channels error:', err.message);
       res.status(500).json({ error: 'Failed to fetch channels' });

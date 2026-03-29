@@ -14,7 +14,6 @@ const multer = require('multer');
 const { initChat, registerChatRoutes, triggerCouncilHoustonResponse } = require('./services/chat');
 const { mountAiRoutes } = require('./routes/ai');
 const { mountVerificationRoutes } = require('./routes/verification');
-const { mountContractRoutes } = require('./routes/contracts');
 
 // Load env
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
@@ -279,7 +278,6 @@ mountAiRoutes(app, {
 
 // Mount Verification Queue routes BEFORE requireAuth — has its own dual-auth (JWT or X-Agent-Key)
 mountVerificationRoutes(app, { getPool: () => pool, requireAuth, optionalAuth });
-mountContractRoutes(app, { getPool: () => pool, requireAuth });
 
 // Protect all API routes below this line (except Houston completions which use optionalAuth)
 app.use('/api', requireAuth);

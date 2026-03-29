@@ -14,7 +14,6 @@ import CouncilChat from '../components/ai-ops/detail-views/CouncilChat';
 import ImprovementProposals from '../components/ai-ops/detail-views/ImprovementProposals';
 import CouncilMeetings from '../components/ai-ops/detail-views/CouncilMeetings';
 import AgentSchedules from '../components/ai-ops/detail-views/AgentSchedules';
-import DedupQueue from '../components/ai-ops/detail-views/DedupQueue';
 
 // ─────────────────────────────────────────────────────────────
 // Detail view registry — maps screen/agent IDs to components
@@ -34,7 +33,6 @@ const DETAIL_VIEWS = {
   proposals:        ImprovementProposals,
   meetings:         CouncilMeetings,
   schedules:        AgentSchedules,
-  dedup:            DedupQueue,
 };
 
 // ─────────────────────────────────────────────────────────────
@@ -102,7 +100,6 @@ export default function AIOps() {
         onProposalsClick={() => setActiveView('proposals')}
         onMeetingsClick={() => setActiveView('meetings')}
         onSchedulesClick={() => setActiveView('schedules')}
-        onDedupClick={() => setActiveView('dedup')}
       />
 
       {/* Live Ticker — bottom bar */}
