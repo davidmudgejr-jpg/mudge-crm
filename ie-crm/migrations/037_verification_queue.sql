@@ -3,6 +3,15 @@
 -- Tracks confirmation rates to measure enrichment quality over time
 
 -- ============================================================
+-- 0. ENSURE contacts.enriched_at EXISTS
+-- fn_verification_auto_promote (below) writes to this column.
+-- Must be present before the function is defined so the migration
+-- chain is replay-safe on a clean database (migration 038 also adds
+-- it as a safety net, but this guarantees correct ordering).
+-- ============================================================
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS enriched_at TIMESTAMPTZ;
+
+-- ============================================================
 -- 1. VERIFICATION REQUESTS TABLE
 -- ============================================================
 CREATE TABLE IF NOT EXISTS verification_requests (

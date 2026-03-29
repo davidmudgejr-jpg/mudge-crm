@@ -3523,6 +3523,50 @@ router.post('/dedup/scan', async (req, res) => {
   }
 });
 
+// 56b. GET /api/ai/dedup/:id/details — Full property records + contacts for both sides
+router.get('/dedup/:id/details', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { id } = req.params;
+    const candidate = await pool.query('SELECT * FROM dedup_candidates WHERE id = $1', [id]);
+    if (candidate.rows.length === 0) return res.status(404).json({ error: 'Not found' });
+    const c = candidate.rows[0];
+
+    const [propA, propB, contactsA, contactsB] = await Promise.all([
+      pool.query('SELECT * FROM properties WHERE property_id = $1', [c.property_a_id]),
+      pool.query('SELECT * FROM properties WHERE property_id = $1', [c.property_b_id]),
+      pool.query(
+        `SELECT c.contact_id, c.first_name, c.last_name, c.title, c.company_name, pc.role
+         FROM property_contacts pc
+         JOIN contacts c ON c.contact_id = pc.contact_id
+         WHERE pc.property_id = $1
+         ORDER BY c.last_name, c.first_name`,
+        [c.property_a_id]
+      ),
+      pool.query(
+        `SELECT c.contact_id, c.first_name, c.last_name, c.title, c.company_name, pc.role
+         FROM property_contacts pc
+         JOIN contacts c ON c.contact_id = pc.contact_id
+         WHERE pc.property_id = $1
+         ORDER BY c.last_name, c.first_name`,
+        [c.property_b_id]
+      ),
+    ]);
+
+    res.json({
+      candidate: c,
+      property_a: propA.rows[0] || null,
+      property_b: propB.rows[0] || null,
+      contacts_a: contactsA.rows,
+      contacts_b: contactsB.rows,
+    });
+  } catch (err) {
+    console.error('[AI API] GET /dedup/:id/details error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch details' });
+  }
+});
+
 // 57. GET /api/ai/dedup/candidates — List dedup candidates for review
 router.get('/dedup/candidates', async (req, res) => {
   const pool = dbPool(res);
@@ -3561,7 +3605,7 @@ router.post('/dedup/merge/:id', async (req, res) => {
   if (!pool) return;
   try {
     const { id } = req.params;
-    const { direction, notes } = req.body; // 'a_absorbs_b' or 'b_absorbs_a'
+    const { direction, notes, field_overrides } = req.body; // 'a_absorbs_b' or 'b_absorbs_a'
 
     if (!direction || !['a_absorbs_b', 'b_absorbs_a'].includes(direction)) {
       return res.status(400).json({ error: 'direction must be a_absorbs_b or b_absorbs_a' });
@@ -3648,6 +3692,31 @@ router.post('/dedup/merge/:id', async (req, res) => {
           `UPDATE properties SET ${fillUpdates.join(', ')} WHERE property_id = $${fIdx}`,
           fillParams
         );
+      }
+
+      // Apply explicit field overrides (field_overrides: { property_address: 'a'|'b', ... })
+      const ALLOWED_OVERRIDE_FIELDS = [
+        'property_address', 'property_name', 'rba', 'property_type', 'building_class',
+        'year_built', 'city', 'county', 'zip', 'owner_name', 'owner_phone',
+        'land_sf', 'land_area_ac', 'clear_ht', 'zoning',
+      ];
+      if (field_overrides && typeof field_overrides === 'object') {
+        const overrideUpdates = [];
+        const overrideParams = [];
+        let oIdx = 1;
+        for (const [field, side] of Object.entries(field_overrides)) {
+          if (!ALLOWED_OVERRIDE_FIELDS.includes(field)) continue;
+          const sourceRow = side === 'a' ? w : l;
+          overrideUpdates.push(`${field} = $${oIdx++}`);
+          overrideParams.push(sourceRow[field] ?? null);
+        }
+        if (overrideUpdates.length > 0) {
+          overrideParams.push(winnerId);
+          await pool.query(
+            `UPDATE properties SET ${overrideUpdates.join(', ')} WHERE property_id = $${oIdx}`,
+            overrideParams
+          );
+        }
       }
     }
 
@@ -4820,7 +4889,7 @@ router.get('/contacts/enrichment-queue', async (req, res) => {
       GROUP BY c.contact_id
       ORDER BY
         MAX(t.tpe_score) DESC NULLS LAST,
-        c.updated_at DESC
+        c.created_at DESC
       LIMIT $1 OFFSET $2
     `, [limit, offset]);
 
