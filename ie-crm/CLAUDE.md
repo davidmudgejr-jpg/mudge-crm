@@ -1,5 +1,10 @@
 # IE CRM — Development Guide
 
+## Behavior Overrides
+
+- Do NOT auto-trigger code reviews or the requesting-code-review skill unless I explicitly ask for a review.
+- Do NOT proactively run PR reviews, "all good" checks, or verification-before-completion unless explicitly requested.
+
 ## Overview
 
 Inland Empire CRM — a React + Express web application for commercial real estate contact/deal management. Built with Vite, Tailwind CSS, and PostgreSQL (Neon). Includes an integrated Claude AI assistant for natural-language database queries. Deployed on Vercel (frontend) + Railway (backend).
@@ -217,6 +222,50 @@ The CRM integrates with a planned 3-tier AI agent fleet (see `ai-system/` direct
 - **Tier 3 (Local — Qwen 3.5, MiniMax 2.5):** High-volume research, enrichment, matching
 
 Agent outputs land in `sandbox_*` tables (migration 007) for human review before promotion to production tables.
+
+## Contracts Module (AIR CRE)
+
+Full WYSIWYG editor for AIR CRE contract packages. Reverse-engineered from the AIR CRE desktop app.
+
+### Key files
+```
+server/routes/contracts.js         # Package CRUD, form add/remove, PATCH field_values+strikeouts, WAFPKG export
+server/utils/airFieldMapping.js    # FieldTypeID → CRM column map (annotation IDs to contact/property fields)
+server/utils/wafpkgExporter.js     # AES-128-CBC WAFPKG export (multi-form, single WinAirFile envelope)
+src/pages/Contracts.jsx            # Package list — form code badges, delete
+src/pages/ContractEditor.jsx       # Package editor — form tabs, field checklist sidebar, zoom
+src/components/contracts/
+  XamlDocumentRenderer.jsx         # Telerik RadDocument XAML → React DOM renderer
+  contracts.css                    # Air document styles (air-para, air-field-*, air-added-text, etc.)
+  NewContractModal.jsx             # Multi-select form codes → create package
+air-cre-data/
+  packages/          # Decrypted .wafpkg.xml files (5 real packages)
+  decompiled/        # ILSpy output from AIR CRE DLLs (EncryptionHelpers, WafPackage, etc.)
+```
+
+### Schema
+- `contract_packages` — parent: id, name, deal_id, status, created_at
+- `contracts` — child form: id, package_id, form_code, form_order, field_values JSONB, strikeouts JSONB, template JSONB
+
+### field_values JSONB conventions
+- **Regular fields**: `{ annotationId: value }` — keyed by numeric annotation ID
+- **Strikeouts**: stored in separate `strikeouts` column as `{ paraId: true }`
+- **Added text**: `__addtext__${paraId}: text` — red addendum language inserted after a paragraph
+
+### Editing features
+- Double-click any paragraph → strike/unstrike (red line-through, stored in `strikeouts`)
+- **T+ button** → add-text mode: click a paragraph → inline editor → red Georgia 16pt bold text inserted after it
+- Zoom slider (20–100%) with CSS `transform: scale()` + `ResizeObserver` for scroll height
+- Form tabs — add/remove forms within a package
+- Field checklist sidebar — green dots for filled, red asterisk for required
+
+### WAFPKG format
+- AES-128-CBC encrypted XML (keys hardcoded in AIR CRE DLLs — found via ILSpy decompile)
+- Multi-form export: loops all forms → builds multiple `<AireaDocTemplate>` blocks in one `<WinAirFile>`
+- Decrypt script: `air-cre-data/decrypt.ps1` (PowerShell, runs on Windows via Tailscale SSH)
+
+### XAML quirk (AIR CRE .NET serializer)
+AIR CRE's XAML serializer writes unescaped `"` inside XML attribute values (e.g. `Text=", (&quot;Buyer&quot;)"`). `sanitizeXamlForXml()` in `XamlDocumentRenderer.jsx` uses a character walker with lookahead to distinguish closing delimiters from literal quotes.
 
 ## Tech Stack
 
