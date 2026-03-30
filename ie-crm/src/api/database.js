@@ -71,6 +71,7 @@ const ALLOWED_COLS = {
     'increases', 'escrow_url', 'surveys_brochures_url',
     'run_by', 'other_broker', 'industry', 'deadline', 'fell_through_reason',
     'created_at', 'modified', 'lead_count',
+    'team_gross_computed', 'jr_gross_computed', 'jr_net_computed', 'missy_net_computed',
   ]),
   interactions: new Set([
     'interaction_id', 'airtable_id', 'type', 'subject', 'date',
@@ -164,18 +165,23 @@ const VALID_VIEW_TABLES = new Set([
   'properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns',
 ]);
 
+// Map entity tables to their computed VIEWs (for formula columns)
+const TABLE_VIEW_MAP = { deals: 'deal_formulas' };
+
 export async function queryWithFilters(table, { whereClause = '', params = [], orderBy, order, limit = 200, offset = 0 } = {}) {
   if (!VALID_VIEW_TABLES.has(table)) throw new Error(`Invalid table: ${table}`);
+  const queryTable = TABLE_VIEW_MAP[table] || table;
   const safeOrder = sanitizeCol(orderBy, table, 'created_at');
   const safeDir = sanitizeDir(order);
   const n = params.length;
-  const sql = `SELECT * FROM ${table} ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${n + 1} OFFSET $${n + 2}`;
+  const sql = `SELECT * FROM ${queryTable} ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${n + 1} OFFSET $${n + 2}`;
   return query(sql, [...params, limit, offset]);
 }
 
 export async function countWithFilters(table, { whereClause = '', params = [] } = {}) {
   if (!VALID_VIEW_TABLES.has(table)) throw new Error(`Invalid table: ${table}`);
-  const sql = `SELECT COUNT(*) AS total FROM ${table} ${whereClause}`;
+  const queryTable = TABLE_VIEW_MAP[table] || table;
+  const sql = `SELECT COUNT(*) AS total FROM ${queryTable} ${whereClause}`;
   const result = await query(sql, params);
   return parseInt(result.rows?.[0]?.total || '0', 10);
 }
