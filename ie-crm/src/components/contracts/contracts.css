@@ -1,0 +1,274 @@
+/* AIR CRE Contracts — Document Preview Styles */
+
+/* Zoom container — scales the entire document while maintaining layout */
+.air-zoom-container {
+  /* transform + width set inline by React based on zoom level */
+}
+
+/* Document container — single column of pages */
+.air-document {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 1.5rem 0;
+}
+
+/* Page — letter size with white background */
+.air-page {
+  width: 8.5in;
+  min-height: 11in;
+  background: white;
+  color: #1a1a1a;
+  font-family: Calibri, 'Segoe UI', sans-serif;
+  font-size: 10.67pt;
+  line-height: 1.15;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.air-page + .air-page {
+  break-before: page;
+}
+
+.air-page-body {
+  padding: 0.5in;
+  flex: 1;
+}
+
+/* Page footer — initials + copyright at bottom of each page */
+.air-page-footer {
+  border-top: 1px solid #ccc;
+  margin-top: auto;
+  font-size: 8pt;
+  color: #666;
+  line-height: 1.4;
+}
+
+.air-page-footer .air-para {
+  margin: 0;
+  font-size: 8pt;
+}
+
+.air-page-footer .air-field-signature {
+  display: inline-block;
+  width: 1.5in;
+  border-bottom: 1px solid #999;
+  font-family: 'Courier New', monospace;
+  font-size: 8pt;
+  color: #999;
+}
+
+/* Paragraph styles */
+.air-para {
+  margin: 0;
+  padding: 0;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+.air-para + .air-para {
+  margin-top: 0;
+}
+
+.air-para-spaced {
+  margin-top: 6pt;
+}
+
+/* Indent levels (matching AIR CRE L1-L7 paragraph styles) */
+.air-indent-1 { padding-left: 0.25in; }
+.air-indent-2 { padding-left: 0.5in; }
+.air-indent-3 { padding-left: 0.75in; }
+.air-indent-4 { padding-left: 1.0in; }
+.air-indent-5 { padding-left: 1.25in; }
+.air-indent-6 { padding-left: 1.5in; }
+.air-indent-7 { padding-left: 1.75in; }
+
+/* Text alignment */
+.air-align-center { text-align: center; }
+.air-align-right { text-align: right; }
+.air-align-justify { text-align: justify; }
+
+/* Span styles */
+.air-span {
+  /* default: inherits from paragraph */
+}
+
+.air-span-original {
+  font-family: Calibri, sans-serif;
+  font-size: 10.67pt;
+  color: #1a1a1a;
+}
+
+.air-span-bold {
+  font-weight: bold;
+}
+
+.air-span-italic {
+  font-style: italic;
+}
+
+/* Strikethrough — AIR CRE convention:
+   - Original/boilerplate text: turns red with red line-through
+   - Blue field content: stays blue with blue line-through
+   The AIR app renders this visually — XAML only stores Strikethrough="True". */
+.air-span-strikethrough {
+  text-decoration: line-through;
+  text-decoration-color: #FF0000;
+  text-decoration-thickness: 1.5px;
+  color: #FF0000;
+}
+
+/* Field content that's struck through stays blue */
+.air-field-editable.air-span-strikethrough,
+.air-span-strikethrough.air-field-readonly {
+  color: #0000FF;
+  text-decoration-color: #0000FF;
+}
+
+/* User-added text — AIR CRE convention: red, bold, larger (Georgia 16pt).
+   Text added by users during negotiations appears in red to distinguish from boilerplate. */
+.air-added-text {
+  color: #FF0000;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+/* Editable field (user-entered data) */
+.air-field-editable {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 10pt;
+  color: #0000FF;
+  border-bottom: 1px dotted #0000FF;
+  min-width: 3em;
+  display: inline-block;
+  outline: none;
+  padding: 0 2px;
+  cursor: text;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.air-field-editable:hover {
+  background: rgba(0, 0, 255, 0.03);
+}
+
+.air-field-editable:focus {
+  background: rgba(0, 0, 255, 0.06);
+  border-bottom: 2px solid #0000FF;
+}
+
+/* Placeholder for empty fields */
+.air-field-editable:empty::before {
+  content: attr(data-field-name);
+  color: #aaa;
+  font-style: italic;
+  font-size: 9pt;
+}
+
+/* Read-only field (finalized) */
+.air-field-readonly {
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 10pt;
+  color: #0000FF;
+  display: inline;
+}
+
+/* Checkbox field */
+.air-field-checkbox {
+  width: 13px;
+  height: 13px;
+  vertical-align: middle;
+  margin: 0 2px;
+  accent-color: #0000FF;
+  cursor: pointer;
+}
+
+.air-field-checkbox:disabled {
+  cursor: default;
+}
+
+/* Signature placeholder */
+.air-signature-placeholder {
+  display: inline-block;
+  min-width: 2in;
+  height: 24px;
+  border-bottom: 1px solid #999;
+  color: #999;
+  font-size: 8pt;
+  font-style: italic;
+  vertical-align: bottom;
+  line-height: 24px;
+}
+
+/* Tables */
+.air-table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 4pt 0;
+}
+
+.air-table td {
+  padding: 2pt 4pt;
+  vertical-align: top;
+}
+
+.air-table-bordered td {
+  border: 1px solid #ccc;
+}
+
+/* Header/Footer */
+.air-header {
+  border-bottom: 1px solid #eee;
+  padding-bottom: 4pt;
+  margin-bottom: 8pt;
+}
+
+.air-footer {
+  border-top: 1px solid #eee;
+  padding-top: 4pt;
+  margin-top: auto;
+  font-size: 9pt;
+  color: #666;
+}
+
+/* AIR CRE logo image */
+.air-logo {
+  max-height: 48px;
+  max-width: 200px;
+}
+
+/* Read-only range (non-editable boilerplate) */
+.air-readonly-range {
+  user-select: text;
+}
+
+/* Page break for PDF export */
+.air-page-break {
+  page-break-after: always;
+}
+
+/* Print styles */
+@media print {
+  .air-document {
+    gap: 0;
+    padding: 0;
+  }
+
+  .air-page {
+    box-shadow: none;
+    margin: 0;
+    page-break-after: always;
+  }
+
+  .air-field-editable {
+    border-bottom: none;
+  }
+
+  .air-field-editable:empty::before {
+    content: '';
+  }
+}
