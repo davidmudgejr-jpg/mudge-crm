@@ -24,6 +24,8 @@ import AIOps from './pages/AIOps';
 import VerificationQueue from './pages/VerificationQueue';
 import DedupReview from './pages/DedupReview';
 import DataTrust from './pages/DataTrust';
+import Contracts from './pages/Contracts';
+import ContractEditor from './pages/ContractEditor';
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
@@ -132,6 +134,8 @@ function AppShell() {
           <Route path="/import" element={<Import />} />
           <Route path="/dedup" element={<DedupReview onCountChange={setRowCount} />} />
           <Route path="/data-trust" element={<DataTrust onCountChange={setRowCount} />} />
+          <Route path="/contracts" element={<Contracts onCountChange={setRowCount} />} />
+          <Route path="/contracts/:packageId" element={<ContractEditor />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
       </main>
