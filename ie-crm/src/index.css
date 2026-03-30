@@ -7,34 +7,39 @@
    Automatically switches based on macOS appearance setting.
    ============================================================ */
 :root {
-  /* Dark theme — Apple macOS Sonoma-inspired */
-  --crm-bg: #000000;
-  --crm-sidebar: rgba(44,44,46,0.80);
-  --crm-card: #1c1c1e;
-  --crm-accent: #007AFF;
-  --crm-accent-hover: #0056CC;
-  --crm-text: #f5f5f7;
-  --crm-muted: #8e8e93;
-  --crm-success: #30D158;
-  --crm-border: rgba(255,255,255,0.08);
-  --crm-hover: rgba(255,255,255,0.06);
+  /* Dark theme — VS Code Dark+ inspired (promoted from dev-mode) */
+  --crm-bg: #1e1e1e;
+  --crm-sidebar: #252526;
+  --crm-card: #2d2d30;
+  --crm-accent: #569cd6;
+  --crm-accent-hover: #4fc1ff;
+  --crm-text: #d4d4d4;
+  --crm-muted: #808080;
+  --crm-success: #6a9955;
+  --crm-border: #3e3e42;
+  --crm-hover: #2a2d2e;
 
   /* Surfaces & overlays */
-  --crm-deep: #000000;
-  --crm-overlay: rgba(0, 0, 0, 0.3);
-  --crm-panel: rgba(36,36,38,0.55);
-  --crm-tooltip: #1c1c1e;
+  --crm-deep: #1b1b1b;
+  --crm-overlay: rgba(0, 0, 0, 0.55);
+  --crm-panel: #2d2d30;
+  --crm-tooltip: #252526;
 
   /* Scrollbar */
-  --crm-scroll-track: transparent;
-  --crm-scroll-thumb: rgba(255,255,255,0.15);
-  --crm-scroll-thumb-hover: rgba(255,255,255,0.25);
+  --crm-scroll-track: #1e1e1e;
+  --crm-scroll-thumb: #424242;
+  --crm-scroll-thumb-hover: #4f4f4f;
 
-  /* SQL syntax (keep existing) */
-  --crm-sql-keyword: #c084fc;
-  --crm-sql-string: #34d399;
-  --crm-sql-number: #fbbf24;
-  --crm-sql-comment: #64748b;
+  /* SQL syntax (VS Code Dark+ palette) */
+  --crm-sql-keyword: #c586c0;
+  --crm-sql-string: #ce9178;
+  --crm-sql-number: #b5cea8;
+  --crm-sql-comment: #6a9955;
+
+  /* Dev-mode tokens (always available now) */
+  --crm-dev-keyword: #c586c0;
+  --crm-dev-function: #dcdcaa;
+  --crm-dev-type: #4ec9b0;
 
   /* Gradient accents */
   --crm-gradient-primary: linear-gradient(135deg, #007AFF, #AF52DE);
@@ -81,9 +86,62 @@
 }
 
 /* ============================================================
-   LIGHT MODE: Color adjustments for Tailwind utility classes
-   that are hardcoded for dark backgrounds (e.g. text-emerald-400)
+   LIGHT MODE: Applied via .light-mode class (toggle button) OR
+   OS preference. The toggle overrides OS preference.
    ============================================================ */
+.light-mode {
+  --crm-bg: #f5f5f7;
+  --crm-sidebar: rgba(245,245,247,0.85);
+  --crm-card: #ffffff;
+  --crm-accent: #007AFF;
+  --crm-accent-hover: #0056CC;
+  --crm-text: #1d1d1f;
+  --crm-muted: #6e6e73;
+  --crm-success: #34C759;
+  --crm-border: rgba(0,0,0,0.12);
+  --crm-hover: rgba(0,0,0,0.05);
+
+  --crm-deep: #e8e8ed;
+  --crm-overlay: rgba(0, 0, 0, 0.22);
+  --crm-tooltip: #1c1c1e;
+  --crm-panel: rgba(255,255,255,0.65);
+
+  --crm-scroll-track: transparent;
+  --crm-scroll-thumb: rgba(0,0,0,0.15);
+  --crm-scroll-thumb-hover: rgba(0,0,0,0.25);
+
+  --crm-sql-keyword: #7c3aed;
+  --crm-sql-string: #059669;
+  --crm-sql-number: #d97706;
+  --crm-sql-comment: #94a3b8;
+
+  --crm-dev-keyword: #7c3aed;
+  --crm-dev-function: #b45309;
+  --crm-dev-type: #059669;
+
+  --crm-gradient-primary-shadow: 0 4px 14px rgba(0,122,255,0.25);
+}
+
+/* Light mode color adjustments for hardcoded Tailwind utilities */
+.light-mode .text-emerald-400 { color: #059669 !important; }
+.light-mode .text-red-400 { color: #dc2626 !important; }
+.light-mode .text-yellow-400 { color: #ca8a04 !important; }
+.light-mode .text-blue-400 { color: #2563eb !important; }
+.light-mode .text-purple-400 { color: #9333ea !important; }
+.light-mode .text-indigo-400 { color: #4f46e5 !important; }
+.light-mode .text-orange-400 { color: #ea580c !important; }
+.light-mode .text-cyan-400 { color: #0891b2 !important; }
+.light-mode .text-pink-400 { color: #db2777 !important; }
+.light-mode .text-green-400 { color: #16a34a !important; }
+.light-mode .text-emerald-300 { color: #10b981 !important; }
+.light-mode .text-red-300 { color: #ef4444 !important; }
+.light-mode .text-blue-300 { color: #3b82f6 !important; }
+.light-mode .bg-crm-sidebar { box-shadow: 1px 0 0 var(--crm-border); }
+.light-mode .text-crm-muted\/50 { color: rgba(110,110,115,0.65) !important; }
+.light-mode .text-crm-muted\/40 { color: rgba(110,110,115,0.55) !important; }
+.light-mode .text-crm-muted\/30 { color: rgba(110,110,115,0.45) !important; }
+
+/* Also apply light theme via OS preference (for users who haven't toggled) */
 @media (prefers-color-scheme: light) {
   /* Status/type badge text — use darker variants in light mode */
   .text-emerald-400 { color: #059669 !important; } /* emerald-600 */

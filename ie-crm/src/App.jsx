@@ -108,7 +108,7 @@ function AppShell() {
   });
 
   return (
-    <div className={`flex h-screen bg-crm-bg text-crm-text overflow-hidden ${devMode ? 'dev-mode' : ''}`}>
+    <div className={`flex h-screen bg-crm-bg text-crm-text overflow-hidden ${devMode ? 'light-mode' : ''}`}>
       {/* Titlebar drag region */}
       <div className="drag-region fixed top-0 left-0 right-0 h-8 z-50" />
 

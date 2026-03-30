@@ -187,20 +187,26 @@ export default function Sidebar({ onTableChange }) {
         </div>
       )}
 
-      {/* Dev Mode toggle — only visible in dark mode */}
-      {isDark && (
-        <button
-          onClick={toggleDevMode}
-          className={`no-drag mb-2 w-10 h-10 rounded-lg flex items-center justify-center text-xs font-mono font-bold transition-colors ${
-            devMode
-              ? 'bg-[#0e7ad3]/20 text-[#569cd6] ring-1 ring-[#569cd6]/40'
-              : 'text-crm-muted hover:text-crm-text hover:bg-crm-hover'
-          }`}
-          title={devMode ? 'Disable Developer Mode' : 'Enable Developer Mode'}
-        >
-          {'{ }'}
-        </button>
-      )}
+      {/* Light/Dark mode toggle */}
+      <button
+        onClick={toggleDevMode}
+        className={`no-drag mb-2 w-10 h-10 rounded-lg flex items-center justify-center transition-colors ${
+          devMode
+            ? 'bg-yellow-400/15 text-yellow-400 ring-1 ring-yellow-400/30'
+            : 'text-crm-muted hover:text-crm-text hover:bg-crm-hover'
+        }`}
+        title={devMode ? 'Switch to Dark Mode' : 'Switch to Light Mode'}
+      >
+        {devMode ? (
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+          </svg>
+        ) : (
+          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+          </svg>
+        )}
+      </button>
     </aside>
   );
 }
