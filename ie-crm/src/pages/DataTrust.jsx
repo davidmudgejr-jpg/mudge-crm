@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/shared/Toast';
 import useDetailPanel from '../hooks/useDetailPanel';
-import { SlideOver } from '../components/shared/SlideOver';
+import SlideOver from '../components/shared/SlideOver';
 import ContactDetail from './ContactDetail';
 
 const TIER_CONFIG = {

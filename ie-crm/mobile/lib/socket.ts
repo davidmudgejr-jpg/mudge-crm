@@ -4,8 +4,8 @@
 import { io, Socket } from 'socket.io-client';
 import { getToken } from './api';
 
-// Railway production URL — works everywhere
-const API_BASE = 'https://mudge-crm-production.up.railway.app';
+// Local dev server
+const API_BASE = 'http://192.168.1.35:3001';
 
 let socket: Socket | null = null;
 

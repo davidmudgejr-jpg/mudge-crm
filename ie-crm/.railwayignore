@@ -1,0 +1,10 @@
+node_modules
+mobile
+dist
+.expo
+ios
+android
+.next
+:public:textures:
+:public:hdri:
+air-cre-data

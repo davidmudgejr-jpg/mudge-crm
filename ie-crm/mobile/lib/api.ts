@@ -1,11 +1,10 @@
 // API client — fetch wrapper with JWT auth headers
-// Connects to Railway (production) by default, falls back to local for dev
+// Uses local server on home WiFi, Railway when away
 
 import * as SecureStore from 'expo-secure-store';
 
-// Use Railway production URL — works on any network
-// To use local dev server instead, change to: 'http://192.168.1.35:3001'
-const API_BASE = 'https://mudge-crm-production.up.railway.app';
+// Local dev server — Houston works here with API key
+const API_BASE = 'http://192.168.1.35:3001';
 
 const TOKEN_KEY = 'crm-auth-token';
 
@@ -51,18 +50,15 @@ export async function apiFetch(
     if (refreshRes.ok) {
       const { token: newToken } = await refreshRes.json();
       await setToken(newToken);
-      // Retry original request with new token
       headers['Authorization'] = `Bearer ${newToken}`;
       return fetch(`${API_BASE}${path}`, { ...options, headers });
     }
-    // Refresh failed — token is dead
     await clearToken();
   }
 
   return res;
 }
 
-// Convenience for JSON responses
 export async function apiGet<T = any>(path: string): Promise<T> {
   const res = await apiFetch(path);
   if (!res.ok) throw new Error(`API ${path}: ${res.status}`);

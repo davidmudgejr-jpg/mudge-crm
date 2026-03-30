@@ -4,39 +4,34 @@
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+const dotenv = require('dotenv');
 
 // ============================================================
-// CLAUDE API — raw fetch with OAuth Bearer or API key
-// Uses Authorization: Bearer for OAuth tokens (Claude Max),
-// falls back to x-api-key for paid API keys.
+// CLAUDE API — raw fetch with API key
+// Force-read API key from .env (process.env may have stale empty value)
 // ============================================================
 const HOUSTON_MODEL = 'claude-sonnet-4-20250514';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
+// Read API key directly from .env file to avoid process.env empty string issue
+const _envParsed = dotenv.config({ path: path.join(__dirname, '..', '..', '.env') }).parsed || {};
+const ANTHROPIC_API_KEY = _envParsed.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
+
 function isClaudeAvailable() {
-  return Boolean(process.env.ANTHROPIC_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY);
+  return ANTHROPIC_API_KEY.length > 0;
 }
 
 /**
- * Call Claude API via raw fetch (supports OAuth Bearer tokens)
- * @param {object} opts - { system, messages, max_tokens }
- * @returns {string} response text
+ * Call Claude API via raw fetch with API key
  */
 async function callClaude({ system, messages, max_tokens = 500 }) {
-  const oauthToken = process.env.ANTHROPIC_OAUTH_TOKEN;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!oauthToken && !apiKey) return null;
+  if (!ANTHROPIC_API_KEY) return null;
 
-  // Build headers — OAuth uses Bearer, API key uses x-api-key
   const headers = {
     'Content-Type': 'application/json',
     'anthropic-version': '2023-06-01',
+    'x-api-key': ANTHROPIC_API_KEY,
   };
-  if (oauthToken) {
-    headers['Authorization'] = `Bearer ${oauthToken}`;
-  } else {
-    headers['x-api-key'] = apiKey;
-  }
 
   const body = {
     model: HOUSTON_MODEL,

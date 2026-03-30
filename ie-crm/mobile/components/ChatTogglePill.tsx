@@ -17,7 +17,7 @@ export default function ChatTogglePill() {
   const isHouston = pathname.includes('houston');
 
   return (
-    <View style={[styles.wrapper, { paddingTop: insets.top + 6 }]} pointerEvents="box-none">
+    <View style={[styles.wrapper, { paddingTop: insets.top + 6 }]}>
       <BlurView intensity={50} tint="dark" style={styles.pill}>
         <Pressable
           style={[styles.segment, !isHouston && styles.segmentActive]}
