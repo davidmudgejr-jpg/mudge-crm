@@ -35,7 +35,8 @@ function mountVerificationRoutes(app, { getPool, requireAuth, optionalAuth }) {
       try {
         const jwt = require('jsonwebtoken');
         const token = authHeader.slice(7);
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'dev-secret');
+        const { EFFECTIVE_JWT_SECRET } = require('../middleware/auth');
+        const decoded = jwt.verify(token, EFFECTIVE_JWT_SECRET);
         req.user = decoded;
         return next();
       } catch (err) {

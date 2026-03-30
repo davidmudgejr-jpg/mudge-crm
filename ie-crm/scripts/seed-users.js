@@ -11,13 +11,15 @@ const USERS = [
   { email: 'sarahmudgie@gmail.com',  displayName: 'Sarah Tabor',     avatarColor: '#a78bfa' },
 ];
 
-const TEMP_PASSWORD = 'Houstonishere!';
+// SECURITY: Use env var or generate random password — never hardcode (Houston audit H4 — 2026-03-30)
+const crypto = require('crypto');
+const TEMP_PASSWORD = process.env.SEED_PASSWORD || crypto.randomBytes(16).toString('hex');
 
 async function seed() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } });
 
   try {
-    const hash = await bcrypt.hash(TEMP_PASSWORD, 10);
+    const hash = await bcrypt.hash(TEMP_PASSWORD, 12); // H5: increased from 10 to 12 rounds
 
     for (const u of USERS) {
       await pool.query(
@@ -32,7 +34,10 @@ async function seed() {
       console.log(`  ✓ ${u.displayName} (${u.email})`);
     }
 
-    console.log('\nAll 3 users seeded. Temp password: Houstonishere!');
+    console.log(`\nAll 3 users seeded. Temp password: ${TEMP_PASSWORD}`);
+    if (!process.env.SEED_PASSWORD) {
+      console.log('⚠️  Password was randomly generated. Set SEED_PASSWORD env var for a specific password.');
+    }
   } catch (err) {
     console.error('Seed failed:', err.message);
     process.exit(1);

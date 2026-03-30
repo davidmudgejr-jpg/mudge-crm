@@ -7,6 +7,7 @@ const rateLimit = require('express-rate-limit');
 
 const instantly = require('../services/instantly');
 const { normalizeRecord } = require('../utils/fieldNormalizer');
+const { validateColumn, quoteIdentifier, validateTable } = require('../utils/sqlSafety'); // SECURITY: Houston audit C4 — 2026-03-30
 
 const router = express.Router();
 
@@ -63,9 +64,9 @@ function requireAgentKeyOrJwt(req, res, next) {
   if (header && header.startsWith('Bearer ')) {
     try {
       const jwt = require('jsonwebtoken');
-      const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-DO-NOT-USE-IN-PRODUCTION';
+      const { EFFECTIVE_JWT_SECRET } = require('../middleware/auth');
       const token = header.slice(7);
-      const payload = jwt.verify(token, JWT_SECRET);
+      const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET);
       req.user = {
         user_id: payload.user_id,
         email: payload.email,
@@ -780,22 +781,18 @@ router.post('/queue/approve/:table/:id', async (req, res) => {
       promoted = true;
     } else if (table === 'enrichments') {
       if (item.contact_id && item.field_name && item.new_value) {
-        const allowedFields = [
-          'email', 'email_2', 'email_3', 'phone_1', 'phone_2', 'phone_3',
-          'home_address', 'work_address', 'work_city', 'work_state', 'work_zip',
-          'title', 'linkedin', 'type', 'full_name', 'first_name', 'company_name',
-        ];
-        if (allowedFields.includes(item.field_name)) {
-          await pool.query(
-            `UPDATE contacts SET ${item.field_name} = $1, modified = NOW() WHERE contact_id = $2`,
-            [item.new_value, item.contact_id]
-          );
-          await pool.query(
-            `UPDATE ${sandboxTable} SET status = 'promoted', promoted_at = NOW() WHERE id = $1`,
-            [id]
-          );
-          promoted = true;
-        }
+        // SECURITY: Houston audit C4 — 2026-03-30
+        // Validate field_name via sqlSafety whitelist instead of local allowedFields
+        validateColumn(item.field_name, 'contacts');
+        await pool.query(
+          `UPDATE contacts SET ${quoteIdentifier(item.field_name)} = $1, modified = NOW() WHERE contact_id = $2`,
+          [item.new_value, item.contact_id]
+        );
+        await pool.query(
+          `UPDATE ${sandboxTable} SET status = 'promoted', promoted_at = NOW() WHERE id = $1`,
+          [id]
+        );
+        promoted = true;
       }
     } else if (table === 'signals') {
       const insertResult = await pool.query(
@@ -1019,7 +1016,7 @@ const directivesRouter = express.Router();
 directivesRouter.use(agentLimiter);
 
 const jwt = require('jsonwebtoken');
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-DO-NOT-USE-IN-PRODUCTION';
+const { EFFECTIVE_JWT_SECRET } = require('../middleware/auth');
 
 // Middleware: accepts either agent key or JWT admin auth
 function requireAgentOrAdmin(req, res, next) {
@@ -1037,7 +1034,7 @@ function requireAgentOrAdmin(req, res, next) {
   if (header && header.startsWith('Bearer ')) {
     try {
       const token = header.slice(7);
-      const payload = jwt.verify(token, JWT_SECRET);
+      const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET);
       req.user = {
         user_id: payload.user_id,
         email: payload.email,
@@ -1060,7 +1057,7 @@ function requireJwtAdmin(req, res, next) {
   }
   try {
     const token = header.slice(7);
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET);
     req.user = {
       user_id: payload.user_id,
       email: payload.email,
@@ -1522,14 +1519,8 @@ router.post('/command/fill-empty', async (req, res) => {
     }
     const record = current.rows[0];
 
-    // Validate field names against actual columns
-    const validFields = await pool.query(
-      'SELECT column_name FROM information_schema.columns WHERE table_name = $1',
-      [table]
-    );
-    const validFieldNames = validFields.rows.map(r => r.column_name);
-
-    // Protected fields that Houston Command can NEVER write to
+    // SECURITY: Houston audit C4 — 2026-03-30
+    // Validate field names via sqlSafety whitelist instead of information_schema query
     const protectedFields = [idCol, 'airtable_id', 'created_at', 'modified'];
 
     const filled = [];
@@ -1538,7 +1529,7 @@ router.post('/command/fill-empty', async (req, res) => {
 
     for (const [fieldName, newValue] of Object.entries(fields)) {
       // Skip invalid or protected fields
-      if (!validFieldNames.includes(fieldName)) {
+      try { validateColumn(fieldName, table); } catch (_) {
         skipped.push({ field: fieldName, reason: 'invalid_column' });
         continue;
       }
@@ -1552,7 +1543,7 @@ router.post('/command/fill-empty', async (req, res) => {
       // If field is empty → fill it directly
       if (currentValue === null || currentValue === '' || currentValue === undefined) {
         await pool.query(
-          `UPDATE ${table} SET "${fieldName}" = $1 WHERE "${idCol}" = $2`,
+          `UPDATE ${table} SET ${quoteIdentifier(fieldName)} = $1 WHERE ${quoteIdentifier(idCol)} = $2`,
           [newValue, entity_id]
         );
         filled.push({ field: fieldName, value: newValue });
@@ -1935,25 +1926,19 @@ router.patch('/suggested-updates/:id', async (req, res) => {
       const idCol = idColMap[s.entity_type];
 
       if (table && idCol) {
-        // Validate the field name to prevent SQL injection
-        const validFields = await pool.query(
-          `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
-          [table]
+        // SECURITY: Houston audit C4 — 2026-03-30
+        // Validate field name via sqlSafety whitelist instead of information_schema
+        validateColumn(s.field_name, table);
+        await pool.query(
+          `UPDATE ${table} SET ${quoteIdentifier(s.field_name)} = $1 WHERE ${quoteIdentifier(idCol)} = $2`,
+          [s.suggested_value, s.entity_id]
         );
-        const validFieldNames = validFields.rows.map(r => r.column_name);
 
-        if (validFieldNames.includes(s.field_name)) {
-          await pool.query(
-            `UPDATE ${table} SET "${s.field_name}" = $1 WHERE "${idCol}" = $2`,
-            [s.suggested_value, s.entity_id]
-          );
-
-          // Mark as applied
-          await pool.query(
-            'UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1',
-            [id]
-          );
-        }
+        // Mark as applied
+        await pool.query(
+          'UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1',
+          [id]
+        );
       }
     }
 
@@ -2009,18 +1994,14 @@ router.post('/suggested-updates/batch', async (req, res) => {
         const idCol = idColMap[s.entity_type];
 
         if (table && idCol) {
-          const validFields = await pool.query(
-            `SELECT column_name FROM information_schema.columns WHERE table_name = $1`,
-            [table]
+          // SECURITY: Houston audit C4 — 2026-03-30
+          validateColumn(s.field_name, table);
+          await pool.query(
+            `UPDATE ${table} SET ${quoteIdentifier(s.field_name)} = $1 WHERE ${quoteIdentifier(idCol)} = $2`,
+            [s.suggested_value, s.entity_id]
           );
-          if (validFields.rows.map(r => r.column_name).includes(s.field_name)) {
-            await pool.query(
-              `UPDATE ${table} SET "${s.field_name}" = $1 WHERE "${idCol}" = $2`,
-              [s.suggested_value, s.entity_id]
-            );
-            await pool.query('UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1', [id]);
-            appliedCount++;
-          }
+          await pool.query('UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1', [id]);
+          appliedCount++;
         }
       }
     }
@@ -3864,16 +3845,21 @@ router.post('/instantly/webhook/event', async (req, res) => {
       }
 
       if (Object.keys(updateFields).length > 0) {
-        // Try to match the email to our outbound queue
-        const setClauses = Object.entries(updateFields)
-          .map(([k, v]) => `${k} = ${v}`)
-          .join(', ');
+        // SECURITY: Houston audit C4 — 2026-03-30
+        // Hardcoded column whitelist for outbound_email_queue (not in sqlSafety ALLOWED_COLS)
+        const ALLOWED_EMAIL_COLS = new Set(['opened_at', 'replied_at', 'bounced_at', 'unsubscribed_at']);
+        const safeSetClauses = [];
+        for (const k of Object.keys(updateFields)) {
+          if (!ALLOWED_EMAIL_COLS.has(k)) throw new Error(`[sqlSafety] Disallowed column "${k}" for outbound_email_queue`);
+          safeSetClauses.push(`${quoteIdentifier(k)} = NOW()`);
+        }
+        const firstCol = quoteIdentifier(Object.keys(updateFields)[0]);
         await pool.query(
-          `UPDATE outbound_email_queue SET ${setClauses}
+          `UPDATE outbound_email_queue SET ${safeSetClauses.join(', ')}
            WHERE contact_id IN (
              SELECT contact_id FROM contacts
              WHERE email = $1 OR email_2 = $1 OR email_3 = $1
-           ) AND ${Object.keys(updateFields)[0]} IS NULL`,
+           ) AND ${firstCol} IS NULL`,
           [event.lead_email]
         );
       }

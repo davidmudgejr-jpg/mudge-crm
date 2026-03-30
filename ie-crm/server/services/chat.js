@@ -78,18 +78,15 @@ function initChat(socketServer, dbPool) {
 
   // SECURITY: Verify JWT on socket connection — derive userId server-side
   const jwt = require('jsonwebtoken');
-  const JWT_SECRET = process.env.JWT_SECRET;
+  const { EFFECTIVE_JWT_SECRET } = require('../middleware/auth');
 
   io.use((socket, next) => {
     const token = socket.handshake.auth?.token;
     if (!token) {
       return next(new Error('Authentication required'));
     }
-    if (!JWT_SECRET) {
-      return next(new Error('Server JWT not configured'));
-    }
     try {
-      const payload = jwt.verify(token, JWT_SECRET);
+      const payload = jwt.verify(token, EFFECTIVE_JWT_SECRET);
       socket.authenticatedUser = {
         user_id: payload.user_id,
         email: payload.email,
@@ -2586,16 +2583,14 @@ async function executeSingleAction(action, userId) {
         if (contactResult.rows.length === 0) return { success: false, message: 'Contact "' + p.contact_name + '" not found' };
 
         const contactId = contactResult.rows[0].contact_id;
-        const setClauses = [];
-        const values = [contactId];
-        let idx = 2;
-        for (const [key, val] of Object.entries(p.updates)) {
-          setClauses.push(key + ' = $' + idx);
-          values.push(val);
-          idx++;
-        }
+        // SECURITY: Validate column names against whitelist (Houston audit H8 — 2026-03-30)
+        const { buildSetClauses } = require('../utils/sqlSafety');
+        const { setClauses, values, nextIdx } = buildSetClauses(p.updates, 'contacts', 2);
         if (setClauses.length > 0) {
-          await pool.query('UPDATE contacts SET ' + setClauses.join(', ') + ', updated_at = NOW() WHERE contact_id = $1', values);
+          await pool.query(
+            'UPDATE contacts SET ' + setClauses.join(', ') + ', updated_at = NOW() WHERE contact_id = $1',
+            [contactId, ...values]
+          );
         }
         emitCrmChange('contact', 'updated', contactId, { name: p.contact_name, updates: p.updates });
         return { success: true, message: '\u2705 Updated ' + p.contact_name };
@@ -2612,16 +2607,14 @@ async function executeSingleAction(action, userId) {
         if (propResult.rows.length === 0) return { success: false, message: 'Property "' + p.address + '" not found' };
 
         const propId = propResult.rows[0].property_id;
-        const setClauses2 = [];
-        const values2 = [propId];
-        let idx2 = 2;
-        for (const [key, val] of Object.entries(p.updates)) {
-          setClauses2.push(key + ' = $' + idx2);
-          values2.push(Array.isArray(val) ? '{' + val.join(',') + '}' : val);
-          idx2++;
-        }
+        // SECURITY: Validate column names against whitelist (Houston audit H8 — 2026-03-30)
+        const { buildSetClauses: buildPropClauses } = require('../utils/sqlSafety');
+        const { setClauses: setClauses2, values: values2 } = buildPropClauses(p.updates, 'properties', 2);
         if (setClauses2.length > 0) {
-          await pool.query('UPDATE properties SET ' + setClauses2.join(', ') + ', updated_at = NOW() WHERE property_id = $1', values2);
+          await pool.query(
+            'UPDATE properties SET ' + setClauses2.join(', ') + ', updated_at = NOW() WHERE property_id = $1',
+            [propId, ...values2]
+          );
         }
         emitCrmChange('property', 'updated', propId, { address: p.address, updates: p.updates });
         return { success: true, message: '\u2705 Updated ' + p.address };

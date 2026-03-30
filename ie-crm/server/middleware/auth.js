@@ -70,8 +70,8 @@ function signToken(user) {
       role: user.role || 'broker',
     },
     EFFECTIVE_JWT_SECRET,
-    { expiresIn: '90d' }
+    { expiresIn: '14d' }
   );
 }
 
-module.exports = { requireAuth, optionalAuth, requireRole, signToken };
+module.exports = { requireAuth, optionalAuth, requireRole, signToken, EFFECTIVE_JWT_SECRET };

@@ -14,6 +14,7 @@ const multer = require('multer');
 const { initChat, registerChatRoutes, triggerCouncilHoustonResponse } = require('./services/chat');
 const { mountAiRoutes } = require('./routes/ai');
 const { mountVerificationRoutes } = require('./routes/verification');
+const { mountContractRoutes } = require('./routes/contracts');
 
 // Load env
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
@@ -282,6 +283,9 @@ mountVerificationRoutes(app, { getPool: () => pool, requireAuth, optionalAuth })
 // Protect all API routes below this line (except Houston completions which use optionalAuth)
 app.use('/api', requireAuth);
 
+// Mount Contracts routes (after requireAuth — needs JWT)
+mountContractRoutes(app, { getPool: () => pool, requireAuth });
+
 // ============================================================
 // USER MANAGEMENT (admin only)
 // ============================================================
@@ -369,11 +373,11 @@ app.post('/api/users/:id/reset-password', requireRole('admin'), async (req, res)
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    if (!newPassword || newPassword.length < 8) {
+      return res.status(400).json({ error: 'Password must be at least 8 characters' });
     }
 
-    const hash = await bcrypt.hash(newPassword, 10);
+    const hash = await bcrypt.hash(newPassword, 12); // Houston audit H5/L5 — increased rounds
     const result = await pool.query(
       'UPDATE users SET password_hash = $1 WHERE user_id = $2 RETURNING user_id',
       [hash, id]
@@ -398,22 +402,35 @@ app.post('/api/db/query', async (req, res) => {
     return res.status(403).json({ error: 'Admin access required for raw SQL queries' });
   }
 
-  // SECURITY: Block destructive DDL statements
+  // SECURITY: Restrict to read-only queries (Houston audit C3 — 2026-03-30)
   const { sql, params } = req.body;
   if (!sql || typeof sql !== 'string') {
     return res.status(400).json({ error: 'sql string required' });
   }
-  const upperSql = sql.trim().toUpperCase();
-  const blocked = ['DROP ', 'TRUNCATE ', 'ALTER ', 'CREATE ', 'GRANT ', 'REVOKE '];
-  if (blocked.some(keyword => upperSql.startsWith(keyword))) {
-    return res.status(403).json({ error: 'DDL statements are not allowed via this endpoint' });
+  const trimmed = sql.trim();
+  const upper = trimmed.toUpperCase();
+
+  // Only allow SELECT and WITH...SELECT (read-only)
+  if (!upper.startsWith('SELECT ') && !upper.startsWith('WITH ')) {
+    return res.status(403).json({ error: 'Only SELECT queries are allowed via this endpoint' });
+  }
+  // Block chained statements (prevents SELECT 1; DROP TABLE ...)
+  if (trimmed.includes(';')) {
+    return res.status(403).json({ error: 'Multiple statements (semicolons) are not allowed' });
+  }
+  // Block DML keywords anywhere in the query (CTE abuse prevention)
+  const dmlKeywords = /\b(INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|EXECUTE)\b/i;
+  if (dmlKeywords.test(trimmed)) {
+    return res.status(403).json({ error: 'Write operations are not allowed via this endpoint' });
   }
 
   try {
     const result = await pool.query(sql, params || []);
     res.json({ rows: result.rows, rowCount: result.rowCount });
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    // Don't expose internal error details in production
+    const safeMessage = process.env.NODE_ENV === 'production' ? 'Query failed' : err.message;
+    res.status(400).json({ error: safeMessage });
   }
 });
 
@@ -891,13 +908,16 @@ const TABLE_ID_COL = {
 app.post('/api/bulk-delete', requireRole('admin'), async (req, res) => {
   try {
     const { table, ids } = req.body;
+    // SECURITY: Explicit whitelist validation (Houston audit C1 — 2026-03-30)
+    const VALID_BULK_DELETE_TABLES = Object.keys(TABLE_ID_COL);
+    if (!VALID_BULK_DELETE_TABLES.includes(table)) return res.status(400).json({ error: `Invalid table: ${table}` });
     const idCol = TABLE_ID_COL[table];
-    if (!idCol) return res.status(400).json({ error: `Unknown table: ${table}` });
     if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'No IDs provided' });
+    if (ids.length > 500) return res.status(400).json({ error: 'Max 500 IDs per request' });
 
     // Use parameterized ANY($1) instead of string interpolation for safety
     const result = await pool.query(
-      `DELETE FROM ${table} WHERE ${idCol} = ANY($1::uuid[])`,
+      `DELETE FROM "${table}" WHERE "${idCol}" = ANY($1::uuid[])`,
       [ids]
     );
 
@@ -2524,11 +2544,9 @@ app.post('/v1/chat/completions', (req, res, next) => {
   if (header && header.startsWith('Bearer ')) {
     try {
       const jwt = require('jsonwebtoken');
-      const JWT_SECRET = process.env.JWT_SECRET;
-      if (JWT_SECRET) {
-        jwt.verify(header.slice(7), JWT_SECRET);
-        return next();
-      }
+      const { EFFECTIVE_JWT_SECRET } = require('./middleware/auth');
+      jwt.verify(header.slice(7), EFFECTIVE_JWT_SECRET);
+      return next();
     } catch { /* invalid JWT, fall through */ }
   }
 
@@ -2708,11 +2726,14 @@ app.post('/api/data-trust/suggestions/:id/resolve', requireAuth, async (req, res
 
     // If accepted, apply the change to the actual record
     if (action === 'accepted') {
+      const { validateColumn, quoteIdentifier, validateTable } = require('./utils/sqlSafety');
       const table = { contact: 'contacts', property: 'properties', company: 'companies' }[suggestion.entity_type];
       const idCol = { contact: 'contact_id', property: 'property_id', company: 'company_id' }[suggestion.entity_type];
       if (table && idCol) {
+        // SECURITY: Validate field_name against whitelist (Houston audit C5 — 2026-03-30)
+        validateColumn(suggestion.field_name, table);
         await client.query(
-          `UPDATE ${table} SET ${suggestion.field_name} = $1, updated_at = NOW() WHERE ${idCol} = $2`,
+          `UPDATE "${table}" SET ${quoteIdentifier(suggestion.field_name)} = $1, updated_at = NOW() WHERE "${idCol}" = $2`,
           [suggestion.suggested_value, suggestion.entity_id]
         );
         await client.query(
