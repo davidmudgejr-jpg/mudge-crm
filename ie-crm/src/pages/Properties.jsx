@@ -472,7 +472,7 @@ export default function Properties({ onCountChange }) {
         deleteView={view.deleteView}
         duplicateView={view.duplicateView}
         setDefault={view.setDefault}
-        onNewView={() => setNewViewModalOpen(true)}
+        onNewView={() => { view.resetToAll(); setNewViewModalOpen(true); }}
       />
       <FilterBar
         filters={view.filters}

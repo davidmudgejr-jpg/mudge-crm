@@ -188,12 +188,46 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
   }, [entityType, applyViewState]);
 
   // --- Actions ---
-  const applyView = useCallback((viewId) => {
+  // Auto-save dirty view before switching to another
+  const applyView = useCallback(async (viewId) => {
+    if (isDirty && activeViewId) {
+      try {
+        const updated = await updateView(activeViewId, {
+          filters,
+          filter_logic: filterLogic,
+          sort_column: sort.column,
+          sort_direction: sort.direction,
+          visible_columns: visibleColumnKeys,
+        });
+        const next = views.map(v => v.view_id === activeViewId ? updated : v);
+        setViews(next);
+        writeCache(entityType, next);
+      } catch (err) {
+        console.error('[useViewEngine] Auto-save failed:', err);
+      }
+    }
     const view = views.find(v => v.view_id === viewId);
     if (view) applyViewState(view);
-  }, [views, applyViewState]);
+  }, [views, applyViewState, isDirty, activeViewId, filters, filterLogic, sort, visibleColumnKeys, entityType]);
 
-  const resetToAll = useCallback(() => {
+  const resetToAll = useCallback(async () => {
+    // Auto-save dirty view before clearing
+    if (isDirty && activeViewId) {
+      try {
+        const updated = await updateView(activeViewId, {
+          filters,
+          filter_logic: filterLogic,
+          sort_column: sort.column,
+          sort_direction: sort.direction,
+          visible_columns: visibleColumnKeys,
+        });
+        const next = views.map(v => v.view_id === activeViewId ? updated : v);
+        setViews(next);
+        writeCache(entityType, next);
+      } catch (err) {
+        console.error('[useViewEngine] Auto-save failed:', err);
+      }
+    }
     setActiveViewId(null);
     writeActiveId(entityType, null);
     setFilters([]);
@@ -201,7 +235,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     setSort(defaultSort);
     setVisibleColumnKeys(null);
     setIsDirty(false);
-  }, [entityType, defaultSort]);
+  }, [entityType, defaultSort, isDirty, activeViewId, filters, filterLogic, sort, visibleColumnKeys, views]);
 
   const updateFilters = useCallback((newFilters, newLogic) => {
     setFilters(newFilters);

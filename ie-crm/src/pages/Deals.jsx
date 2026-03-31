@@ -352,7 +352,7 @@ export default function Deals({ onCountChange }) {
         deleteView={view.deleteView}
         duplicateView={view.duplicateView}
         setDefault={view.setDefault}
-        onNewView={() => setNewViewModalOpen(true)}
+        onNewView={() => { view.resetToAll(); setNewViewModalOpen(true); }}
       />
       <FilterBar
         filters={view.filters}
