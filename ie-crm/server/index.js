@@ -804,7 +804,7 @@ const IMPORT_COLS = {
     'sewer', 'water', 'gas', 'heating', 'zoning', 'features',
     // Financial
     'last_sale_date', 'last_sale_price', 'price_psf', 'price_per_sqft', 'plsf',
-    'loan_amount', 'debt_date', 'holding_period_years', 'rent_psf_mo',
+    'loan_amount', 'debt_date', 'holding_period_years', 'listing_asking_lease_rate',
     'cap_rate', 'vacancy_pct', 'percent_leased', 'noi', 'for_sale_price',
     'ops_expense_psf', 'building_tax', 'building_opex', 'avg_weighted_rent',
     // Availability
@@ -824,6 +824,8 @@ const IMPORT_COLS = {
     // URLs & IDs
     'costar_url', 'landvision_url', 'sb_county_zoning', 'google_maps_url',
     'zoning_map_url', 'listing_url', 'building_image_path', 'parcel_number', 'airtable_id',
+    // Listing / market intelligence
+    'listing_status', 'listing_first_seen_date',
     // Notes & misc
     'notes', 'overflow',
   ]),
@@ -1041,7 +1043,7 @@ app.post('/api/import/batch', denyReadOnly, async (req, res) => {
       'drive_ins','far','for_sale_price','holding_period_years','land_area_ac','land_sf','last_sale_price',
       'latitude','loan_amount','longitude','noi','num_properties_owned','number_of_cranes',
       'number_of_loading_docks','ops_expense_psf','parking_ratio','parking_spaces','percent_leased',
-      'plsf','price_per_sqft','price_psf','rba','rent_psf_mo','stories','total_available_sf','units',
+      'plsf','price_per_sqft','price_psf','rba','listing_asking_lease_rate','stories','total_available_sf','units',
       'vacancy_pct','year_built','year_renovated',
       // contacts
       'age','lease_months_left',

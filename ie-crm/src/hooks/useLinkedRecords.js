@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  batchGetPropertyContacts, batchGetPropertyCompanies, batchGetPropertyDeals,
+  batchGetPropertyContacts, batchGetPropertyCompanies, batchGetPropertyDeals, batchGetPropertyCompCounts,
   batchGetContactProperties, batchGetContactCompanies, batchGetContactDeals, batchGetContactCampaigns,
   batchGetCompanyContacts, batchGetCompanyProperties, batchGetCompanyDeals,
   batchGetDealProperties, batchGetDealContacts, batchGetDealCompanies, batchGetDealCampaigns,
@@ -16,6 +16,7 @@ const ENTITY_FETCHERS = {
       linked_companies: batchGetPropertyCompanies,
       linked_deals: batchGetPropertyDeals,
       linked_interactions: batchGetPropertyInteractions,
+      linked_comp_counts: batchGetPropertyCompCounts,
     },
   },
   contacts: {

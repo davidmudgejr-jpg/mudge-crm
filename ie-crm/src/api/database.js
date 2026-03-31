@@ -22,7 +22,8 @@ const ALLOWED_COLS = {
     'year_built', 'year_renovated', 'ceiling_ht', 'clear_ht', 'number_of_loading_docks', 'drive_ins',
     'column_spacing', 'sprinklers', 'power', 'construction_material', 'zoning', 'features',
     'last_sale_date', 'last_sale_price', 'price_psf', 'plsf', 'loan_amount', 'debt_date',
-    'holding_period_years', 'rent_psf_mo', 'cap_rate', 'vacancy_pct', 'percent_leased',
+    'holding_period_years', 'listing_asking_lease_rate', 'cap_rate', 'vacancy_pct', 'percent_leased',
+    'listing_status', 'listing_first_seen_date',
     'owner_name', 'owner_phone', 'owner_address', 'owner_city_state_zip',
     'recorded_owner_name', 'true_owner_name', 'contacted', 'priority', 'off_market_deal',
     'target', 'target_for', 'building_park', 'market_name', 'submarket_name', 'submarket_cluster',
@@ -41,6 +42,8 @@ const ALLOWED_COLS = {
     'units', 'stories', 'parking_spaces', 'price_per_sqft', 'noi', 'owner_email', 'owner_mailing_address',
     // migration 006 — TPE-related columns
     'owner_call_status', 'tenant_call_status', 'has_lien_or_delinquency', 'costar_star_rating',
+    // migration 046 — listing/market intelligence
+    'listing_status', 'listing_first_seen_date',
   ]),
   contacts: new Set([
     'contact_id', 'airtable_id', 'full_name', 'first_name', 'type', 'title',
@@ -126,6 +129,7 @@ const ALLOWED_JUNCTION_TABLES = new Set([
   'deal_properties', 'deal_contacts', 'deal_companies',
   'interaction_contacts', 'interaction_properties', 'interaction_deals', 'interaction_companies',
   'campaign_contacts',
+  'deal_campaigns',
   'action_item_contacts', 'action_item_properties', 'action_item_deals', 'action_item_companies',
 ]);
 
@@ -1008,6 +1012,24 @@ export async function deleteSaleComp(id) {
 }
 
 // Property ↔ Comps lookups (for property detail view)
+export async function batchGetPropertyCompCounts(propertyIds) {
+  if (!propertyIds.length) return {};
+  const r = await query(`
+    SELECT p.property_id,
+      COALESCE(lc.cnt, 0)::int AS lease_count,
+      COALESCE(sc.cnt, 0)::int AS sale_count
+    FROM unnest($1::uuid[]) AS p(property_id)
+    LEFT JOIN (SELECT property_id, COUNT(*) AS cnt FROM lease_comps WHERE property_id = ANY($1) GROUP BY property_id) lc ON lc.property_id = p.property_id
+    LEFT JOIN (SELECT property_id, COUNT(*) AS cnt FROM sale_comps WHERE property_id = ANY($1) GROUP BY property_id) sc ON sc.property_id = p.property_id
+    WHERE COALESCE(lc.cnt, 0) + COALESCE(sc.cnt, 0) > 0
+  `, [propertyIds]);
+  const result = {};
+  for (const row of r.rows) {
+    result[row.property_id] = [row];
+  }
+  return result;
+}
+
 export async function getPropertyLeaseComps(propertyId) {
   return query('SELECT * FROM lease_comps WHERE property_id = $1 ORDER BY commencement_date DESC', [propertyId]);
 }

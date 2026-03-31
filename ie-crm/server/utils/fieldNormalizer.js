@@ -59,7 +59,9 @@ const FIELD_MAPS = {
     'last sale price': 'last_sale_price', last_sale_price: 'last_sale_price',
     'price psf': 'price_psf', price_psf: 'price_psf', '$/sf': 'price_psf',
     'cap rate': 'cap_rate', cap_rate: 'cap_rate',
-    'rent psf': 'rent_psf_mo', rent_psf_mo: 'rent_psf_mo', 'asking rent': 'rent_psf_mo',
+    'rent psf': 'listing_asking_lease_rate', rent_psf_mo: 'listing_asking_lease_rate',
+    listing_asking_lease_rate: 'listing_asking_lease_rate', 'asking rent': 'listing_asking_lease_rate',
+    'asking lease rate': 'listing_asking_lease_rate', 'asking rate': 'listing_asking_lease_rate',
 
     // Availability
     'total available sf': 'total_available_sf', total_available_sf: 'total_available_sf',
@@ -218,7 +220,7 @@ const FIELD_NORMALIZER_MAP = {
   percent_leased: 'numeric', term_months: 'numeric', last_sale_price: 'numeric',
   number_of_loading_docks: 'numeric', drive_ins: 'numeric',
   dock_high_doors: 'numeric', grade_level_doors: 'numeric',
-  rent_psf_mo: 'numeric', price_per_sqft: 'numeric', noi: 'numeric',
+  listing_asking_lease_rate: 'numeric', price_per_sqft: 'numeric', noi: 'numeric',
 
   // Height fields
   clear_ht: 'height', ceiling_ht: 'height', clear_height: 'height',

@@ -22,7 +22,7 @@ async function loadCaches(client) {
             zoning, power, ceiling_ht, clear_ht, number_of_loading_docks, drive_ins,
             column_spacing, sprinklers, number_of_cranes, construction_material,
             rail_lines, parking_spaces, parking_ratio, features,
-            last_sale_date, last_sale_price, price_psf, rent_psf_mo,
+            last_sale_date, last_sale_price, price_psf, listing_asking_lease_rate,
             debt_date, loan_amount, building_park, county, owner_type,
             costar_url, landvision_url, heating, sewer, water, gas, contacted, overflow
      FROM properties`
@@ -163,7 +163,7 @@ const PROPERTY_FIELDS = {
   lastSaleDate: 'last_sale_date',
   lastSalePrice: 'last_sale_price',
   pricePsf: 'price_psf',
-  rentPsfMo: 'rent_psf_mo',
+  rentPsfMo: 'listing_asking_lease_rate',
   debtDate: 'debt_date',
   loanAmount: 'loan_amount',
   buildingPark: 'building_park',

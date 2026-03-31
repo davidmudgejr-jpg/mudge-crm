@@ -42,6 +42,9 @@ const ALL_COLUMNS = [
   { key: 'priority', label: 'Priority', defaultWidth: 80, type: 'select', filterable: true, format: 'priority', editType: 'select', editOptions: ['Hot', 'Warm', 'Cold', 'Dead'], filterOptions: ['Hot', 'Warm', 'Cold', 'Dead'] },
   { key: 'contacted', label: 'Contacted', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: CONTACTED_OPTIONS },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags' },
+  // Market listing columns (AIR ingest + CoStar)
+  { key: 'listing_status', label: 'Listing Status', defaultWidth: 110, type: 'select', filterable: true, editType: 'select', editOptions: ['for_sale', 'for_lease', 'sold', 'leased'], filterOptions: ['for_sale', 'for_lease', 'sold', 'leased'] },
+  { key: 'listing_asking_lease_rate', label: 'Asking Rate/SF/Mo', defaultWidth: 120, type: 'number', filterable: true, format: 'currency', editType: 'number' },
   // Hidden by default
   { key: 'property_name', label: 'Property Name', defaultWidth: 160, defaultVisible: false },
   { key: 'zip', label: 'ZIP', defaultWidth: 70, defaultVisible: false },
@@ -71,7 +74,7 @@ const ALL_COLUMNS = [
   { key: 'heating', label: 'Heating', defaultWidth: 80, defaultVisible: false },
   { key: 'power', label: 'Power', defaultWidth: 80, defaultVisible: false },
   // Availability
-  { key: 'total_available_sf', label: 'Total Avail SF', defaultWidth: 100, format: 'number', defaultVisible: false },
+  { key: 'total_available_sf', label: 'Available SF', defaultWidth: 100, type: 'number', filterable: true, format: 'number', editType: 'number', defaultVisible: false },
   { key: 'direct_available_sf', label: 'Direct Avail SF', defaultWidth: 110, format: 'number', defaultVisible: false },
   { key: 'direct_vacant_space', label: 'Direct Vacant', defaultWidth: 100, format: 'number', defaultVisible: false },
   { key: 'percent_leased', label: '% Leased', defaultWidth: 80, format: 'number', defaultVisible: false },
@@ -80,7 +83,7 @@ const ALL_COLUMNS = [
   { key: 'last_sale_price', label: 'Last Sale Price', defaultWidth: 110, type: 'number', filterable: true, format: 'currency', defaultVisible: false },
   { key: 'last_sale_date', label: 'Last Sale Date', defaultWidth: 100, type: 'date', filterable: true, format: 'date', defaultVisible: false },
   { key: 'plsf', label: 'PLSF', defaultWidth: 70, format: 'currency', defaultVisible: false },
-  { key: 'for_sale_price', label: 'For Sale Price', defaultWidth: 110, format: 'currency', defaultVisible: false },
+  { key: 'for_sale_price', label: 'Asking Sale Price', defaultWidth: 120, type: 'number', filterable: true, format: 'currency', editType: 'number', defaultVisible: false },
   { key: 'avg_weighted_rent', label: 'Avg Rent', defaultWidth: 90, format: 'currency', defaultVisible: false },
   { key: 'building_tax', label: 'Building Tax', defaultWidth: 120, defaultVisible: false },
   { key: 'building_opex', label: 'Bldg OpEx', defaultWidth: 120, defaultVisible: false },
@@ -111,7 +114,11 @@ const ALL_COLUMNS = [
   { key: 'landvision_url', label: 'Landvision', defaultWidth: 80, defaultVisible: false },
   { key: 'google_maps_url', label: 'Google Maps', defaultWidth: 80, defaultVisible: false },
   { key: 'zoning_map_url', label: 'Zoning Map', defaultWidth: 80, defaultVisible: false },
-  { key: 'listing_url', label: 'Listing', defaultWidth: 80, defaultVisible: false },
+  { key: 'lease_comp_count', label: 'Lease Comps', defaultWidth: 90, type: 'number', filterable: true, format: 'number', defaultVisible: false },
+  { key: 'sale_comp_count', label: 'Sale Comps', defaultWidth: 90, type: 'number', filterable: true, format: 'number', defaultVisible: false },
+  { key: 'building_status', label: 'Building Status', defaultWidth: 120, type: 'select', filterable: true, editType: 'select', editOptions: ['Existing', 'Under Construction', 'Proposed', 'Final Planning', 'Demolished', 'Abandoned'], filterOptions: ['Existing', 'Under Construction', 'Proposed', 'Final Planning', 'Demolished', 'Abandoned'], defaultVisible: false },
+  { key: 'listing_first_seen_date', label: 'Listed Since', defaultWidth: 100, type: 'date', filterable: true, format: 'date', defaultVisible: false },
+  { key: 'listing_url', label: 'Listing URL', defaultWidth: 80, defaultVisible: false },
   // Linked record columns — role-specific
   { key: 'linked_owner_contacts', label: 'Owner Contact', defaultWidth: 160, defaultVisible: true,
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
@@ -198,6 +205,9 @@ export default function Properties({ onCountChange }) {
         linked_companies: allCompanies,
         linked_deals: linked.linked_deals?.[row.property_id] || [],
         linked_interactions: linked.linked_interactions?.[row.property_id] || [],
+        // Comp counts
+        lease_comp_count: linked.linked_comp_counts?.[row.property_id]?.[0]?.lease_count || 0,
+        sale_comp_count: linked.linked_comp_counts?.[row.property_id]?.[0]?.sale_count || 0,
       };
     });
   }, [rows, linked]);

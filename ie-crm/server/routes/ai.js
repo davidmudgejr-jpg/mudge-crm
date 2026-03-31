@@ -2840,6 +2840,19 @@ router.post('/air/ingest', async (req, res) => {
         } else {
           results.market_tracking_updated++;
         }
+
+        // Sync listing data back to properties row
+        if (propertyId) {
+          await pool.query(
+            `UPDATE properties SET
+               listing_status = 'for_lease',
+               listing_asking_lease_rate = COALESCE($2, listing_asking_lease_rate),
+               total_available_sf = COALESCE($3, total_available_sf),
+               listing_first_seen_date = COALESCE(listing_first_seen_date, $4)
+             WHERE property_id = $1`,
+            [propertyId, listing.asking_rate, listing.available_sf, parsed_date]
+          );
+        }
       } catch (err) {
         results.errors.push({ type: 'new_listing_lease', address: listing.address, error: err.message });
       }
@@ -2875,6 +2888,18 @@ router.post('/air/ingest', async (req, res) => {
           results.market_tracking_created++;
         } else {
           results.market_tracking_updated++;
+        }
+
+        // Sync listing data back to properties row
+        if (propertyId) {
+          await pool.query(
+            `UPDATE properties SET
+               listing_status = 'for_sale',
+               for_sale_price = COALESCE($2, for_sale_price),
+               listing_first_seen_date = COALESCE(listing_first_seen_date, $3)
+             WHERE property_id = $1`,
+            [propertyId, listing.asking_price, parsed_date]
+          );
         }
       } catch (err) {
         results.errors.push({ type: 'new_listing_sale', address: listing.address, error: err.message });
@@ -2923,6 +2948,29 @@ router.post('/air/ingest', async (req, res) => {
              AND market_status = 'for_lease' AND outcome_type IS NULL`,
             [compDate, comp.rate, comp.address]
           );
+
+          // Update property listing_status (multi-tenant aware)
+          if (propertyId) {
+            const remaining = await pool.query(
+              `SELECT market_status FROM market_tracking
+               WHERE property_id = $1 AND outcome_type IS NULL`,
+              [propertyId]
+            );
+            if (remaining.rows.length > 0) {
+              // Still has active listings — prefer for_sale over for_lease
+              const hasForSale = remaining.rows.some(r => r.market_status === 'for_sale');
+              await pool.query(
+                `UPDATE properties SET listing_status = $2 WHERE property_id = $1`,
+                [propertyId, hasForSale ? 'for_sale' : 'for_lease']
+              );
+            } else {
+              // No active listings remain — mark as leased
+              await pool.query(
+                `UPDATE properties SET listing_status = 'leased' WHERE property_id = $1`,
+                [propertyId]
+              );
+            }
+          }
         }
       } catch (err) {
         results.errors.push({ type: 'lease_comp', address: comp.address, error: err.message });
@@ -2967,6 +3015,29 @@ router.post('/air/ingest', async (req, res) => {
              AND market_status = 'for_sale' AND outcome_type IS NULL`,
             [comp.sale_date || parsed_date, comp.sale_price, comp.price_psf, comp.address]
           );
+
+          // Update property listing_status (multi-tenant aware)
+          if (propertyId) {
+            const remaining = await pool.query(
+              `SELECT market_status FROM market_tracking
+               WHERE property_id = $1 AND outcome_type IS NULL`,
+              [propertyId]
+            );
+            if (remaining.rows.length > 0) {
+              // Still has active listings — prefer for_sale over for_lease
+              const hasForSale = remaining.rows.some(r => r.market_status === 'for_sale');
+              await pool.query(
+                `UPDATE properties SET listing_status = $2 WHERE property_id = $1`,
+                [propertyId, hasForSale ? 'for_sale' : 'for_lease']
+              );
+            } else {
+              // No active listings remain — mark as sold
+              await pool.query(
+                `UPDATE properties SET listing_status = 'sold' WHERE property_id = $1`,
+                [propertyId]
+              );
+            }
+          }
         }
       } catch (err) {
         results.errors.push({ type: 'sale_comp', address: comp.address, error: err.message });
@@ -3613,7 +3684,7 @@ router.post('/dedup/merge/:id', async (req, res) => {
       // List of fields to fill if empty on winner
       const fillFields = ['rba', 'property_name', 'property_type', 'year_built', 'clear_ht',
         'number_of_loading_docks', 'drive_ins', 'zoning', 'owner_name', 'owner_phone',
-        'owner_entity_type', 'land_sf', 'land_area_ac', 'rent_psf_mo', 'cap_rate',
+        'owner_entity_type', 'land_sf', 'land_area_ac', 'listing_asking_lease_rate', 'cap_rate',
         'parking_ratio', 'parcel_number', 'costar_url'];
 
       for (const field of fillFields) {
