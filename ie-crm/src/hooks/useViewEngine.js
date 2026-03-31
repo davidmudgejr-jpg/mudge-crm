@@ -220,6 +220,8 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
   }, [activeViewId]);
 
   const saveView = useCallback(async (name) => {
+    console.log('[saveView] called with name:', name, 'activeViewId:', activeViewId, 'filters:', JSON.stringify(filters));
+    console.trace('[saveView] call stack');
     const viewData = {
       entity_type: entityType,
       view_name: name,
@@ -256,6 +258,32 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
       setIsDirty(false);
       return created;
     }
+  }, [entityType, activeViewId, filters, filterLogic, sort, visibleColumnKeys, views]);
+
+  // Force-create a brand new view — NEVER updates an existing one.
+  // Uses createView API (POST) regardless of activeViewId.
+  const createNewView = useCallback(async (name) => {
+    console.log('[createNewView] Creating new view:', name, 'current activeViewId:', activeViewId);
+    const viewData = {
+      entity_type: entityType,
+      view_name: name,
+      filters,
+      filter_logic: filterLogic,
+      sort_column: sort.column,
+      sort_direction: sort.direction,
+      visible_columns: visibleColumnKeys,
+      position: views.length,
+    };
+    // Always POST — never PATCH
+    const created = await createView(viewData);
+    console.log('[createNewView] Created:', created.view_id, created.view_name);
+    const next = [...views, created];
+    setViews(next);
+    writeCache(entityType, next);
+    setActiveViewId(created.view_id);
+    writeActiveId(entityType, created.view_id);
+    setIsDirty(false);
+    return created;
   }, [entityType, activeViewId, filters, filterLogic, sort, visibleColumnKeys, views]);
 
   const renameView = useCallback(async (viewId, newName) => {
@@ -341,6 +369,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     applyView,
     updateFilters,
     saveView,
+    createNewView,
     renameView,
     deleteView: removeView,
     duplicateView,

@@ -222,7 +222,7 @@ function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide,
         style={{ right: '-9px', width: '18px' }}
         onMouseDown={(e) => onResizeStart(col.key, e)}
       >
-        <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-[3px] rounded bg-transparent group-hover/resize:bg-crm-accent transition-colors" />
+        <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 w-[2px] bg-crm-border group-hover/resize:bg-crm-accent group-hover/resize:w-[3px] transition-all" />
       </div>
     </div>
   );
@@ -598,11 +598,11 @@ export default function CrmTable({
                   return (
                     <td
                       key={col.key}
-                      className={`px-3 py-2.5 text-ellipsis whitespace-nowrap${isEditing ? ' overflow-visible relative z-20' : ' overflow-hidden'}${isEditable && !isEditing ? ' cursor-cell' : ''}`}
+                      className={`px-3 py-2.5${col.wrapText ? ' whitespace-normal break-words' : ' text-ellipsis whitespace-nowrap'}${isEditing ? ' overflow-visible relative z-20' : col.wrapText ? '' : ' overflow-hidden'}${isEditable && !isEditing ? ' cursor-cell' : ''}`}
                       style={{
                         width: widths[col.key] || col.defaultWidth || 150,
                         minWidth: widths[col.key] || col.defaultWidth || 150,
-                        maxWidth: widths[col.key] || col.defaultWidth || 150,
+                        ...(col.wrapText ? {} : { maxWidth: widths[col.key] || col.defaultWidth || 150 }),
                       }}
                       onClick={isEditable ? (e) => {
                         e.stopPropagation();

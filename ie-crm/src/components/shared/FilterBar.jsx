@@ -52,8 +52,6 @@ export default function FilterBar({
     return flatten(filters);
   }, [filters]);
 
-  if (conditions.length === 0) return null;
-
   const removeFilter = (index) => {
     // Rebuild from flattened conditions (works for both flat arrays and compound objects)
     const next = conditions.filter((_, i) => i !== index);
@@ -62,9 +60,11 @@ export default function FilterBar({
 
   return (
     <div className="flex items-center gap-1.5 px-5 py-1.5 border-b border-crm-border/50 flex-wrap">
-      <span className="text-[10px] text-crm-muted/60 uppercase tracking-wider mr-1">
-        Filters{filterLogic === 'OR' ? ' (OR)' : ''}:
-      </span>
+      {conditions.length > 0 && (
+        <span className="text-[10px] text-crm-muted/60 uppercase tracking-wider mr-1">
+          Filters{filterLogic === 'OR' ? ' (OR)' : ''}:
+        </span>
+      )}
 
       {conditions.map((cond, i) => (
         <span

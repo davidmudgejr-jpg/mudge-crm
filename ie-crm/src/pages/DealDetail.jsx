@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getDeal, updateDeal, deleteDeal, getDealProperties, getDealContacts, getDealCompanies, getDealInteractions, getDealActionItems } from '../api/database';
+import { getDeal, updateDeal, deleteDeal, getDealProperties, getDealContacts, getDealCompanies, getDealCampaigns, getDealInteractions, getDealActionItems } from '../api/database';
 import Section from '../components/shared/Section';
 import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import InlineField from '../components/shared/InlineField';
@@ -41,6 +41,7 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
   const [linkedProperties, setLinkedProperties] = useState([]);
   const [linkedContacts, setLinkedContacts] = useState([]);
   const [linkedCompanies, setLinkedCompanies] = useState([]);
+  const [linkedCampaigns, setLinkedCampaigns] = useState([]);
   const [interactions, setInteractions] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -66,16 +67,18 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
       }
       setDeal(dealData);
 
-      const [props, contacts, companies, iRes, tRes] = await Promise.allSettled([
+      const [props, contacts, companies, campaigns, iRes, tRes] = await Promise.allSettled([
         getDealProperties(resolvedId),
         getDealContacts(resolvedId),
         getDealCompanies(resolvedId),
+        getDealCampaigns(resolvedId),
         getDealInteractions(resolvedId),
         getDealActionItems(resolvedId),
       ]);
       setLinkedProperties(props.status === 'fulfilled' ? props.value.rows || [] : []);
       setLinkedContacts(contacts.status === 'fulfilled' ? contacts.value.rows || [] : []);
       setLinkedCompanies(companies.status === 'fulfilled' ? companies.value.rows || [] : []);
+      setLinkedCampaigns(campaigns.status === 'fulfilled' ? campaigns.value.rows || [] : []);
       setInteractions(iRes.status === 'fulfilled' ? iRes.value.rows || [] : []);
       setTasks(tRes.status === 'fulfilled' ? tRes.value.rows || [] : []);
     } catch (err) {
@@ -101,6 +104,11 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
     id: co.company_id,
     label: co.company_name,
     secondary: co.city,
+  }));
+  const campaignRecords = linkedCampaigns.map((ca) => ({
+    id: ca.campaign_id,
+    label: ca.name,
+    secondary: ca.sent_date ? formatDatePacific(ca.sent_date) : ca.status,
   }));
 
   if (loading) {
@@ -190,6 +198,7 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
       <LinkedRecordSection title="Properties" entityType="property" records={propertyRecords} defaultOpen={linkedProperties.length > 0} sourceType="deal" sourceId={resolvedId} onRefresh={loadData} />
       <LinkedRecordSection title="Contacts" entityType="contact" records={contactRecords} defaultOpen={linkedContacts.length > 0} sourceType="deal" sourceId={resolvedId} onRefresh={loadData} />
       <LinkedRecordSection title="Companies" entityType="company" records={companyRecords} defaultOpen={linkedCompanies.length > 0} sourceType="deal" sourceId={resolvedId} onRefresh={loadData} />
+      <LinkedRecordSection title="Email Campaigns" entityType="campaign" records={campaignRecords} defaultOpen={linkedCampaigns.length > 0} sourceType="deal" sourceId={resolvedId} onRefresh={loadData} />
     </>
   );
 

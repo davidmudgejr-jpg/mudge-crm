@@ -82,7 +82,7 @@ export default function NewViewModal({
               onChange={(e) => setName(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="e.g. Hot Leads, Riverside Industrial, Closing Soon..."
-              className="w-full bg-crm-card/60 border border-crm-border/40 rounded-lg text-sm text-crm-text px-3 py-2.5 outline-none focus:border-crm-accent/50 placeholder-crm-muted/40 transition-colors"
+              className="w-full bg-crm-hover border border-crm-border rounded-lg text-sm text-crm-text px-3 py-2.5 outline-none focus:border-crm-accent/50 placeholder-crm-muted/40 transition-colors"
             />
           </div>
 
@@ -97,7 +97,7 @@ export default function NewViewModal({
                 Edit Filters
               </button>
             </div>
-            <div className="bg-crm-card/40 rounded-lg border border-crm-border/20 px-3 py-2.5 min-h-[40px]">
+            <div className="bg-crm-hover rounded-lg border border-crm-border px-3 py-2.5 min-h-[40px]">
               {filters.length === 0 ? (
                 <span className="text-xs text-crm-muted/50">No filters — view will show all records</span>
               ) : (
@@ -123,7 +123,7 @@ export default function NewViewModal({
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-[11px] text-crm-muted uppercase tracking-wider mb-1.5">Sort</label>
-              <div className="bg-crm-card/40 rounded-lg border border-crm-border/20 px-3 py-2 text-xs text-crm-text">
+              <div className="bg-crm-hover rounded-lg border border-crm-border px-3 py-2 text-xs text-crm-text">
                 {sort.column ? (
                   <span>
                     {sort.column.replace(/_/g, ' ')}
@@ -136,7 +136,7 @@ export default function NewViewModal({
             </div>
             <div className="flex-1">
               <label className="block text-[11px] text-crm-muted uppercase tracking-wider mb-1.5">Columns</label>
-              <div className="bg-crm-card/40 rounded-lg border border-crm-border/20 px-3 py-2 text-xs text-crm-text">
+              <div className="bg-crm-hover rounded-lg border border-crm-border px-3 py-2 text-xs text-crm-text">
                 {visibleCount} of {totalCount} visible
               </div>
             </div>

@@ -57,7 +57,7 @@ const DEAL_DEAD_REASON_OPTIONS = [
 
 const ALL_COLUMNS = [
   // Default visible
-  { key: 'deal_name', label: 'Deal', defaultWidth: 180, editable: false, type: 'text', filterable: true },
+  { key: 'deal_name', label: 'Deal', defaultWidth: 180, editable: false, type: 'text', filterable: true, wrapText: true },
   { key: 'deal_type', label: 'Type', defaultWidth: 100, type: 'select', filterable: true, editType: 'select', editOptions: DEAL_TYPES, filterOptions: ['Lease', 'Sale', 'Purchase', 'Sub-Lease', 'Renewal', 'Other'] },
   { key: 'status', label: 'Status', defaultWidth: 90, type: 'select', filterable: true,
     editType: 'select', editOptions: ['Prospecting', 'Active', 'Lead', 'Long Leads', 'Under Contract', 'Closed', 'Deal fell through', 'Dead', 'Dead Lead'],
@@ -69,10 +69,9 @@ const ALL_COLUMNS = [
   { key: 'repping', label: 'Repping', defaultWidth: 100, format: 'tags', editType: 'multi-select', editOptions: REPPING_OPTIONS },
   { key: 'sf', label: 'SF', defaultWidth: 70, type: 'number', filterable: true, format: 'number' },
   { key: 'rate', label: 'Rate', defaultWidth: 70, type: 'number', filterable: true, format: 'currency' },
-  { key: 'gross_fee_potential', label: 'Gross Fee', defaultWidth: 90, type: 'number', filterable: true, format: 'currency' },
   { key: 'close_date', label: 'Close Date', defaultWidth: 90, type: 'date', filterable: true, format: 'date' },
   { key: 'priority_deal', label: 'Priority', defaultWidth: 70, type: 'select', filterable: true, filterOptions: ['Yes', 'No'], editType: 'boolean',
-    renderCell: (val) => val ? <span className="text-crm-success">Yes</span> : <span className="text-crm-muted">No</span>,
+    renderCell: (val) => val ? <span className="text-red-500 font-semibold">Yes</span> : <span className="text-crm-muted">No</span>,
   },
   { key: 'lead_count', label: 'Leads', defaultWidth: 65, format: 'number',
     renderCell: (val) => {
@@ -84,13 +83,16 @@ const ALL_COLUMNS = [
   },
   // Hidden by default
   { key: 'deal_source', label: 'Source', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: DEAL_SOURCE_OPTIONS, defaultVisible: false },
-  { key: 'term', label: 'Term (mo)', defaultWidth: 80, format: 'number', defaultVisible: false },
-  { key: 'price', label: 'Price', defaultWidth: 100, format: 'currency', defaultVisible: false },
-  { key: 'commission_rate', label: 'Commission %', defaultWidth: 100, format: 'number', defaultVisible: false },
-  { key: 'net_potential', label: 'Net Potential', defaultWidth: 100, format: 'currency', defaultVisible: false },
+  { key: 'term', label: 'Term (mo)', defaultWidth: 80, type: 'number', filterable: true, format: 'number', defaultVisible: false },
+  { key: 'price', label: 'Price', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', defaultVisible: false },
+  { key: 'commission_rate', label: 'Commission %', defaultWidth: 100, type: 'number', filterable: true, defaultVisible: false,
+    renderCell: (val) => val ? <span>{Number(val)}%</span> : <span className="text-crm-muted">--</span>,
+  },
   { key: 'important_date', label: 'Important Date', defaultWidth: 100, format: 'date', defaultVisible: false },
   { key: 'deal_dead_reason', label: 'Dead Reason', defaultWidth: 140, format: 'tags', editType: 'multi-select', editOptions: DEAL_DEAD_REASON_OPTIONS, defaultVisible: false },
-  { key: 'increases', label: 'Escalation %', defaultWidth: 90, format: 'number', defaultVisible: false },
+  { key: 'increases', label: 'Escalation %', defaultWidth: 90, type: 'number', filterable: true, defaultVisible: false,
+    renderCell: (val) => val ? <span>{Number(val)}%</span> : <span className="text-crm-muted">--</span>,
+  },
   { key: 'run_by', label: 'Run By', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: RUN_BY_OPTIONS, defaultVisible: false },
   { key: 'other_broker', label: 'Other Broker', defaultWidth: 120, defaultVisible: false },
   { key: 'industry', label: 'Industry', defaultWidth: 100, defaultVisible: false },
@@ -100,9 +102,15 @@ const ALL_COLUMNS = [
   { key: 'surveys_brochures_url', label: 'Surveys/Brochures', defaultWidth: 80, defaultVisible: false },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags', defaultVisible: false },
   // Computed formula columns (from deal_formulas VIEW)
-  { key: 'team_gross_computed', label: 'Team Gross', defaultWidth: 110, format: 'currency', defaultVisible: false },
-  { key: 'jr_gross_computed', label: 'Jr Gross', defaultWidth: 100, format: 'currency', defaultVisible: false },
-  { key: 'jr_net_computed', label: 'Jr Net', defaultWidth: 100, format: 'currency', defaultVisible: false },
+  { key: 'team_gross_computed', label: 'Team Gross', defaultWidth: 110, type: 'number', filterable: true, defaultVisible: true,
+    renderCell: (val) => {
+      if (!val && val !== 0) return <span className="text-crm-muted">--</span>;
+      const n = Number(val);
+      return <span className="text-emerald-400 font-medium">${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>;
+    },
+  },
+  { key: 'jr_gross_computed', label: 'Jr Gross', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', defaultVisible: true },
+  { key: 'jr_net_computed', label: 'Jr Net', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', defaultVisible: true },
   // Linked record columns
   { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false,
     renderCell: (val) => <LinkedChips items={val} type="property" labelKey="property_address" /> },
@@ -110,6 +118,8 @@ const ALL_COLUMNS = [
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
   { key: 'linked_companies', label: 'Companies', defaultWidth: 150, defaultVisible: false,
     renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
+  { key: 'linked_campaigns', label: 'Email Campaign', defaultWidth: 180, defaultVisible: false,
+    renderCell: (val) => <LinkedChips items={val} type="campaign" labelKey="campaign_name" /> },
 ];
 
 export default function Deals({ onCountChange }) {
@@ -119,10 +129,10 @@ export default function Deals({ onCountChange }) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [filterStatus, setFilterStatus] = useState('');
   const [selected, setSelected] = useState(new Set());
   const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
   const [newViewModalOpen, setNewViewModalOpen] = useState(false);
+  const [reopenNewViewAfterFilter, setReopenNewViewAfterFilter] = useState(false);
   const view = useViewEngine('deals', ALL_COLUMNS);
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
@@ -156,6 +166,7 @@ export default function Deals({ onCountChange }) {
       linked_properties: linked.linked_properties?.[row.deal_id] || [],
       linked_contacts: linked.linked_contacts?.[row.deal_id] || [],
       linked_companies: linked.linked_companies?.[row.deal_id] || [],
+      linked_campaigns: linked.linked_campaigns?.[row.deal_id] || [],
       linked_interactions: linked.linked_interactions?.[row.deal_id] || [],
     }));
   }, [rows, linked]);
@@ -163,10 +174,8 @@ export default function Deals({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      if (search || filterStatus) {
-        const filters = {};
-        if (search) filters.search = search;
-        if (filterStatus) filters.status = filterStatus;
+      if (search) {
+        const filters = { search };
         const result = await getDeals({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
         setRows(result.rows || []);
         const count = result.rows?.length || 0;
@@ -192,7 +201,7 @@ export default function Deals({ onCountChange }) {
     } finally {
       setLoading(false);
     }
-  }, [search, filterStatus, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
+  }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates('deal', fetchData);
@@ -313,11 +322,6 @@ export default function Deals({ onCountChange }) {
             <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search deals..."
               className="w-full bg-crm-hover border-0 rounded-[10px] pl-9 pr-3 py-2.5 text-sm text-crm-text placeholder-crm-muted focus:outline-none focus:ring-2 focus:ring-crm-accent/30" />
           </div>
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}
-            className="bg-crm-card border border-crm-border rounded-lg px-2 py-1.5 text-sm text-crm-text focus:outline-none focus:border-crm-accent/50">
-            <option value="">All Statuses</option>
-            {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
           <ColumnToggleMenu
             allColumns={allColumnsWithActivity}
             visibleKeys={visibleKeys}
@@ -343,6 +347,7 @@ export default function Deals({ onCountChange }) {
         applyView={view.applyView}
         resetToAll={view.resetToAll}
         saveView={view.saveView}
+        createNewView={view.createNewView}
         renameView={view.renameView}
         deleteView={view.deleteView}
         duplicateView={view.duplicateView}
@@ -357,11 +362,17 @@ export default function Deals({ onCountChange }) {
         totalCount={totalCount}
         filteredCount={rows.length}
         activeViewId={view.activeViewId}
-        onSaveAsView={(name) => view.saveView(name)}
+        onSaveAsView={(name) => view.createNewView(name)}
       />
       <FilterBuilder
         isOpen={filterBuilderOpen}
-        onClose={() => setFilterBuilderOpen(false)}
+        onClose={() => {
+          setFilterBuilderOpen(false);
+          if (reopenNewViewAfterFilter) {
+            setReopenNewViewAfterFilter(false);
+            setNewViewModalOpen(true);
+          }
+        }}
         columnDefs={ALL_COLUMNS}
         initialFilters={view.filters}
         initialLogic={view.filterLogic}
@@ -370,17 +381,17 @@ export default function Deals({ onCountChange }) {
       <NewViewModal
         isOpen={newViewModalOpen}
         onClose={() => setNewViewModalOpen(false)}
-        onSave={(name) => view.saveView(name)}
+        onSave={(name) => view.createNewView(name)}
         filters={view.filters}
         filterLogic={view.filterLogic}
         sort={view.sort}
         columnDefs={ALL_COLUMNS}
         visibleColumnKeys={view.visibleColumnKeys}
-        onOpenFilterBuilder={() => setFilterBuilderOpen(true)}
+        onOpenFilterBuilder={() => { setReopenNewViewAfterFilter(true); setFilterBuilderOpen(true); }}
       />
 
       <div className="flex-1 overflow-auto">
-        {!loading && augmentedRows.length === 0 && !search && !filterStatus ? (
+        {!loading && augmentedRows.length === 0 && !search ? (
           <EmptyState entity="deals" entityLabel="Deals" onAdd={() => setShowQuickAdd(true)} addLabel="+ New Deal" />
         ) : (
           <CrmTable

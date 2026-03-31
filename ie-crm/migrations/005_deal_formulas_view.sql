@@ -3,20 +3,17 @@
 -- SELECT from this view instead of deals table for list/detail queries.
 -- Writes (INSERT/UPDATE) still go directly to deals table.
 --
+-- Commission rate is stored as a percentage (e.g. 3 = 3%), so divide by 100.
+--
 -- Formula for Lease Team Gross:
---   sf * commission_rate * total_rent_value
---   total_rent_value = sum of monthly rents over term with annual escalation
---   = rate * 12 * ((1+increases)^full_years - 1) / increases  [geometric series]
---     + rate * (1+increases)^full_years * remaining_months     [stub year]
---   If increases is NULL or 0: simplified to rate * term (no compounding)
+--   sf * (commission_rate/100) * total_rent_value
 --
--- Formula for Sale/Purchase Team Gross:
---   price * commission_rate
+-- Formula for Sale/Purchase/Buy Team Gross:
+--   price * (commission_rate/100)
 --
--- Splits (per HANDOFF.md):
+-- Splits:
 --   jr_gross  = team_gross / 3
---   jr_net    = team_gross / 3 * 0.75  (Jr and Missy share)
---   dave_net  = TBD (placeholder same as jr_net for now)
+--   jr_net    = team_gross / 3 * 0.75
 
 CREATE OR REPLACE VIEW deal_formulas AS
 WITH base AS (
@@ -29,23 +26,23 @@ WITH base AS (
         CASE
           WHEN d.increases IS NULL OR d.increases = 0 THEN
             -- No escalation: simple total
-            d.sf::numeric * d.rate * d.term * d.commission_rate
+            d.sf::numeric * d.rate * d.term * (d.commission_rate / 100.0)
           ELSE
             (
               -- Full years via geometric series
               d.sf::numeric * d.rate * 12.0
-                * (POW(1.0 + d.increases, FLOOR(d.term / 12.0)::int) - 1.0)
-                / NULLIF(d.increases, 0)
+                * (POW(1.0 + d.increases / 100.0, FLOOR(d.term / 12.0)::int) - 1.0)
+                / NULLIF(d.increases / 100.0, 0)
               -- Stub/remaining months at final escalated rate
               + d.sf::numeric * d.rate
-                * POW(1.0 + d.increases, FLOOR(d.term / 12.0)::int)
+                * POW(1.0 + d.increases / 100.0, FLOOR(d.term / 12.0)::int)
                 * (d.term - FLOOR(d.term / 12.0)::int * 12)
-            ) * d.commission_rate
+            ) * (d.commission_rate / 100.0)
         END
-      -- Sale / Purchase: flat commission on price
-      WHEN d.deal_type IN ('Sale', 'Purchase')
+      -- Sale / Purchase / Buy: flat commission on price
+      WHEN d.deal_type IN ('Sale', 'Purchase', 'Buy')
            AND d.price > 0 AND d.commission_rate > 0 THEN
-        d.price * d.commission_rate
+        d.price * (d.commission_rate / 100.0)
       ELSE NULL
     END AS _team_gross
   FROM deals d

@@ -36,6 +36,7 @@ export default function Interactions({ onCountChange }) {
   const [totalCount, setTotalCount] = useState(0);
   const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
   const [newViewModalOpen, setNewViewModalOpen] = useState(false);
+  const [reopenNewViewAfterFilter, setReopenNewViewAfterFilter] = useState(false);
   const view = useViewEngine('interactions', ALL_COLUMNS, { defaultSort: { column: 'date', direction: 'DESC' } });
 
   const fetchData = useCallback(async () => {
@@ -154,6 +155,7 @@ export default function Interactions({ onCountChange }) {
         applyView={view.applyView}
         resetToAll={view.resetToAll}
         saveView={view.saveView}
+        createNewView={view.createNewView}
         renameView={view.renameView}
         deleteView={view.deleteView}
         duplicateView={view.duplicateView}
@@ -168,11 +170,11 @@ export default function Interactions({ onCountChange }) {
         totalCount={totalCount}
         filteredCount={rows.length}
         activeViewId={view.activeViewId}
-        onSaveAsView={(name) => view.saveView(name)}
+        onSaveAsView={(name) => view.createNewView(name)}
       />
       <FilterBuilder
         isOpen={filterBuilderOpen}
-        onClose={() => setFilterBuilderOpen(false)}
+        onClose={() => { setFilterBuilderOpen(false); if (reopenNewViewAfterFilter) { setReopenNewViewAfterFilter(false); setNewViewModalOpen(true); } }}
         columnDefs={ALL_COLUMNS}
         initialFilters={view.filters}
         initialLogic={view.filterLogic}
@@ -181,13 +183,13 @@ export default function Interactions({ onCountChange }) {
       <NewViewModal
         isOpen={newViewModalOpen}
         onClose={() => setNewViewModalOpen(false)}
-        onSave={(name) => view.saveView(name)}
+        onSave={(name) => view.createNewView(name)}
         filters={view.filters}
         filterLogic={view.filterLogic}
         sort={view.sort}
         columnDefs={ALL_COLUMNS}
         visibleColumnKeys={view.visibleColumnKeys}
-        onOpenFilterBuilder={() => setFilterBuilderOpen(true)}
+        onOpenFilterBuilder={() => { setReopenNewViewAfterFilter(true); setFilterBuilderOpen(true); }}
       />
 
       {/* Content Area */}

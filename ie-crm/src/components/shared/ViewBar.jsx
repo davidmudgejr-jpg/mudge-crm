@@ -13,6 +13,7 @@ export default function ViewBar({
   applyView,
   resetToAll,
   saveView,
+  createNewView,
   renameView,
   deleteView,
   duplicateView,
@@ -57,7 +58,7 @@ export default function ViewBar({
   const handleNewViewSave = async () => {
     if (newViewName.trim()) {
       try {
-        await saveView(newViewName.trim());
+        await (createNewView || saveView)(newViewName.trim());
         setNaming(false);
         setNewViewName('');
       } catch (err) {
@@ -86,7 +87,16 @@ export default function ViewBar({
       {views.map((view) => (
         <button
           key={view.view_id}
-          onClick={() => { applyView(view.view_id); setNaming(false); }}
+          onClick={() => {
+            if (activeViewId === view.view_id) {
+              // Already on this view — start renaming
+              setRenaming(view.view_id);
+              setRenameValue(view.view_name);
+            } else {
+              applyView(view.view_id);
+            }
+            setNaming(false);
+          }}
           onContextMenu={(e) => handleContextMenu(e, view)}
           className={`shrink-0 px-3.5 py-1.5 rounded-md text-xs whitespace-nowrap transition-colors ${
             activeViewId === view.view_id

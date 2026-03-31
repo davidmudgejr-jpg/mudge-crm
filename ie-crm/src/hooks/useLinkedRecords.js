@@ -3,7 +3,7 @@ import {
   batchGetPropertyContacts, batchGetPropertyCompanies, batchGetPropertyDeals,
   batchGetContactProperties, batchGetContactCompanies, batchGetContactDeals, batchGetContactCampaigns,
   batchGetCompanyContacts, batchGetCompanyProperties, batchGetCompanyDeals,
-  batchGetDealProperties, batchGetDealContacts, batchGetDealCompanies,
+  batchGetDealProperties, batchGetDealContacts, batchGetDealCompanies, batchGetDealCampaigns,
   batchGetActionItemContacts, batchGetActionItemProperties, batchGetActionItemDeals, batchGetActionItemCompanies,
   batchGetContactInteractions, batchGetPropertyInteractions, batchGetCompanyInteractions, batchGetDealInteractions,
 } from '../api/database';
@@ -43,6 +43,7 @@ const ENTITY_FETCHERS = {
       linked_properties: batchGetDealProperties,
       linked_contacts: batchGetDealContacts,
       linked_companies: batchGetDealCompanies,
+      linked_campaigns: batchGetDealCampaigns,
       linked_interactions: batchGetDealInteractions,
     },
   },

@@ -562,6 +562,15 @@ export async function getDealContacts(dealId) {
   `, [dealId]);
 }
 
+export async function getDealCampaigns(dealId) {
+  return query(`
+    SELECT ca.* FROM campaigns ca
+    JOIN deal_campaigns dc ON ca.campaign_id = dc.campaign_id
+    WHERE dc.deal_id = $1
+    ORDER BY ca.sent_date DESC NULLS LAST, ca.name
+  `, [dealId]);
+}
+
 export async function getDealCompanies(dealId) {
   return query(`
     SELECT co.* FROM companies co
@@ -1192,6 +1201,16 @@ export async function batchGetDealCompanies(dealIds) {
     SELECT co.company_id, co.company_name, co.company_type, dc.deal_id
     FROM companies co JOIN deal_companies dc ON co.company_id = dc.company_id
     WHERE dc.deal_id = ANY($1) ORDER BY co.company_name
+  `, [dealIds]);
+  return groupBy(r.rows, 'deal_id');
+}
+
+export async function batchGetDealCampaigns(dealIds) {
+  if (!dealIds.length) return {};
+  const r = await query(`
+    SELECT ca.campaign_id, ca.name AS campaign_name, ca.status, ca.sent_date, dc.deal_id
+    FROM campaigns ca JOIN deal_campaigns dc ON ca.campaign_id = dc.campaign_id
+    WHERE dc.deal_id = ANY($1) ORDER BY ca.sent_date DESC NULLS LAST, ca.name
   `, [dealIds]);
   return groupBy(r.rows, 'deal_id');
 }

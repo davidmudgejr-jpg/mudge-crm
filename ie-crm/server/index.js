@@ -1087,6 +1087,7 @@ app.post('/api/import/batch', denyReadOnly, async (req, res) => {
         _link_contact:  { junction: 'deal_contacts',   col1: 'deal_id', col2: 'contact_id',  role: null, type: 'contact',  textCol: null },
         _link_company:  { junction: 'deal_companies',  col1: 'deal_id', col2: 'company_id',  role: null, type: 'company',  textCol: null },
         _link_property: { junction: 'deal_properties', col1: 'deal_id', col2: 'property_id', role: null, type: 'property', textCol: null },
+        _link_campaign: { junction: 'deal_campaigns',  col1: 'deal_id', col2: 'campaign_id', role: null, type: 'campaign', textCol: null },
       },
       campaigns: {
         _link_contact: { junction: 'campaign_contacts', col1: 'campaign_id', col2: 'contact_id', role: null, type: 'contact', textCol: null },
