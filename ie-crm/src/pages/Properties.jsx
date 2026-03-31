@@ -37,7 +37,7 @@ const ALL_COLUMNS = [
   { key: 'property_type', label: 'Type', defaultWidth: 100, type: 'select', filterable: true, editType: 'select', editOptions: ['Office', 'Retail', 'Industrial', 'Multifamily', 'Land', 'Mixed-Use', 'Special Purpose'], filterOptions: ['Office', 'Retail', 'Industrial', 'Multifamily', 'Land', 'Mixed-Use', 'Special Purpose'] },
   { key: 'rba', label: 'Bldg SF', defaultWidth: 80, type: 'number', filterable: true, format: 'number' },
   { key: 'land_sf', label: 'Lot SF', defaultWidth: 80, format: 'number' },
-  { key: 'year_built', label: 'Year', defaultWidth: 60, type: 'number', filterable: true, format: 'number' },
+  { key: 'year_built', label: 'Year', defaultWidth: 60, type: 'number', filterable: true },
   { key: 'owner_name', label: 'Entity Name', defaultWidth: 140, type: 'text', filterable: true },
   { key: 'priority', label: 'Priority', defaultWidth: 80, type: 'select', filterable: true, format: 'priority', editType: 'select', editOptions: ['Hot', 'Warm', 'Cold', 'Dead'], filterOptions: ['Hot', 'Warm', 'Cold', 'Dead'] },
   { key: 'contacted', label: 'Contacted', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: CONTACTED_OPTIONS },
@@ -54,7 +54,10 @@ const ALL_COLUMNS = [
   { key: 'parking_spaces', label: 'Parking Spaces', defaultWidth: 90, format: 'number', editType: 'number', defaultVisible: false },
   { key: 'price_per_sqft', label: 'Price/SF', defaultWidth: 90, format: 'currency', editType: 'number', defaultVisible: false },
   // RBA already shown as 'Bldg SF' above
-  { key: 'far', label: 'FAR', defaultWidth: 60, defaultVisible: false },
+  { key: 'far', label: 'FAR', defaultWidth: 60, defaultVisible: false, editable: false, renderCell: (_, row) => {
+    if (!row?.rba || !row?.land_sf || row.land_sf === 0) return <span className="text-crm-muted">--</span>;
+    return (row.rba / row.land_sf).toFixed(2);
+  }},
   { key: 'cap_rate', label: 'Cap Rate', defaultWidth: 80, type: 'number', filterable: true, defaultVisible: false },
   { key: 'noi', label: 'NOI', defaultWidth: 100, format: 'currency', editType: 'number', defaultVisible: false },
   { key: 'owner_phone', label: 'Owner Phone', defaultWidth: 120, defaultVisible: false },
@@ -110,15 +113,15 @@ const ALL_COLUMNS = [
   { key: 'tenancy', label: 'Tenancy', defaultWidth: 80, defaultVisible: false },
   { key: 'off_market_deal', label: 'Off Market', defaultWidth: 80, format: 'bool', editType: 'boolean', defaultVisible: false },
   // Links / URLs
-  { key: 'costar_url', label: 'CoStar', defaultWidth: 80, defaultVisible: false },
-  { key: 'landvision_url', label: 'Landvision', defaultWidth: 80, defaultVisible: false },
-  { key: 'google_maps_url', label: 'Google Maps', defaultWidth: 80, defaultVisible: false },
-  { key: 'zoning_map_url', label: 'Zoning Map', defaultWidth: 80, defaultVisible: false },
+  { key: 'costar_url', label: 'CoStar', defaultWidth: 80, defaultVisible: false, format: 'url' },
+  { key: 'landvision_url', label: 'Landvision', defaultWidth: 80, defaultVisible: false, format: 'url' },
+  { key: 'google_maps_url', label: 'Google Maps', defaultWidth: 80, defaultVisible: false, format: 'url' },
+  { key: 'zoning_map_url', label: 'Zoning Map', defaultWidth: 80, defaultVisible: false, format: 'url' },
   { key: 'lease_comp_count', label: 'Lease Comps', defaultWidth: 90, type: 'number', filterable: true, format: 'number', defaultVisible: false },
   { key: 'sale_comp_count', label: 'Sale Comps', defaultWidth: 90, type: 'number', filterable: true, format: 'number', defaultVisible: false },
   { key: 'building_status', label: 'Building Status', defaultWidth: 120, type: 'select', filterable: true, editType: 'select', editOptions: ['Existing', 'Under Construction', 'Proposed', 'Final Planning', 'Demolished', 'Abandoned'], filterOptions: ['Existing', 'Under Construction', 'Proposed', 'Final Planning', 'Demolished', 'Abandoned'], defaultVisible: false },
   { key: 'listing_first_seen_date', label: 'Listed Since', defaultWidth: 100, type: 'date', filterable: true, format: 'date', defaultVisible: false },
-  { key: 'listing_url', label: 'Listing URL', defaultWidth: 80, defaultVisible: false },
+  { key: 'listing_url', label: 'Listing URL', defaultWidth: 80, defaultVisible: false, format: 'url' },
   // Linked record columns — role-specific
   { key: 'linked_owner_contacts', label: 'Owner Contact', defaultWidth: 160, defaultVisible: true,
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
@@ -215,30 +218,50 @@ export default function Properties({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      if (search || filterType || filterPriority) {
-        const filters = {};
-        if (search) filters.search = search;
-        if (filterType) filters.property_type = filterType;
-        if (filterPriority) filters.priority = filterPriority;
-        const result = await getProperties({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
-        setRows(result.rows || []);
-        const count = result.rows?.length || 0;
-        setTotalCount(count);
-        if (onCountChange) onCountChange(count);
-      } else {
-        const [result, total] = await Promise.all([
-          queryWithFilters('properties', {
-            ...view.sqlFilters,
-            orderBy: view.sort.column,
-            order: view.sort.direction,
-            limit: 500,
-          }),
-          countWithFilters('properties', {}),
-        ]);
-        setRows(result.rows || []);
-        setTotalCount(total);
-        if (onCountChange) onCountChange(result.rows?.length || 0);
+      // Merge view engine filters with quick-access dropdown filters
+      let whereClause = view.sqlFilters?.whereClause || '';
+      let params = [...(view.sqlFilters?.params || [])];
+
+      // Append quick-access filters (search, type, priority) to the view engine WHERE clause
+      const extraConds = [];
+      if (filterType) {
+        params.push(filterType);
+        extraConds.push(`property_type = $${params.length}`);
       }
+      if (filterPriority) {
+        params.push(filterPriority);
+        extraConds.push(`priority = $${params.length}`);
+      }
+      if (search) {
+        params.push(`%${search}%`);
+        const i = params.length;
+        extraConds.push(`(property_address ILIKE $${i} OR owner_name ILIKE $${i} OR city ILIKE $${i} OR property_name ILIKE $${i})`);
+      }
+
+      if (extraConds.length) {
+        const extraWhere = extraConds.join(' AND ');
+        if (whereClause) {
+          // Existing WHERE from view engine — append with AND
+          whereClause = whereClause.replace(/^WHERE\s+/i, 'WHERE (') + ') AND ' + extraWhere;
+        } else {
+          whereClause = 'WHERE ' + extraWhere;
+        }
+      }
+
+      const mergedFilters = { whereClause, params };
+
+      const [result, total] = await Promise.all([
+        queryWithFilters('properties', {
+          ...mergedFilters,
+          orderBy: view.sort.column,
+          order: view.sort.direction,
+          limit: 500,
+        }),
+        countWithFilters('properties', mergedFilters),
+      ]);
+      setRows(result.rows || []);
+      setTotalCount(total);
+      if (onCountChange) onCountChange(result.rows?.length || 0);
     } catch (err) {
       console.error('Failed to fetch properties:', err);
       setRows([]);
@@ -427,8 +450,8 @@ export default function Properties({ onCountChange }) {
         isDirty={view.isDirty}
         activeView={view.activeView}
         filters={view.filters}
-        applyView={view.applyView}
-        resetToAll={view.resetToAll}
+        applyView={(id) => { setSearch(''); setFilterType(''); setFilterPriority(''); view.applyView(id); }}
+        resetToAll={() => { setSearch(''); setFilterType(''); setFilterPriority(''); view.resetToAll(); }}
         saveView={view.saveView}
         createNewView={view.createNewView}
         renameView={view.renameView}

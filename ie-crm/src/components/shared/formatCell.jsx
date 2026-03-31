@@ -1,5 +1,5 @@
 import React from 'react';
-import { formatDatePacific, formatDateTimePacific } from '../../utils/timezone';
+import { formatDateNumeric, formatDateTimePacific } from '../../utils/timezone';
 
 // Unified cell formatter — replaces 4 duplicate formatCell functions across pages
 
@@ -29,7 +29,7 @@ export default function formatCell(value, format) {
       return `${value}%`;
 
     case 'date':
-      return formatDatePacific(value) || String(value);
+      return formatDateNumeric(value) || String(value);
 
     case 'datetime':
       return formatDateTimePacific(value) || String(value);
@@ -100,8 +100,15 @@ export default function formatCell(value, format) {
 
     case 'url':
       return (
-        <a href={value} target="_blank" rel="noopener noreferrer" className="text-crm-accent hover:underline truncate">
-          {value}
+        <a
+          href={value}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className="text-crm-accent hover:underline truncate"
+          title={value}
+        >
+          Open ↗
         </a>
       );
 

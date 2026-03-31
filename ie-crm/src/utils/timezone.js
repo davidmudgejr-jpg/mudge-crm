@@ -56,6 +56,21 @@ export function formatDatePacific(val) {
 }
 
 /**
+ * Numeric date format for table cells: "3/15/2026"
+ */
+export function formatDateNumeric(val) {
+  if (!val) return null;
+  try {
+    const d = new Date(val);
+    if (isNaN(d)) return String(val);
+    return d.toLocaleDateString('en-US', {
+      timeZone: TZ,
+      month: 'numeric', day: 'numeric', year: 'numeric',
+    });
+  } catch { return String(val); }
+}
+
+/**
  * Compact date format for space-constrained UIs (Activity, Tasks): "Mar 4, 2026"
  */
 export function formatDateCompact(val) {
