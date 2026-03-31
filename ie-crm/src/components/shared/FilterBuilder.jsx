@@ -1,6 +1,106 @@
 // Modal filter editor with AND/OR logic, condition rows, value inputs.
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
+
+/**
+ * Searchable select — portal-rendered so dropdown escapes modal overflow.
+ * `options` can be plain strings OR { value, label } objects.
+ * `placeholder` shown when no value selected.
+ * `widthClass` controls the trigger button width (e.g. 'w-[140px]').
+ */
+function SearchableSelect({ options, value, onChange, className, placeholder = 'Select...', widthClass = 'flex-1' }) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const [rect, setRect] = useState(null);
+  const btnRef = useRef(null);
+  const dropRef = useRef(null);
+
+  // Normalize options to { value, label }
+  const normalized = useMemo(() =>
+    options.map(o => typeof o === 'string' ? { value: o, label: o } : o),
+    [options]
+  );
+
+  const displayLabel = useMemo(() => {
+    const match = normalized.find(o => o.value === value);
+    return match ? match.label : '';
+  }, [normalized, value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e) => {
+      if (btnRef.current?.contains(e.target)) return;
+      if (dropRef.current?.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open]);
+
+  const toggle = () => {
+    if (!open && btnRef.current) setRect(btnRef.current.getBoundingClientRect());
+    setOpen(!open);
+    setSearch('');
+  };
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return normalized;
+    const q = search.toLowerCase();
+    return normalized.filter(o => o.label.toLowerCase().includes(q));
+  }, [normalized, search]);
+
+  const dropdown = open && rect && ReactDOM.createPortal(
+    <div
+      ref={dropRef}
+      style={{ position: 'fixed', top: rect.bottom + 4, left: rect.left, width: Math.max(rect.width, 180), zIndex: 99999 }}
+      className="bg-crm-card border border-crm-border rounded-lg shadow-2xl overflow-hidden"
+    >
+      {normalized.length > 6 && (
+        <div className="p-1.5">
+          <input
+            autoFocus
+            type="text"
+            placeholder="Search…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="w-full rounded px-2 py-1 text-xs bg-crm-bg border border-crm-border text-crm-text placeholder:text-crm-muted outline-none focus:border-crm-accent [color-scheme:dark]"
+          />
+        </div>
+      )}
+      <div className="max-h-48 overflow-y-auto">
+        {filtered.length === 0 && (
+          <p className="text-xs text-crm-muted italic px-2.5 py-1.5">No matches</p>
+        )}
+        {filtered.map(opt => (
+          <button
+            key={opt.value}
+            type="button"
+            onClick={() => { onChange(opt.value); setOpen(false); setSearch(''); }}
+            className={`w-full text-left px-2.5 py-1.5 text-xs hover:bg-crm-hover truncate ${opt.value === value ? 'text-crm-accent' : 'text-crm-text'}`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+    </div>,
+    document.body
+  );
+
+  return (
+    <div className={widthClass}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={toggle}
+        className={`${className} w-full text-left truncate`}
+      >
+        {displayLabel || placeholder}
+      </button>
+      {dropdown}
+    </div>
+  );
+}
 
 const OPERATORS_BY_TYPE = {
   text: [
@@ -53,27 +153,24 @@ function ConditionRow({ condition, index, columnDefs, onChange, onRemove }) {
   return (
     <div className="flex gap-2 items-center mb-2.5">
       {/* Column select */}
-      <select
+      <SearchableSelect
+        options={columnDefs.map(c => ({ value: c.key, label: c.label }))}
         value={condition.column || ''}
-        onChange={(e) => onChange(index, { ...condition, column: e.target.value, operator: 'equals', value: '' })}
-        className="bg-crm-hover border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs w-[140px]"
-      >
-        <option value="">Select column...</option>
-        {columnDefs.map(c => (
-          <option key={c.key} value={c.key}>{c.label}</option>
-        ))}
-      </select>
+        onChange={(val) => onChange(index, { ...condition, column: val, operator: 'equals', value: '' })}
+        className="bg-crm-hover border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs"
+        placeholder="Select column..."
+        widthClass="w-[140px]"
+      />
 
       {/* Operator select */}
-      <select
+      <SearchableSelect
+        options={operators}
         value={condition.operator || 'equals'}
-        onChange={(e) => onChange(index, { ...condition, operator: e.target.value, value: e.target.value === 'between' ? ['', ''] : '' })}
-        className="bg-crm-hover border border-crm-border text-crm-accent px-2.5 py-1.5 rounded-md text-xs w-[100px]"
-      >
-        {operators.map(op => (
-          <option key={op.value} value={op.value}>{op.label}</option>
-        ))}
-      </select>
+        onChange={(val) => onChange(index, { ...condition, operator: val, value: val === 'between' ? ['', ''] : '' })}
+        className="bg-crm-hover border border-crm-border text-crm-accent px-2.5 py-1.5 rounded-md text-xs"
+        placeholder="Operator..."
+        widthClass="w-[100px]"
+      />
 
       {/* Value input */}
       {!needsNoValue && (
@@ -102,16 +199,13 @@ function ConditionRow({ condition, index, columnDefs, onChange, onRemove }) {
             />
           </div>
         ) : col?.filterOptions ? (
-          <select
+          <SearchableSelect
+            options={col.filterOptions}
             value={condition.value || ''}
-            onChange={(e) => onChange(index, { ...condition, value: e.target.value })}
-            className="bg-crm-hover border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs flex-1"
-          >
-            <option value="">Select...</option>
-            {col.filterOptions.map(opt => (
-              <option key={opt} value={opt}>{opt}</option>
-            ))}
-          </select>
+            onChange={(val) => onChange(index, { ...condition, value: val })}
+            className="bg-crm-hover border border-crm-border text-crm-text px-2.5 py-1.5 rounded-md text-xs"
+            placeholder="Select..."
+          />
         ) : (
           <input
             type={colType === 'date' ? 'date' : colType === 'number' ? 'number' : 'text'}

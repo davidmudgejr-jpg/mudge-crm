@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getProperties, updateProperty, queryWithFilters, countWithFilters } from '../api/database';
+import { getProperties, updateProperty, queryWithFilters, countWithFilters, query } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
@@ -168,6 +168,14 @@ export default function Properties({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
+  const [cityOptions, setCityOptions] = useState([]);
+
+  // Fetch distinct cities once for dropdown filter
+  useEffect(() => {
+    query('SELECT DISTINCT city FROM properties WHERE city IS NOT NULL ORDER BY city')
+      .then(r => setCityOptions((r.rows || []).map(x => x.city)))
+      .catch(() => {});
+  }, []);
   const { formulas, evaluateFormulas } = useFormulaColumns('properties');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('properties');
 
@@ -182,10 +190,16 @@ export default function Properties({ onCountChange }) {
         />
       ),
     };
-    const result = [...ALL_COLUMNS];
+    // Inject dynamic filterOptions for city and county
+    const result = ALL_COLUMNS.map(col => {
+      if (col.key === 'city' && cityOptions.length > 0) {
+        return { ...col, type: 'select', filterOptions: cityOptions };
+      }
+      return col;
+    });
     result.splice(idx >= 0 ? idx : result.length, 0, activityCol);
     return result;
-  }, []);
+  }, [cityOptions]);
 
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('properties', allColumnsWithActivity);
   const linked = useLinkedRecords('properties', rows);
@@ -473,7 +487,7 @@ export default function Properties({ onCountChange }) {
       <FilterBuilder
         isOpen={filterBuilderOpen}
         onClose={() => { setFilterBuilderOpen(false); if (reopenNewViewAfterFilter) { setReopenNewViewAfterFilter(false); setNewViewModalOpen(true); } }}
-        columnDefs={ALL_COLUMNS}
+        columnDefs={allColumnsWithActivity}
         initialFilters={view.filters}
         initialLogic={view.filterLogic}
         onApply={(filters, logic) => view.updateFilters(filters, logic)}
@@ -485,7 +499,7 @@ export default function Properties({ onCountChange }) {
         filters={view.filters}
         filterLogic={view.filterLogic}
         sort={view.sort}
-        columnDefs={ALL_COLUMNS}
+        columnDefs={allColumnsWithActivity}
         visibleColumnKeys={view.visibleColumnKeys}
         onOpenFilterBuilder={() => { setReopenNewViewAfterFilter(true); setFilterBuilderOpen(true); }}
       />
