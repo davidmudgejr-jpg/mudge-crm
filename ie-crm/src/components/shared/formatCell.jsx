@@ -98,6 +98,17 @@ export default function formatCell(value, format) {
       );
     }
 
+    case 'image':
+      return (
+        <img
+          src={value}
+          alt=""
+          className="w-10 h-10 rounded object-cover border border-crm-border cursor-pointer hover:opacity-80 transition-opacity"
+          onClick={(e) => { e.stopPropagation(); window.open(value, '_blank'); }}
+          onError={(e) => { e.target.style.display = 'none'; }}
+        />
+      );
+
     case 'url':
       return (
         <a

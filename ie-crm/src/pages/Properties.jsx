@@ -19,6 +19,7 @@ import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
+import PhotoUploadCell from '../components/shared/PhotoUploadCell';
 import { bulkOps } from '../api/bridge';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
@@ -179,8 +180,25 @@ export default function Properties({ onCountChange }) {
   const { formulas, evaluateFormulas } = useFormulaColumns('properties');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('properties');
 
+  const handlePhotoSave = useCallback(async (rowId, field, value) => {
+    setRows((prev) => prev.map((r) =>
+      r.property_id === rowId ? { ...r, [field]: value } : r
+    ));
+    try {
+      await updateProperty(rowId, { [field]: value });
+    } catch (err) {
+      addToast(`Photo save failed: ${err.message}`, 'error', 4000);
+    }
+  }, [addToast]);
+
   const allColumnsWithActivity = useMemo(() => {
     const idx = ALL_COLUMNS.findIndex(c => c.defaultVisible === false);
+    const photoCol = {
+      key: 'building_image_path', label: 'Photo', defaultWidth: 140, editable: false,
+      renderCell: (val, row) => (
+        <PhotoUploadCell url={val} rowId={row.property_id} onSave={handlePhotoSave} folder="properties" field="building_image_path" />
+      ),
+    };
     const activityCol = {
       key: 'linked_interactions', label: 'Activity', defaultWidth: 220,
       renderCell: (val, row) => (
@@ -197,9 +215,12 @@ export default function Properties({ onCountChange }) {
       }
       return col;
     });
-    result.splice(idx >= 0 ? idx : result.length, 0, activityCol);
+    // Insert photo after address (index 1)
+    result.splice(1, 0, photoCol);
+    const hiddenIdx = result.findIndex(c => c.defaultVisible === false);
+    result.splice(hiddenIdx >= 0 ? hiddenIdx : result.length, 0, activityCol);
     return result;
-  }, [cityOptions]);
+  }, [cityOptions, handlePhotoSave]);
 
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('properties', allColumnsWithActivity);
   const linked = useLinkedRecords('properties', rows);

@@ -71,7 +71,7 @@ const ALLOWED_COLS = {
     'repping', 'term', 'rate', 'sf', 'price', 'commission_rate',
     'gross_fee_potential', 'net_potential', 'close_date', 'important_date',
     'deal_dead_reason', 'notes', 'priority_deal',
-    'increases', 'escrow_url', 'surveys_brochures_url',
+    'increases', 'escrow_url', 'surveys_brochures_url', 'photo_url',
     'run_by', 'other_broker', 'industry', 'deadline', 'fell_through_reason',
     'created_at', 'modified', 'lead_count',
     'team_gross_computed', 'jr_gross_computed', 'jr_net_computed', 'missy_net_computed',
@@ -224,9 +224,7 @@ export async function getProperty(id) {
 export async function updateProperty(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'properties');
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE properties SET ${sets.join(', ')}, last_modified = NOW() WHERE property_id = $1 RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+  return db.update('properties', id, fields);
 }
 
 export async function getPropertyContacts(propertyId) {
@@ -298,9 +296,7 @@ export async function getContact(id) {
 export async function updateContact(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'contacts');
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE contacts SET ${sets.join(', ')}, modified = NOW() WHERE contact_id = $1 RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+  return db.update('contacts', id, fields);
 }
 
 // ============================================================
@@ -335,9 +331,7 @@ export async function getCompany(id) {
 export async function updateCompany(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'companies');
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE companies SET ${sets.join(', ')}, modified = NOW() WHERE company_id = $1 RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+  return db.update('companies', id, fields);
 }
 
 // ============================================================
@@ -371,9 +365,7 @@ export async function getDeal(id) {
 export async function updateDeal(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'deals');
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE deals SET ${sets.join(', ')}, modified = NOW() WHERE deal_id = $1 RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+  return db.update('deals', id, fields);
 }
 
 // ============================================================
@@ -415,9 +407,7 @@ export async function getInteraction(id) {
 export async function updateInteraction(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'interactions');
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE interactions SET ${sets.join(', ')} WHERE interaction_id = $1 RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+  return db.update('interactions', id, fields);
 }
 
 export async function getInteractionContacts(interactionId) {
@@ -767,9 +757,7 @@ export async function getCampaign(id) {
 export async function updateCampaign(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'campaigns');
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE campaigns SET ${sets.join(', ')}, modified = NOW() WHERE campaign_id = $1 RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+  return db.update('campaigns', id, fields);
 }
 
 // ============================================================
@@ -816,9 +804,7 @@ export async function createActionItem(fields) {
 export async function updateActionItem(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'action_items');
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE action_items SET ${sets.join(', ')}, updated_at = NOW() WHERE action_item_id = $1 RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+  return db.update('action_items', id, fields);
 }
 
 export async function deleteActionItem(id) {
@@ -941,9 +927,7 @@ export async function createLeaseComp(fields) {
 export async function updateLeaseComp(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'lease_comps');
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE lease_comps SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1 RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+  return db.update('lease_comps', id, fields);
 }
 
 export async function deleteLeaseComp(id) {
@@ -1002,9 +986,7 @@ export async function createSaleComp(fields) {
 export async function updateSaleComp(id, fields) {
   const keys = Object.keys(fields);
   validateFieldKeys(keys, 'sale_comps');
-  const sets = keys.map((k, i) => `${k} = $${i + 2}`);
-  const sql = `UPDATE sale_comps SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $1 RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+  return db.update('sale_comps', id, fields);
 }
 
 export async function deleteSaleComp(id) {

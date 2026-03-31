@@ -48,6 +48,13 @@ export const db = {
     if (isElectron()) return window.iecrm.db.query(sql, params);
     return httpPost('/api/db/query', { sql, params });
   },
+  update: (entity, id, fields) => {
+    if (isElectron()) return window.iecrm.db.query(
+      `UPDATE ${entity} SET ${Object.keys(fields).map((k,i) => `${k} = $${i+2}`).join(', ')} WHERE ${entity.slice(0,-1)}_id = $1 RETURNING *`,
+      [id, ...Object.values(fields)]
+    );
+    return httpPost('/api/db/update', { entity, id, fields });
+  },
   status: () => {
     if (isElectron()) return window.iecrm.db.status();
     return httpGet('/api/db/status');

@@ -153,6 +153,11 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
         </button>
       </SlideOverHeader>
 
+      <DealPhoto url={deal.photo_url} dealId={resolvedId} onSaved={(url) => {
+        setDeal(prev => ({ ...prev, photo_url: url }));
+        updateDeal(resolvedId, { photo_url: url }).then(() => onRefresh?.());
+      }} />
+
       <Section title="Deal Info">
         <div className="grid grid-cols-2 gap-x-4">
           <InlineField label="Deal Name" value={deal.deal_name} field="deal_name" onSave={saveField} />
@@ -210,6 +215,87 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
       <div className="relative w-[520px] bg-crm-panel glass-liquid border-l border-crm-border h-full overflow-y-auto animate-slide-in-right" onClick={(e) => e.stopPropagation()}>
         {content}
       </div>
+    </div>
+  );
+}
+
+const API = import.meta.env.VITE_API_URL || 'http://localhost:3001';
+
+function DealPhoto({ url, dealId, onSaved }) {
+  const [uploading, setUploading] = React.useState(false);
+  const fileRef = React.useRef(null);
+
+  const handleUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const token = localStorage.getItem('crm-auth-token');
+      const res = await fetch(`${API}/api/files/upload?folder=deals`, {
+        method: 'POST',
+        body: form,
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error('Upload failed');
+      const data = await res.json();
+      onSaved(data.url);
+    } catch (err) {
+      console.error('[DealPhoto] Upload error:', err);
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  if (uploading) {
+    return (
+      <div className="px-5 py-3 flex items-center gap-2 text-crm-muted text-xs">
+        <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+          <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" className="opacity-25" />
+          <path d="M4 12a8 8 0 018-8" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="opacity-75" />
+        </svg>
+        Uploading photo...
+      </div>
+    );
+  }
+
+  return (
+    <div className="px-5 py-3">
+      {url ? (
+        <div className="relative group">
+          <img
+            src={url}
+            alt=""
+            className="w-full max-h-48 object-cover rounded-lg border border-crm-border cursor-pointer hover:opacity-90 transition-opacity"
+            onClick={() => window.open(url, '_blank')}
+          />
+          <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="px-2 py-1 text-[10px] rounded bg-crm-card/90 border border-crm-border text-crm-text hover:bg-crm-hover transition-colors"
+            >
+              Change
+            </button>
+            <button
+              onClick={() => onSaved(null)}
+              className="px-2 py-1 text-[10px] rounded bg-crm-card/90 border border-crm-border text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => fileRef.current?.click()}
+          className="w-full py-4 rounded-lg border border-dashed border-crm-border text-crm-muted hover:border-crm-accent hover:text-crm-accent transition-colors text-xs flex items-center justify-center gap-1"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+          Add deal photo
+        </button>
+      )}
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleUpload} />
     </div>
   );
 }

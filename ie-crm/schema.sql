@@ -303,7 +303,8 @@ CREATE TABLE IF NOT EXISTS deals (
   other_broker TEXT,
   industry TEXT,
   deadline DATE,
-  fell_through_reason TEXT
+  fell_through_reason TEXT,
+  photo_url TEXT
 );
 
 -- ---- debt_stress ----

@@ -20,6 +20,7 @@ import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
+import PhotoUploadCell from '../components/shared/PhotoUploadCell';
 import { playDealSound } from '../utils/dealSound';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
@@ -140,8 +141,25 @@ export default function Deals({ onCountChange }) {
   const { formulas, evaluateFormulas } = useFormulaColumns('deals');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('deals');
 
+  const handlePhotoSave = useCallback(async (rowId, field, value) => {
+    setRows((prev) => prev.map((r) =>
+      r.deal_id === rowId ? { ...r, [field]: value } : r
+    ));
+    try {
+      await updateDeal(rowId, { [field]: value });
+    } catch (err) {
+      addToast(`Photo save failed: ${err.message}`, 'error', 4000);
+    }
+  }, [addToast]);
+
   const allColumnsWithActivity = useMemo(() => {
     const idx = ALL_COLUMNS.findIndex(c => c.defaultVisible === false);
+    const photoCol = {
+      key: 'photo_url', label: 'Photo', defaultWidth: 140, editable: false,
+      renderCell: (val, row) => (
+        <PhotoUploadCell url={val} rowId={row.deal_id} onSave={handlePhotoSave} />
+      ),
+    };
     const activityCol = {
       key: 'linked_interactions', label: 'Activity', defaultWidth: 220,
       renderCell: (val, row) => (
@@ -152,9 +170,13 @@ export default function Deals({ onCountChange }) {
       ),
     };
     const result = [...ALL_COLUMNS];
-    result.splice(idx >= 0 ? idx : result.length, 0, activityCol);
+    // Insert photo after deal_name (index 1)
+    result.splice(1, 0, photoCol);
+    // Insert activity before the first hidden-by-default column
+    const hiddenIdx = result.findIndex(c => c.defaultVisible === false);
+    result.splice(hiddenIdx >= 0 ? hiddenIdx : result.length, 0, activityCol);
     return result;
-  }, []);
+  }, [handlePhotoSave]);
 
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('deals', allColumnsWithActivity);
   const linked = useLinkedRecords('deals', rows);

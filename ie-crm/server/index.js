@@ -15,6 +15,7 @@ const { initChat, registerChatRoutes, triggerCouncilHoustonResponse } = require(
 const { mountAiRoutes } = require('./routes/ai');
 const { mountVerificationRoutes } = require('./routes/verification');
 const { mountContractRoutes } = require('./routes/contracts');
+const { uploadFile, deleteFile } = require('./services/fileUpload');
 
 // Load env
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
@@ -431,6 +432,97 @@ app.post('/api/db/query', async (req, res) => {
     // Don't expose internal error details in production
     const safeMessage = process.env.NODE_ENV === 'production' ? 'Query failed' : err.message;
     res.status(400).json({ error: safeMessage });
+  }
+});
+
+// ── Safe parameterized write endpoint (replaces raw SQL for mutations) ──
+const ENTITY_TABLES = {
+  properties:   { table: 'properties',   pk: 'property_id',    timestamp: 'last_modified' },
+  contacts:     { table: 'contacts',     pk: 'contact_id',     timestamp: 'modified' },
+  companies:    { table: 'companies',    pk: 'company_id',     timestamp: 'modified' },
+  deals:        { table: 'deals',        pk: 'deal_id',        timestamp: 'modified' },
+  interactions: { table: 'interactions', pk: 'interaction_id', timestamp: null },
+  campaigns:    { table: 'campaigns',    pk: 'campaign_id',    timestamp: 'modified' },
+  action_items: { table: 'action_items', pk: 'action_item_id', timestamp: 'updated_at' },
+  lease_comps:  { table: 'lease_comps',  pk: 'id',             timestamp: 'updated_at' },
+  sale_comps:   { table: 'sale_comps',   pk: 'id',             timestamp: 'updated_at' },
+};
+
+// Column whitelists per table (same as frontend ALLOWED_COLS)
+const SERVER_ALLOWED_COLS = {
+  deals: new Set([
+    'deal_name', 'deal_type', 'deal_source', 'status', 'repping', 'term', 'rate', 'sf',
+    'price', 'commission_rate', 'gross_fee_potential', 'net_potential', 'close_date',
+    'important_date', 'deal_dead_reason', 'notes', 'priority_deal', 'increases',
+    'escrow_url', 'surveys_brochures_url', 'photo_url', 'run_by', 'other_broker',
+    'industry', 'deadline', 'fell_through_reason', 'lead_count', 'tags', 'overflow',
+  ]),
+  properties: new Set([
+    'property_address', 'property_name', 'city', 'county', 'state', 'zip', 'rba',
+    'land_area_ac', 'land_sf', 'far', 'property_type', 'building_class', 'building_status',
+    'year_built', 'year_renovated', 'ceiling_ht', 'clear_ht', 'number_of_loading_docks',
+    'drive_ins', 'column_spacing', 'sprinklers', 'power', 'construction_material', 'zoning',
+    'features', 'last_sale_date', 'last_sale_price', 'price_psf', 'plsf', 'loan_amount',
+    'debt_date', 'holding_period_years', 'listing_asking_lease_rate', 'cap_rate',
+    'vacancy_pct', 'percent_leased', 'listing_status', 'listing_first_seen_date',
+    'owner_name', 'owner_phone', 'owner_email', 'owner_address', 'tenant_name',
+    'costar_url', 'google_maps_url', 'zoning_map_url', 'landvision_url',
+    'notes', 'tags', 'overflow', 'building_image_path',
+  ]),
+  contacts: new Set([
+    'full_name', 'first_name', 'last_name', 'email', 'phone', 'mobile', 'title',
+    'company_name', 'notes', 'city', 'tags', 'overflow', 'type', 'source',
+  ]),
+  companies: new Set([
+    'company_name', 'company_type', 'industry_type', 'website', 'sf', 'employees',
+    'revenue', 'company_growth', 'company_hq', 'lease_exp', 'lease_months_left',
+    'move_in_date', 'notes', 'city', 'tenant_sic', 'tenant_naics', 'suite', 'tags', 'overflow',
+  ]),
+  interactions: new Set([
+    'type', 'subject', 'date', 'notes', 'email_heading', 'email_body',
+    'follow_up', 'follow_up_notes', 'lead_source', 'lead_status', 'lead_interest',
+    'team_member', 'email_url', 'email_id',
+  ]),
+  campaigns: new Set([
+    'name', 'status', 'sent_date', 'subject', 'body', 'notes', 'tags',
+  ]),
+  action_items: new Set([
+    'title', 'description', 'status', 'priority', 'due_date', 'assigned_to', 'tags',
+  ]),
+};
+
+app.post('/api/db/update', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected' });
+  const { entity, id, fields } = req.body;
+  if (!entity || !id || !fields || typeof fields !== 'object') {
+    return res.status(400).json({ error: 'entity, id, and fields required' });
+  }
+  const meta = ENTITY_TABLES[entity];
+  if (!meta) return res.status(400).json({ error: `Unknown entity: ${entity}` });
+
+  const allowed = SERVER_ALLOWED_COLS[entity];
+  const keys = Object.keys(fields);
+  if (keys.length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+  // Validate all field names against whitelist
+  for (const k of keys) {
+    if (allowed && !allowed.has(k)) {
+      return res.status(400).json({ error: `Disallowed field "${k}" for ${entity}` });
+    }
+    if (!/^[a-z_][a-z0-9_]*$/.test(k)) {
+      return res.status(400).json({ error: `Invalid field name: ${k}` });
+    }
+  }
+
+  try {
+    const sets = keys.map((k, i) => `${k} = $${i + 2}`);
+    if (meta.timestamp) sets.push(`${meta.timestamp} = NOW()`);
+    const sql = `UPDATE ${meta.table} SET ${sets.join(', ')} WHERE ${meta.pk} = $1 RETURNING *`;
+    const result = await pool.query(sql, [id, ...Object.values(fields)]);
+    res.json({ rows: result.rows, rowCount: result.rowCount });
+  } catch (err) {
+    console.error(`[db/update] ${entity} error:`, err.message);
+    res.status(400).json({ error: err.message });
   }
 });
 
@@ -2561,41 +2653,47 @@ app.post('/v1/chat/completions', (req, res, next) => {
 // ============================================================
 registerChatRoutes(app);
 
-// POST /api/chat/upload — Vercel Blob (persistent) with local fallback
+// POST /api/files/upload — Generic file upload (Vercel Blob + local fallback)
+// Query param: ?folder=deals|properties|chat|general (default: general)
+app.post('/api/files/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+    const file = req.file;
+    const folder = req.query.folder || 'general';
+
+    // Read the temp file multer wrote to disk, then upload via shared service
+    const filePath = path.join(uploadsDir, file.filename);
+    const fileBuffer = fs.readFileSync(filePath);
+    const result = await uploadFile(fileBuffer, file.filename, folder, file.mimetype, file.size);
+
+    // Clean up multer's temp file if Blob upload succeeded (URL won't be local)
+    if (!result.url.startsWith('/uploads/')) {
+      try { fs.unlinkSync(filePath); } catch {}
+    }
+
+    res.json({ ...result, original_name: file.originalname });
+  } catch (err) {
+    console.error('[files] Upload error:', err.message);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
+// POST /api/chat/upload — Chat file upload (uses shared service, folder = "chat")
 app.post('/api/chat/upload', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const file = req.file;
 
-    // Try Vercel Blob first (persistent storage)
-    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
-    if (blobToken) {
-      try {
-        const { put } = require('@vercel/blob');
-        const filePath = path.join(uploadsDir, file.filename);
-        const fileBuffer = fs.readFileSync(filePath);
-        const blob = await put(`chat/${file.filename}`, fileBuffer, {
-          access: 'public',
-          contentType: file.mimetype,
-          token: blobToken,
-        });
-        // Clean up local file after uploading to Blob
-        fs.unlinkSync(filePath);
-        return res.json({
-          url: blob.url,
-          filename: file.originalname,
-          mime_type: file.mimetype,
-          size_bytes: file.size,
-        });
-      } catch (blobErr) {
-        console.error('[chat] Blob upload failed, falling back to local:', blobErr.message);
-        // Fall through to local storage
-      }
+    const filePath = path.join(uploadsDir, file.filename);
+    const fileBuffer = fs.readFileSync(filePath);
+    const result = await uploadFile(fileBuffer, file.filename, 'chat', file.mimetype, file.size);
+
+    if (!result.url.startsWith('/uploads/')) {
+      try { fs.unlinkSync(filePath); } catch {}
     }
 
-    // Fallback: local filesystem (dev only — ephemeral on Railway)
     res.json({
-      url: `/uploads/${file.filename}`,
+      url: result.url,
       filename: file.originalname,
       mime_type: file.mimetype,
       size_bytes: file.size,
