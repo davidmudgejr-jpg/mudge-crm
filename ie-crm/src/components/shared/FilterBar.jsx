@@ -21,7 +21,13 @@ function formatFilterPill(condition) {
     }
     case 'is_empty': return `${label} is empty`;
     case 'is_not_empty': return `${label} has value`;
-    case 'in': return `${label} in [${Array.isArray(value) ? value.join(', ') : value}]`;
+    case 'in': {
+      // For ID-based pivot filters, show a clean count instead of listing all UUIDs
+      if (column.endsWith('_id') && Array.isArray(value) && value.length > 3) {
+        return `${value.length} specific records`;
+      }
+      return `${label} is any of ${Array.isArray(value) ? value.join(', ') : value}`;
+    }
     default: return `${label} ${operator} ${value}`;
   }
 }
@@ -36,6 +42,7 @@ export default function FilterBar({
   activeViewId,
   onSaveAsView,
   children,
+  hasPivot = false,
 }) {
   const [naming, setNaming] = useState(false);
   const [viewName, setViewName] = useState('');
@@ -89,8 +96,8 @@ export default function FilterBar({
         + Add Filter
       </button>
 
-      {/* Save as View (when on "All" tab with active filters) */}
-      {!activeViewId && conditions.length > 0 && !naming && (
+      {/* Save as View (when on "All" tab with active filters or pivot) */}
+      {!activeViewId && (conditions.length > 0 || hasPivot) && !naming && (
         <button
           onClick={() => setNaming(true)}
           className="text-[10px] bg-crm-accent/80 text-white px-3 py-0.5 rounded-full font-medium hover:bg-crm-accent transition-colors"

@@ -130,7 +130,21 @@ export default function Contacts({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
-  const [pivotFilter, dismissPivot] = usePivotFilter('contacts');
+  const { pivotFilter, dismiss: dismissPivot, mergeFilters: mergePivotFilters } = usePivotFilter('contacts');
+
+  // Wrap view save to bake pivot IDs into the view's filters
+  const saveViewWithPivot = useCallback(async (name) => {
+    if (pivotFilter?.ids?.length) {
+      // Inject pivot IDs as an `in` filter before saving
+      view.updateFilters(mergePivotFilters(view.filters));
+    }
+    // Small delay to let updateFilters propagate to the view engine state
+    await new Promise(r => setTimeout(r, 50));
+    const result = await view.createNewView(name);
+    if (pivotFilter) dismissPivot(); // View now contains the IDs — pivot no longer needed
+    return result;
+  }, [pivotFilter, view, mergePivotFilters, dismissPivot]);
+
   const { formulas } = useFormulaColumns('contacts');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('contacts');
 
@@ -170,16 +184,10 @@ export default function Contacts({ onCountChange }) {
     try {
       // Pivot filter: contact_id IN (...) from cross-tab navigation
       if (pivotFilter?.ids?.length) {
-        const pivotWhere = `WHERE contact_id = ANY($1)`;
+        const pivotWhere = { whereClause: 'WHERE contact_id = ANY($1)', params: [pivotFilter.ids] };
         const [result, total] = await Promise.all([
-          queryWithFilters('contacts', {
-            whereClause: pivotWhere,
-            params: [pivotFilter.ids],
-            orderBy: view.sort.column,
-            order: view.sort.direction,
-            limit: 500,
-          }),
-          countWithFilters('contacts', {}),
+          queryWithFilters('contacts', { ...pivotWhere, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
+          countWithFilters('contacts', pivotWhere),
         ]);
         setRows(result.rows || []);
         setTotalCount(total);
@@ -188,22 +196,14 @@ export default function Contacts({ onCountChange }) {
         const filters = {};
         if (search) filters.search = search;
         if (filterType) filters.type = filterType;
-        const [result, total] = await Promise.all([
-          getContacts({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters }),
-          countWithFilters('contacts', {}),
-        ]);
+        const result = await getContacts({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
         setRows(result.rows || []);
-        setTotalCount(total);
+        setTotalCount(result.rows?.length || 0);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       } else {
         const [result, total] = await Promise.all([
-          queryWithFilters('contacts', {
-            ...view.sqlFilters,
-            orderBy: view.sort.column,
-            order: view.sort.direction,
-            limit: 500,
-          }),
-          countWithFilters('contacts', {}),
+          queryWithFilters('contacts', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
+          countWithFilters('contacts', view.sqlFilters || {}),
         ]);
         setRows(result.rows || []);
         setTotalCount(total);
@@ -388,8 +388,8 @@ export default function Contacts({ onCountChange }) {
         filters={view.filters}
         applyView={view.applyView}
         resetToAll={view.resetToAll}
-        saveView={view.saveView}
-        createNewView={view.createNewView}
+        saveView={pivotFilter ? saveViewWithPivot : view.saveView}
+        createNewView={pivotFilter ? saveViewWithPivot : view.createNewView}
         renameView={view.renameView}
         deleteView={view.deleteView}
         duplicateView={view.duplicateView}
@@ -404,7 +404,8 @@ export default function Contacts({ onCountChange }) {
         totalCount={totalCount}
         filteredCount={rows.length}
         activeViewId={view.activeViewId}
-        onSaveAsView={(name) => view.createNewView(name)}
+        onSaveAsView={(name) => pivotFilter ? saveViewWithPivot(name) : view.createNewView(name)}
+        hasPivot={!!pivotFilter}
       >
         {pivotFilter && (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-md bg-purple-500/15 text-purple-400 border border-purple-500/25">
@@ -424,7 +425,7 @@ export default function Contacts({ onCountChange }) {
       <NewViewModal
         isOpen={newViewModalOpen}
         onClose={() => setNewViewModalOpen(false)}
-        onSave={(name) => view.createNewView(name)}
+        onSave={(name) => pivotFilter ? saveViewWithPivot(name) : view.createNewView(name)}
         filters={view.filters}
         filterLogic={view.filterLogic}
         sort={view.sort}

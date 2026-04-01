@@ -19,6 +19,10 @@ export function compileFilters(filters, columnDefs, startIndex = 1) {
   const allowedColumns = new Set(
     columnDefs.filter(c => c.filterable !== false && !c.key.startsWith('linked_')).map(c => c.key)
   );
+  // Always allow primary key columns (for pivot views that filter by ID)
+  ['contact_id', 'property_id', 'deal_id', 'company_id', 'interaction_id', 'campaign_id'].forEach(
+    pk => allowedColumns.add(pk)
+  );
 
   if (Array.isArray(filters)) {
     return compileConditionList(filters, allowedColumns, 'AND', startIndex);

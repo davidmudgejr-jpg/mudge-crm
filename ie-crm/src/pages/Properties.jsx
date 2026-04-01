@@ -172,7 +172,17 @@ export default function Properties({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
-  const [pivotFilter, dismissPivot] = usePivotFilter('properties');
+  const { pivotFilter, dismiss: dismissPivot, mergeFilters: mergePivotFilters } = usePivotFilter('properties');
+
+  const saveViewWithPivot = useCallback(async (name) => {
+    if (pivotFilter?.ids?.length) {
+      view.updateFilters(mergePivotFilters(view.filters));
+    }
+    await new Promise(r => setTimeout(r, 50));
+    const result = await view.createNewView(name);
+    if (pivotFilter) dismissPivot();
+    return result;
+  }, [pivotFilter, view, mergePivotFilters, dismissPivot]);
   const [cityOptions, setCityOptions] = useState([]);
 
   // Fetch distinct cities once for dropdown filter
@@ -258,15 +268,15 @@ export default function Properties({ onCountChange }) {
     try {
       // Pivot filter overrides everything
       if (pivotFilter?.ids?.length) {
+        const pivotWhere = { whereClause: 'WHERE property_id = ANY($1)', params: [pivotFilter.ids] };
         const [result, total] = await Promise.all([
           queryWithFilters('properties', {
-            whereClause: 'WHERE property_id = ANY($1)',
-            params: [pivotFilter.ids],
+            ...pivotWhere,
             orderBy: view.sort.column,
             order: view.sort.direction,
             limit: 500,
           }),
-          countWithFilters('properties', {}),
+          countWithFilters('properties', pivotWhere),
         ]);
         setRows(result.rows || []);
         setTotalCount(total);
@@ -309,7 +319,7 @@ export default function Properties({ onCountChange }) {
             order: view.sort.direction,
             limit: 500,
           }),
-          countWithFilters('properties', {}),
+          countWithFilters('properties', mergedFilters),
         ]);
         setRows(result.rows || []);
         setTotalCount(total);
@@ -505,8 +515,8 @@ export default function Properties({ onCountChange }) {
         filters={view.filters}
         applyView={(id) => { setSearch(''); setFilterType(''); setFilterPriority(''); view.applyView(id); }}
         resetToAll={() => { setSearch(''); setFilterType(''); setFilterPriority(''); view.resetToAll(); }}
-        saveView={view.saveView}
-        createNewView={view.createNewView}
+        saveView={pivotFilter ? saveViewWithPivot : view.saveView}
+        createNewView={pivotFilter ? saveViewWithPivot : view.createNewView}
         renameView={view.renameView}
         deleteView={view.deleteView}
         duplicateView={view.duplicateView}
@@ -521,7 +531,8 @@ export default function Properties({ onCountChange }) {
         totalCount={totalCount}
         filteredCount={rows.length}
         activeViewId={view.activeViewId}
-        onSaveAsView={(name) => view.createNewView(name)}
+        onSaveAsView={(name) => pivotFilter ? saveViewWithPivot(name) : view.createNewView(name)}
+        hasPivot={!!pivotFilter}
       >
         {pivotFilter && (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-md bg-purple-500/15 text-purple-400 border border-purple-500/25">
@@ -544,7 +555,7 @@ export default function Properties({ onCountChange }) {
       <NewViewModal
         isOpen={newViewModalOpen}
         onClose={() => setNewViewModalOpen(false)}
-        onSave={(name) => view.createNewView(name)}
+        onSave={(name) => pivotFilter ? saveViewWithPivot(name) : view.createNewView(name)}
         filters={view.filters}
         filterLogic={view.filterLogic}
         sort={view.sort}

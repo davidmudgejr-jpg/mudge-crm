@@ -46,22 +46,14 @@ export default function Interactions({ onCountChange }) {
         const filters = {};
         if (search) filters.search = search;
         if (filterType) filters.type = filterType;
-        const [result, total] = await Promise.all([
-          getInteractions({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters }),
-          countWithFilters('interactions', {}),
-        ]);
+        const result = await getInteractions({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
         setRows(result.rows || []);
-        setTotalCount(total);
+        setTotalCount(result.rows?.length || 0);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       } else {
         const [result, total] = await Promise.all([
-          queryWithFilters('interactions', {
-            ...view.sqlFilters,
-            orderBy: view.sort.column,
-            order: view.sort.direction,
-            limit: 500,
-          }),
-          countWithFilters('interactions', {}),
+          queryWithFilters('interactions', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
+          countWithFilters('interactions', view.sqlFilters || {}),
         ]);
         setRows(result.rows || []);
         setTotalCount(total);

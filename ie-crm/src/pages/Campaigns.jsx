@@ -304,7 +304,7 @@ export default function Campaigns({ onCountChange }) {
             order: view.sort.direction,
             limit: 500,
           }),
-          countWithFilters('campaigns', {}),
+          countWithFilters('campaigns', view.sqlFilters || {}),
         ]);
         setRows(result.rows || []);
         setTotalCount(total);

@@ -120,22 +120,14 @@ export default function Companies({ onCountChange }) {
     try {
       if (search) {
         const filters = { search };
-        const [result, total] = await Promise.all([
-          getCompanies({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters }),
-          countWithFilters('companies', {}),
-        ]);
+        const result = await getCompanies({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
         setRows(result.rows || []);
-        setTotalCount(total);
+        setTotalCount(result.rows?.length || 0);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       } else {
         const [result, total] = await Promise.all([
-          queryWithFilters('companies', {
-            ...view.sqlFilters,
-            orderBy: view.sort.column,
-            order: view.sort.direction,
-            limit: 500,
-          }),
-          countWithFilters('companies', {}),
+          queryWithFilters('companies', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
+          countWithFilters('companies', view.sqlFilters || {}),
         ]);
         setRows(result.rows || []);
         setTotalCount(total);
