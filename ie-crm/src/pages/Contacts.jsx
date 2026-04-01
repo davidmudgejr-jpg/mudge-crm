@@ -170,11 +170,13 @@ export default function Contacts({ onCountChange }) {
         const filters = {};
         if (search) filters.search = search;
         if (filterType) filters.type = filterType;
-        const result = await getContacts({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        const [result, total] = await Promise.all([
+          getContacts({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters }),
+          countWithFilters('contacts', {}),
+        ]);
         setRows(result.rows || []);
-        const count = result.rows?.length || 0;
-        setTotalCount(count);
-        if (onCountChange) onCountChange(count);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       } else {
         const [result, total] = await Promise.all([
           queryWithFilters('contacts', {

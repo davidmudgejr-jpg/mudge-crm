@@ -82,8 +82,8 @@ const OPERATOR_SQL = {
   lt:           (col, i) => ({ sql: `${col} < $${i}`, count: 1 }),
   lte:          (col, i) => ({ sql: `${col} <= $${i}`, count: 1 }),
   between:      (col, i) => ({ sql: `${col} BETWEEN $${i} AND $${i + 1}`, count: 2 }),
-  is_empty:     (col)    => ({ sql: `${col} IS NULL`, count: 0 }),
-  is_not_empty: (col)    => ({ sql: `${col} IS NOT NULL`, count: 0 }),
+  is_empty:     (col)    => ({ sql: `(${col} IS NULL OR CAST(${col} AS TEXT) = '')`, count: 0 }),
+  is_not_empty: (col)    => ({ sql: `(${col} IS NOT NULL AND CAST(${col} AS TEXT) != '')`, count: 0 }),
   in:           (col, i) => ({ sql: `${col} = ANY($${i})`, count: 1 }),
   // Date-friendly aliases
   before:       (col, i) => ({ sql: `${col} < $${i}`, count: 1 }),

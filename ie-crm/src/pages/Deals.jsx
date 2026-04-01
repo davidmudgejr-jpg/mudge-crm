@@ -198,11 +198,13 @@ export default function Deals({ onCountChange }) {
     try {
       if (search) {
         const filters = { search };
-        const result = await getDeals({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        const [result, total] = await Promise.all([
+          getDeals({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters }),
+          countWithFilters('deals', {}),
+        ]);
         setRows(result.rows || []);
-        const count = result.rows?.length || 0;
-        setTotalCount(count);
-        if (onCountChange) onCountChange(count);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       } else {
         const [result, total] = await Promise.all([
           queryWithFilters('deals', {

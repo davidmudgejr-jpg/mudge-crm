@@ -119,6 +119,8 @@ const OPERATORS_BY_TYPE = {
     { value: 'lt', label: '<' },
     { value: 'lte', label: '\u2264' },
     { value: 'between', label: 'between' },
+    { value: 'is_empty', label: 'is empty' },
+    { value: 'is_not_empty', label: 'is not empty' },
   ],
   date: [
     { value: 'equals', label: 'equals' },
@@ -139,6 +141,8 @@ const OPERATORS_BY_TYPE = {
     { value: 'equals', label: 'equals' },
     { value: 'not_equals', label: 'not equals' },
     { value: 'in', label: 'is any of' },
+    { value: 'is_empty', label: 'is empty' },
+    { value: 'is_not_empty', label: 'is not empty' },
   ],
 };
 

@@ -292,7 +292,7 @@ export default function Properties({ onCountChange }) {
           order: view.sort.direction,
           limit: 500,
         }),
-        countWithFilters('properties', mergedFilters),
+        countWithFilters('properties', {}),
       ]);
       setRows(result.rows || []);
       setTotalCount(total);

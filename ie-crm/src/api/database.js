@@ -167,6 +167,7 @@ function validateJunction(table, cols) {
 // ============================================================
 const VALID_VIEW_TABLES = new Set([
   'properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns',
+  'lease_comps', 'sale_comps', 'action_items',
 ]);
 
 // Map entity tables to their computed VIEWs (for formula columns)

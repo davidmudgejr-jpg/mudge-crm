@@ -114,13 +114,14 @@ export default function Companies({ onCountChange }) {
     setLoading(true);
     try {
       if (search) {
-        const filters = {};
-        if (search) filters.search = search;
-        const result = await getCompanies({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        const filters = { search };
+        const [result, total] = await Promise.all([
+          getCompanies({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters }),
+          countWithFilters('companies', {}),
+        ]);
         setRows(result.rows || []);
-        const count = result.rows?.length || 0;
-        setTotalCount(count);
-        if (onCountChange) onCountChange(count);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       } else {
         const [result, total] = await Promise.all([
           queryWithFilters('companies', {

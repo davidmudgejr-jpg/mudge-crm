@@ -293,7 +293,8 @@ export default function Campaigns({ onCountChange }) {
         });
 
         setRows(filtered);
-        setTotalCount(filtered.length);
+        // Keep totalCount as unfiltered total
+        setTotalCount((result.rows || []).length);
         if (onCountChange) onCountChange(filtered.length);
       } else {
         const [result, total] = await Promise.all([

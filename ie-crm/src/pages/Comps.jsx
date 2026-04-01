@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getLeaseComps, getSaleComps, createLeaseComp, createSaleComp } from '../api/database';
+import { getLeaseComps, getSaleComps, createLeaseComp, createSaleComp, countWithFilters } from '../api/database';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import CrmTable from '../components/shared/CrmTable';
@@ -166,15 +166,18 @@ export default function Comps({ onCountChange }) {
       if (search) filters.search = search;
       if (filterType) filters.property_type = filterType;
 
-      const result = activeTab === 'lease'
-        ? await getLeaseComps({ limit: 500, orderBy, order, filters })
-        : await getSaleComps({ limit: 500, orderBy, order, filters });
+      const table = activeTab === 'lease' ? 'lease_comps' : 'sale_comps';
+      const [result, total] = await Promise.all([
+        activeTab === 'lease'
+          ? getLeaseComps({ limit: 500, orderBy, order, filters })
+          : getSaleComps({ limit: 500, orderBy, order, filters }),
+        countWithFilters(table, {}),
+      ]);
 
       const resultRows = result.rows || [];
       setRows(resultRows);
-      const count = resultRows.length;
-      setTotalCount(count);
-      if (onCountChange) onCountChange(count);
+      setTotalCount(total);
+      if (onCountChange) onCountChange(resultRows.length);
     } catch (err) {
       console.error(`Failed to fetch ${activeTab} comps:`, err);
       setRows([]);
