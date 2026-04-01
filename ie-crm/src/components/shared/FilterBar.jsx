@@ -35,6 +35,7 @@ export default function FilterBar({
   filteredCount,
   activeViewId,
   onSaveAsView,
+  children,
 }) {
   const [naming, setNaming] = useState(false);
   const [viewName, setViewName] = useState('');
@@ -120,6 +121,8 @@ export default function FilterBar({
       )}
 
       <div className="flex-1" />
+
+      {children && <div className="flex items-center gap-1.5">{children}</div>}
 
       {totalCount != null && filteredCount != null && (
         <span className="text-[10px] text-crm-muted/60">

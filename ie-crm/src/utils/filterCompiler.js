@@ -15,9 +15,9 @@ export function compileFilters(filters, columnDefs, startIndex = 1) {
   if (Array.isArray(filters) && filters.length === 0) return EMPTY;
   if (typeof filters !== 'object') return EMPTY;
 
-  // Build column whitelist from definitions
+  // Build column whitelist from definitions (exclude linked_* columns — filtered client-side)
   const allowedColumns = new Set(
-    columnDefs.filter(c => c.filterable !== false).map(c => c.key)
+    columnDefs.filter(c => c.filterable !== false && !c.key.startsWith('linked_')).map(c => c.key)
   );
 
   if (Array.isArray(filters)) {

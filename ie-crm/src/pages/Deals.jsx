@@ -21,6 +21,9 @@ import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import PhotoUploadCell from '../components/shared/PhotoUploadCell';
+import PivotButton from '../components/shared/PivotButton';
+import usePivotFilter from '../hooks/usePivotFilter';
+import { applyLinkedFilters, splitLinkedFilters } from '../utils/linkedFilter';
 import { playDealSound } from '../utils/dealSound';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
@@ -112,14 +115,14 @@ const ALL_COLUMNS = [
   },
   { key: 'jr_gross_computed', label: 'Jr Gross', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', defaultVisible: true },
   { key: 'jr_net_computed', label: 'Jr Net', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', defaultVisible: true },
-  // Linked record columns
-  { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false,
+  // Linked record columns (filterable: is_empty / is_not_empty applied client-side)
+  { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="property" labelKey="property_address" /> },
-  { key: 'linked_contacts', label: 'Contacts', defaultWidth: 150, defaultVisible: false,
+  { key: 'linked_contacts', label: 'Contacts', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
-  { key: 'linked_companies', label: 'Companies', defaultWidth: 150, defaultVisible: false,
+  { key: 'linked_companies', label: 'Companies', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
-  { key: 'linked_campaigns', label: 'Email Campaign', defaultWidth: 180, defaultVisible: false,
+  { key: 'linked_campaigns', label: 'Email Campaign', defaultWidth: 180, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="campaign" labelKey="campaign_name" /> },
 ];
 
@@ -138,6 +141,7 @@ export default function Deals({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
+  const [pivotFilter, dismissPivot] = usePivotFilter('deals');
   const { formulas, evaluateFormulas } = useFormulaColumns('deals');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('deals');
 
@@ -183,7 +187,7 @@ export default function Deals({ onCountChange }) {
 
   const augmentedRows = useMemo(() => {
     if (!rows.length) return rows;
-    return rows.map((row) => ({
+    const augmented = rows.map((row) => ({
       ...row,
       linked_properties: linked.linked_properties?.[row.deal_id] || [],
       linked_contacts: linked.linked_contacts?.[row.deal_id] || [],
@@ -191,12 +195,28 @@ export default function Deals({ onCountChange }) {
       linked_campaigns: linked.linked_campaigns?.[row.deal_id] || [],
       linked_interactions: linked.linked_interactions?.[row.deal_id] || [],
     }));
-  }, [rows, linked]);
+    const { linkedFilters } = splitLinkedFilters(view.filters);
+    return linkedFilters.length > 0 ? applyLinkedFilters(augmented, linkedFilters) : augmented;
+  }, [rows, linked, view.filters]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      if (search) {
+      if (pivotFilter?.ids?.length) {
+        const [result, total] = await Promise.all([
+          queryWithFilters('deals', {
+            whereClause: 'WHERE deal_id = ANY($1)',
+            params: [pivotFilter.ids],
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('deals', {}),
+        ]);
+        setRows(result.rows || []);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
+      } else if (search) {
         const filters = { search };
         const [result, total] = await Promise.all([
           getDeals({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters }),
@@ -225,7 +245,7 @@ export default function Deals({ onCountChange }) {
     } finally {
       setLoading(false);
     }
-  }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
+  }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates('deal', fetchData);
@@ -387,7 +407,17 @@ export default function Deals({ onCountChange }) {
         filteredCount={rows.length}
         activeViewId={view.activeViewId}
         onSaveAsView={(name) => view.createNewView(name)}
-      />
+      >
+        {pivotFilter && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-md bg-purple-500/15 text-purple-400 border border-purple-500/25">
+            {pivotFilter.label} ({pivotFilter.ids.length})
+            <button onClick={dismissPivot} className="ml-0.5 hover:text-purple-200">×</button>
+          </span>
+        )}
+        <PivotButton rows={augmentedRows} linkedKey="linked_contacts" idField="contact_id" target="contacts" label="Contacts" sourceLabel={view.activeView?.view_name ? `From Deals: ${view.activeView.view_name}` : 'From Deals'} />
+        <PivotButton rows={augmentedRows} linkedKey="linked_properties" idField="property_id" target="properties" label="Properties" sourceLabel={view.activeView?.view_name ? `From Deals: ${view.activeView.view_name}` : 'From Deals'} />
+        <PivotButton rows={augmentedRows} linkedKey="linked_companies" idField="company_id" target="companies" label="Companies" sourceLabel={view.activeView?.view_name ? `From Deals: ${view.activeView.view_name}` : 'From Deals'} />
+      </FilterBar>
       <FilterBuilder
         isOpen={filterBuilderOpen}
         onClose={() => {

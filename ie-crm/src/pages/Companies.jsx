@@ -20,6 +20,8 @@ import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
+import PivotButton from '../components/shared/PivotButton';
+import { applyLinkedFilters, splitLinkedFilters } from '../utils/linkedFilter';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
 function formatRevenue(val) {
@@ -53,12 +55,12 @@ const ALL_COLUMNS = [
   { key: 'tenant_naics', label: 'NAICS', defaultWidth: 80, defaultVisible: false },
   { key: 'suite', label: 'Suite', defaultWidth: 80, defaultVisible: false },
   { key: 'notes', label: 'Notes', defaultWidth: 200, defaultVisible: false },
-  // Linked record columns
-  { key: 'linked_contacts', label: 'Contacts', defaultWidth: 150, defaultVisible: false,
+  // Linked record columns (filterable: is_empty / is_not_empty applied client-side)
+  { key: 'linked_contacts', label: 'Contacts', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
-  { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false,
+  { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="property" labelKey="property_address" /> },
-  { key: 'linked_deals', label: 'Deals', defaultWidth: 150, defaultVisible: false,
+  { key: 'linked_deals', label: 'Deals', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="deal" labelKey="deal_name" /> },
 ];
 
@@ -101,14 +103,17 @@ export default function Companies({ onCountChange }) {
 
   const augmentedRows = useMemo(() => {
     if (!rows.length) return rows;
-    return rows.map((row) => ({
+    const augmented = rows.map((row) => ({
       ...row,
       linked_contacts: linked.linked_contacts?.[row.company_id] || [],
       linked_properties: linked.linked_properties?.[row.company_id] || [],
       linked_deals: linked.linked_deals?.[row.company_id] || [],
       linked_interactions: linked.linked_interactions?.[row.company_id] || [],
     }));
-  }, [rows, linked]);
+    // Apply client-side linked record filters (is_empty / is_not_empty on linked columns)
+    const { linkedFilters } = splitLinkedFilters(view.filters);
+    return linkedFilters.length > 0 ? applyLinkedFilters(augmented, linkedFilters) : augmented;
+  }, [rows, linked, view.filters]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -302,7 +307,11 @@ export default function Companies({ onCountChange }) {
         filteredCount={rows.length}
         activeViewId={view.activeViewId}
         onSaveAsView={(name) => view.createNewView(name)}
-      />
+      >
+        <PivotButton rows={augmentedRows} linkedKey="linked_contacts" idField="contact_id" target="contacts" label="Contacts" sourceLabel={view.activeView?.view_name ? `From Companies: ${view.activeView.view_name}` : 'From Companies'} />
+        <PivotButton rows={augmentedRows} linkedKey="linked_properties" idField="property_id" target="properties" label="Properties" sourceLabel={view.activeView?.view_name ? `From Companies: ${view.activeView.view_name}` : 'From Companies'} />
+        <PivotButton rows={augmentedRows} linkedKey="linked_deals" idField="deal_id" target="deals" label="Deals" sourceLabel={view.activeView?.view_name ? `From Companies: ${view.activeView.view_name}` : 'From Companies'} />
+      </FilterBar>
       <FilterBuilder
         isOpen={filterBuilderOpen}
         onClose={() => { setFilterBuilderOpen(false); if (reopenNewViewAfterFilter) { setReopenNewViewAfterFilter(false); setNewViewModalOpen(true); } }}

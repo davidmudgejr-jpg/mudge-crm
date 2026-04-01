@@ -20,6 +20,7 @@ import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
+import usePivotFilter from '../hooks/usePivotFilter';
 import { bulkOps } from '../api/bridge';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
@@ -129,6 +130,7 @@ export default function Contacts({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
+  const [pivotFilter, dismissPivot] = usePivotFilter('contacts');
   const { formulas } = useFormulaColumns('contacts');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('contacts');
 
@@ -166,7 +168,23 @@ export default function Contacts({ onCountChange }) {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      if (search || filterType) {
+      // Pivot filter: contact_id IN (...) from cross-tab navigation
+      if (pivotFilter?.ids?.length) {
+        const pivotWhere = `WHERE contact_id = ANY($1)`;
+        const [result, total] = await Promise.all([
+          queryWithFilters('contacts', {
+            whereClause: pivotWhere,
+            params: [pivotFilter.ids],
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('contacts', {}),
+        ]);
+        setRows(result.rows || []);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
+      } else if (search || filterType) {
         const filters = {};
         if (search) filters.search = search;
         if (filterType) filters.type = filterType;
@@ -197,7 +215,7 @@ export default function Contacts({ onCountChange }) {
     } finally {
       setLoading(false);
     }
-  }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
+  }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates('contact', fetchData);
@@ -387,7 +405,14 @@ export default function Contacts({ onCountChange }) {
         filteredCount={rows.length}
         activeViewId={view.activeViewId}
         onSaveAsView={(name) => view.createNewView(name)}
-      />
+      >
+        {pivotFilter && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-md bg-purple-500/15 text-purple-400 border border-purple-500/25">
+            {pivotFilter.label} ({pivotFilter.ids.length})
+            <button onClick={dismissPivot} className="ml-0.5 hover:text-purple-200">×</button>
+          </span>
+        )}
+      </FilterBar>
       <FilterBuilder
         isOpen={filterBuilderOpen}
         onClose={() => { setFilterBuilderOpen(false); if (reopenNewViewAfterFilter) { setReopenNewViewAfterFilter(false); setNewViewModalOpen(true); } }}

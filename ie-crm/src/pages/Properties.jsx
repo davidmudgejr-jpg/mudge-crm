@@ -20,6 +20,9 @@ import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import PhotoUploadCell from '../components/shared/PhotoUploadCell';
+import PivotButton from '../components/shared/PivotButton';
+import usePivotFilter from '../hooks/usePivotFilter';
+import { applyLinkedFilters, splitLinkedFilters } from '../utils/linkedFilter';
 import { bulkOps } from '../api/bridge';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
@@ -123,23 +126,23 @@ const ALL_COLUMNS = [
   { key: 'building_status', label: 'Building Status', defaultWidth: 120, type: 'select', filterable: true, editType: 'select', editOptions: ['Existing', 'Under Construction', 'Proposed', 'Final Planning', 'Demolished', 'Abandoned'], filterOptions: ['Existing', 'Under Construction', 'Proposed', 'Final Planning', 'Demolished', 'Abandoned'], defaultVisible: false },
   { key: 'listing_first_seen_date', label: 'Listed Since', defaultWidth: 100, type: 'date', filterable: true, format: 'date', defaultVisible: false },
   { key: 'listing_url', label: 'Listing URL', defaultWidth: 80, defaultVisible: false, format: 'url' },
-  // Linked record columns — role-specific
-  { key: 'linked_owner_contacts', label: 'Owner Contact', defaultWidth: 160, defaultVisible: true,
+  // Linked record columns — role-specific (filterable: is_empty / is_not_empty applied client-side)
+  { key: 'linked_owner_contacts', label: 'Owner Contact', defaultWidth: 160, defaultVisible: true, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
-  { key: 'linked_broker_contacts', label: 'Broker Contact', defaultWidth: 160, defaultVisible: false,
+  { key: 'linked_broker_contacts', label: 'Broker Contact', defaultWidth: 160, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
-  { key: 'linked_tenant_companies', label: 'Company Tenants', defaultWidth: 160, defaultVisible: true,
+  { key: 'linked_tenant_companies', label: 'Company Tenants', defaultWidth: 160, defaultVisible: true, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
-  { key: 'linked_owner_companies', label: 'Company Owner', defaultWidth: 160, defaultVisible: false,
+  { key: 'linked_owner_companies', label: 'Company Owner', defaultWidth: 160, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
-  { key: 'linked_leasing_companies', label: 'Leasing Company', defaultWidth: 160, defaultVisible: false,
+  { key: 'linked_leasing_companies', label: 'Leasing Company', defaultWidth: 160, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
-  { key: 'linked_deals', label: 'Deals', defaultWidth: 150, defaultVisible: false,
+  { key: 'linked_deals', label: 'Deals', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="deal" labelKey="deal_name" /> },
-  // Generic (all roles) — for power users who want unfiltered view
-  { key: 'linked_contacts', label: 'All Contacts', defaultWidth: 150, defaultVisible: false,
+  // Generic (all roles)
+  { key: 'linked_contacts', label: 'All Contacts', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="contact" labelKey="full_name" /> },
-  { key: 'linked_companies', label: 'All Companies', defaultWidth: 150, defaultVisible: false,
+  { key: 'linked_companies', label: 'All Companies', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="company" labelKey="company_name" /> },
 ];
 
@@ -169,6 +172,7 @@ export default function Properties({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
+  const [pivotFilter, dismissPivot] = usePivotFilter('properties');
   const [cityOptions, setCityOptions] = useState([]);
 
   // Fetch distinct cities once for dropdown filter
@@ -227,83 +231,97 @@ export default function Properties({ onCountChange }) {
 
   const augmentedRows = useMemo(() => {
     if (!rows.length) return rows;
-    return rows.map((row) => {
+    const augmented = rows.map((row) => {
       const allContacts = linked.linked_contacts?.[row.property_id] || [];
       const allCompanies = linked.linked_companies?.[row.property_id] || [];
       return {
         ...row,
-        // Role-specific
         linked_owner_contacts: allContacts.filter(c => c.role === 'owner'),
         linked_broker_contacts: allContacts.filter(c => c.role === 'broker'),
         linked_tenant_companies: allCompanies.filter(c => c.role === 'tenant'),
         linked_owner_companies: allCompanies.filter(c => c.role === 'owner'),
         linked_leasing_companies: allCompanies.filter(c => c.role === 'leasing'),
-        // Generic (all roles)
         linked_contacts: allContacts,
         linked_companies: allCompanies,
         linked_deals: linked.linked_deals?.[row.property_id] || [],
         linked_interactions: linked.linked_interactions?.[row.property_id] || [],
-        // Comp counts
         lease_comp_count: linked.linked_comp_counts?.[row.property_id]?.[0]?.lease_count || 0,
         sale_comp_count: linked.linked_comp_counts?.[row.property_id]?.[0]?.sale_count || 0,
       };
     });
-  }, [rows, linked]);
+    const { linkedFilters } = splitLinkedFilters(view.filters);
+    return linkedFilters.length > 0 ? applyLinkedFilters(augmented, linkedFilters) : augmented;
+  }, [rows, linked, view.filters]);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      // Merge view engine filters with quick-access dropdown filters
-      let whereClause = view.sqlFilters?.whereClause || '';
-      let params = [...(view.sqlFilters?.params || [])];
+      // Pivot filter overrides everything
+      if (pivotFilter?.ids?.length) {
+        const [result, total] = await Promise.all([
+          queryWithFilters('properties', {
+            whereClause: 'WHERE property_id = ANY($1)',
+            params: [pivotFilter.ids],
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('properties', {}),
+        ]);
+        setRows(result.rows || []);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
+      } else {
+        // Merge view engine filters with quick-access dropdown filters
+        let whereClause = view.sqlFilters?.whereClause || '';
+        let params = [...(view.sqlFilters?.params || [])];
 
-      // Append quick-access filters (search, type, priority) to the view engine WHERE clause
-      const extraConds = [];
-      if (filterType) {
-        params.push(filterType);
-        extraConds.push(`property_type = $${params.length}`);
-      }
-      if (filterPriority) {
-        params.push(filterPriority);
-        extraConds.push(`priority = $${params.length}`);
-      }
-      if (search) {
-        params.push(`%${search}%`);
-        const i = params.length;
-        extraConds.push(`(property_address ILIKE $${i} OR owner_name ILIKE $${i} OR city ILIKE $${i} OR property_name ILIKE $${i})`);
-      }
-
-      if (extraConds.length) {
-        const extraWhere = extraConds.join(' AND ');
-        if (whereClause) {
-          // Existing WHERE from view engine — append with AND
-          whereClause = whereClause.replace(/^WHERE\s+/i, 'WHERE (') + ') AND ' + extraWhere;
-        } else {
-          whereClause = 'WHERE ' + extraWhere;
+        const extraConds = [];
+        if (filterType) {
+          params.push(filterType);
+          extraConds.push(`property_type = $${params.length}`);
         }
+        if (filterPriority) {
+          params.push(filterPriority);
+          extraConds.push(`priority = $${params.length}`);
+        }
+        if (search) {
+          params.push(`%${search}%`);
+          const i = params.length;
+          extraConds.push(`(property_address ILIKE $${i} OR owner_name ILIKE $${i} OR city ILIKE $${i} OR property_name ILIKE $${i})`);
+        }
+
+        if (extraConds.length) {
+          const extraWhere = extraConds.join(' AND ');
+          if (whereClause) {
+            whereClause = whereClause.replace(/^WHERE\s+/i, 'WHERE (') + ') AND ' + extraWhere;
+          } else {
+            whereClause = 'WHERE ' + extraWhere;
+          }
+        }
+
+        const mergedFilters = { whereClause, params };
+
+        const [result, total] = await Promise.all([
+          queryWithFilters('properties', {
+            ...mergedFilters,
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('properties', {}),
+        ]);
+        setRows(result.rows || []);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       }
-
-      const mergedFilters = { whereClause, params };
-
-      const [result, total] = await Promise.all([
-        queryWithFilters('properties', {
-          ...mergedFilters,
-          orderBy: view.sort.column,
-          order: view.sort.direction,
-          limit: 500,
-        }),
-        countWithFilters('properties', {}),
-      ]);
-      setRows(result.rows || []);
-      setTotalCount(total);
-      if (onCountChange) onCountChange(result.rows?.length || 0);
     } catch (err) {
       console.error('Failed to fetch properties:', err);
       setRows([]);
     } finally {
       setLoading(false);
     }
-  }, [search, filterType, filterPriority, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
+  }, [search, filterType, filterPriority, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates('property', fetchData);
@@ -504,7 +522,17 @@ export default function Properties({ onCountChange }) {
         filteredCount={rows.length}
         activeViewId={view.activeViewId}
         onSaveAsView={(name) => view.createNewView(name)}
-      />
+      >
+        {pivotFilter && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-md bg-purple-500/15 text-purple-400 border border-purple-500/25">
+            {pivotFilter.label} ({pivotFilter.ids.length})
+            <button onClick={dismissPivot} className="ml-0.5 hover:text-purple-200">×</button>
+          </span>
+        )}
+        <PivotButton rows={augmentedRows} linkedKey="linked_contacts" idField="contact_id" target="contacts" label="Contacts" sourceLabel={view.activeView?.view_name ? `From Properties: ${view.activeView.view_name}` : 'From Properties'} />
+        <PivotButton rows={augmentedRows} linkedKey="linked_companies" idField="company_id" target="companies" label="Companies" sourceLabel={view.activeView?.view_name ? `From Properties: ${view.activeView.view_name}` : 'From Properties'} />
+        <PivotButton rows={augmentedRows} linkedKey="linked_deals" idField="deal_id" target="deals" label="Deals" sourceLabel={view.activeView?.view_name ? `From Properties: ${view.activeView.view_name}` : 'From Properties'} />
+      </FilterBar>
       <FilterBuilder
         isOpen={filterBuilderOpen}
         onClose={() => { setFilterBuilderOpen(false); if (reopenNewViewAfterFilter) { setReopenNewViewAfterFilter(false); setNewViewModalOpen(true); } }}
