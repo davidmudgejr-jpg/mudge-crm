@@ -33,8 +33,8 @@ export default function PivotButton({ rows, linkedKey, idField, target, label, s
         setTimeout(() => window.dispatchEvent(new CustomEvent('crm-pivot', { detail: { target } })), 50);
       }}
       className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-md
-        bg-crm-accent/10 text-crm-accent border border-crm-accent/20
-        hover:bg-crm-accent/20 hover:border-crm-accent/40 transition-colors"
+        text-crm-accent border border-crm-accent
+        hover:bg-crm-accent hover:text-white transition-colors"
       title={`Open ${ids.length} linked ${label.toLowerCase()} in their own tab`}
     >
       Open {ids.length} {label} <span className="opacity-60">→</span>

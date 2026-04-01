@@ -103,13 +103,25 @@ export default function Companies({ onCountChange }) {
 
   const augmentedRows = useMemo(() => {
     if (!rows.length) return rows;
-    const augmented = rows.map((row) => ({
-      ...row,
-      linked_contacts: linked.linked_contacts?.[row.company_id] || [],
-      linked_properties: linked.linked_properties?.[row.company_id] || [],
-      linked_deals: linked.linked_deals?.[row.company_id] || [],
-      linked_interactions: linked.linked_interactions?.[row.company_id] || [],
-    }));
+    const now = new Date();
+    const augmented = rows.map((row) => {
+      let lease_months_left = null;
+      if (row.lease_exp) {
+        const exp = new Date(row.lease_exp);
+        if (!isNaN(exp)) {
+          const months = (exp.getFullYear() - now.getFullYear()) * 12 + (exp.getMonth() - now.getMonth());
+          lease_months_left = months > 0 ? months : 0;
+        }
+      }
+      return {
+        ...row,
+        lease_months_left,
+        linked_contacts: linked.linked_contacts?.[row.company_id] || [],
+        linked_properties: linked.linked_properties?.[row.company_id] || [],
+        linked_deals: linked.linked_deals?.[row.company_id] || [],
+        linked_interactions: linked.linked_interactions?.[row.company_id] || [],
+      };
+    });
     // Apply client-side linked record filters (is_empty / is_not_empty on linked columns)
     const { linkedFilters } = splitLinkedFilters(view.filters);
     return linkedFilters.length > 0 ? applyLinkedFilters(augmented, linkedFilters) : augmented;
@@ -296,7 +308,7 @@ export default function Companies({ onCountChange }) {
         updateFilters={view.updateFilters}
         onAddFilter={() => setFilterBuilderOpen(true)}
         totalCount={totalCount}
-        filteredCount={rows.length}
+        filteredCount={augmentedRows.length}
         activeViewId={view.activeViewId}
         onSaveAsView={(name) => view.createNewView(name)}
       >

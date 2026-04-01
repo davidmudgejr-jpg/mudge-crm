@@ -151,7 +151,14 @@ export default function CompanyDetail({ companyId, id, onClose, onSave, onRefres
       <Section title="Lease Info">
         <div className="grid grid-cols-2 gap-x-4">
           <InlineField label="Lease Expiration" value={company.lease_exp} field="lease_exp" type="date" onSave={saveField} />
-          <InlineField label="Months Left" value={company.lease_months_left} field="lease_months_left" type="number" onSave={saveField} parse={parseInt0} />
+          <InlineField label="Months Left" value={(() => {
+            if (!company.lease_exp) return null;
+            const exp = new Date(company.lease_exp);
+            if (isNaN(exp)) return null;
+            const now = new Date();
+            const months = (exp.getFullYear() - now.getFullYear()) * 12 + (exp.getMonth() - now.getMonth());
+            return months > 0 ? months : 0;
+          })()} field="lease_months_left" type="number" readOnly />
           <InlineField label="Move-in Date" value={company.move_in_date} field="move_in_date" type="date" onSave={saveField} />
         </div>
       </Section>

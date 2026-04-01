@@ -100,7 +100,7 @@ export default function FilterBar({
       {!activeViewId && (conditions.length > 0 || hasPivot) && !naming && (
         <button
           onClick={() => setNaming(true)}
-          className="text-[10px] bg-crm-accent/80 text-white px-3 py-0.5 rounded-full font-medium hover:bg-crm-accent transition-colors"
+          className="text-[10px] bg-crm-accent text-white px-3 py-0.5 rounded-full font-medium hover:bg-crm-accent-hover transition-colors"
         >
           Save as View
         </button>

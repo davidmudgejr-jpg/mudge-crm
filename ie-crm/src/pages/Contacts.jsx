@@ -134,14 +134,9 @@ export default function Contacts({ onCountChange }) {
 
   // Wrap view save to bake pivot IDs into the view's filters
   const saveViewWithPivot = useCallback(async (name) => {
-    if (pivotFilter?.ids?.length) {
-      // Inject pivot IDs as an `in` filter before saving
-      view.updateFilters(mergePivotFilters(view.filters));
-    }
-    // Small delay to let updateFilters propagate to the view engine state
-    await new Promise(r => setTimeout(r, 50));
-    const result = await view.createNewView(name);
-    if (pivotFilter) dismissPivot(); // View now contains the IDs — pivot no longer needed
+    const mergedFilters = pivotFilter?.ids?.length ? mergePivotFilters(view.filters) : view.filters;
+    const result = await view.createNewView(name, { overrideFilters: mergedFilters });
+    if (pivotFilter) dismissPivot();
     return result;
   }, [pivotFilter, view, mergePivotFilters, dismissPivot]);
 
@@ -386,15 +381,15 @@ export default function Contacts({ onCountChange }) {
         isDirty={view.isDirty}
         activeView={view.activeView}
         filters={view.filters}
-        applyView={view.applyView}
-        resetToAll={view.resetToAll}
+        applyView={(...args) => { dismissPivot(); view.applyView(...args); }}
+        resetToAll={() => { dismissPivot(); view.resetToAll(); }}
         saveView={pivotFilter ? saveViewWithPivot : view.saveView}
         createNewView={pivotFilter ? saveViewWithPivot : view.createNewView}
         renameView={view.renameView}
-        deleteView={view.deleteView}
+        deleteView={(...args) => { dismissPivot(); view.deleteView(...args); }}
         duplicateView={view.duplicateView}
         setDefault={view.setDefault}
-        onNewView={() => { view.resetToAll(); setNewViewModalOpen(true); }}
+        onNewView={() => { dismissPivot(); view.resetToAll(); setNewViewModalOpen(true); }}
       />
       <FilterBar
         filters={view.filters}

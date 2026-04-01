@@ -296,13 +296,12 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     if (activeViewId) setIsDirty(true);
   }, [activeViewId, entityType]);
 
-  const saveView = useCallback(async (name) => {
-    console.log('[saveView] called with name:', name, 'activeViewId:', activeViewId, 'filters:', JSON.stringify(filters));
-    console.trace('[saveView] call stack');
+  const saveView = useCallback(async (name, { overrideFilters } = {}) => {
+    const effectiveFilters = overrideFilters || filters;
     const viewData = {
       entity_type: entityType,
       view_name: name,
-      filters,
+      filters: effectiveFilters,
       filter_logic: filterLogic,
       sort_column: sort.column,
       sort_direction: sort.direction,
@@ -313,7 +312,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     if (activeViewId) {
       // Update existing
       const updated = await updateView(activeViewId, {
-        filters,
+        filters: effectiveFilters,
         filter_logic: filterLogic,
         sort_column: sort.column,
         sort_direction: sort.direction,
@@ -322,6 +321,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
       const next = views.map(v => v.view_id === activeViewId ? updated : v);
       setViews(next);
       writeCache(entityType, next);
+      if (overrideFilters) setFilters(overrideFilters);
       setIsDirty(false);
       return updated;
     } else {
@@ -332,6 +332,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
       writeCache(entityType, next);
       setActiveViewId(created.view_id);
       writeActiveId(entityType, created.view_id);
+      if (overrideFilters) setFilters(overrideFilters);
       setIsDirty(false);
       return created;
     }
@@ -339,12 +340,12 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
 
   // Force-create a brand new view — NEVER updates an existing one.
   // Uses createView API (POST) regardless of activeViewId.
-  const createNewView = useCallback(async (name) => {
-    console.log('[createNewView] Creating new view:', name, 'current activeViewId:', activeViewId);
+  const createNewView = useCallback(async (name, { overrideFilters } = {}) => {
+    const effectiveFilters = overrideFilters || filters;
     const viewData = {
       entity_type: entityType,
       view_name: name,
-      filters,
+      filters: effectiveFilters,
       filter_logic: filterLogic,
       sort_column: sort.column,
       sort_direction: sort.direction,
@@ -353,12 +354,12 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     };
     // Always POST — never PATCH
     const created = await createView(viewData);
-    console.log('[createNewView] Created:', created.view_id, created.view_name);
     const next = [...views, created];
     setViews(next);
     writeCache(entityType, next);
     setActiveViewId(created.view_id);
     writeActiveId(entityType, created.view_id);
+    if (overrideFilters) setFilters(overrideFilters);
     setIsDirty(false);
     return created;
   }, [entityType, activeViewId, filters, filterLogic, sort, visibleColumnKeys, views]);

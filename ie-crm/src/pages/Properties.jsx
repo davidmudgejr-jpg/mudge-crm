@@ -175,11 +175,8 @@ export default function Properties({ onCountChange }) {
   const { pivotFilter, dismiss: dismissPivot, mergeFilters: mergePivotFilters } = usePivotFilter('properties');
 
   const saveViewWithPivot = useCallback(async (name) => {
-    if (pivotFilter?.ids?.length) {
-      view.updateFilters(mergePivotFilters(view.filters));
-    }
-    await new Promise(r => setTimeout(r, 50));
-    const result = await view.createNewView(name);
+    const mergedFilters = pivotFilter?.ids?.length ? mergePivotFilters(view.filters) : view.filters;
+    const result = await view.createNewView(name, { overrideFilters: mergedFilters });
     if (pivotFilter) dismissPivot();
     return result;
   }, [pivotFilter, view, mergePivotFilters, dismissPivot]);
@@ -513,15 +510,15 @@ export default function Properties({ onCountChange }) {
         isDirty={view.isDirty}
         activeView={view.activeView}
         filters={view.filters}
-        applyView={(id) => { setSearch(''); setFilterType(''); setFilterPriority(''); view.applyView(id); }}
-        resetToAll={() => { setSearch(''); setFilterType(''); setFilterPriority(''); view.resetToAll(); }}
+        applyView={(id) => { dismissPivot(); setSearch(''); setFilterType(''); setFilterPriority(''); view.applyView(id); }}
+        resetToAll={() => { dismissPivot(); setSearch(''); setFilterType(''); setFilterPriority(''); view.resetToAll(); }}
         saveView={pivotFilter ? saveViewWithPivot : view.saveView}
         createNewView={pivotFilter ? saveViewWithPivot : view.createNewView}
         renameView={view.renameView}
-        deleteView={view.deleteView}
+        deleteView={(...args) => { dismissPivot(); view.deleteView(...args); }}
         duplicateView={view.duplicateView}
         setDefault={view.setDefault}
-        onNewView={() => { view.resetToAll(); setNewViewModalOpen(true); }}
+        onNewView={() => { dismissPivot(); view.resetToAll(); setNewViewModalOpen(true); }}
       />
       <FilterBar
         filters={view.filters}
@@ -529,7 +526,7 @@ export default function Properties({ onCountChange }) {
         updateFilters={view.updateFilters}
         onAddFilter={() => setFilterBuilderOpen(true)}
         totalCount={totalCount}
-        filteredCount={rows.length}
+        filteredCount={augmentedRows.length}
         activeViewId={view.activeViewId}
         onSaveAsView={(name) => pivotFilter ? saveViewWithPivot(name) : view.createNewView(name)}
         hasPivot={!!pivotFilter}
