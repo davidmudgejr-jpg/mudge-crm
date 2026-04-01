@@ -601,64 +601,30 @@ export async function unlinkRecords(junctionTable, col1, id1, col2, id2) {
 // ============================================================
 // CREATE FUNCTIONS
 // ============================================================
-export async function createProperty(fields) {
-  const keys = Object.keys(fields);
-  validateFieldKeys(keys, 'properties');
-  const cols = ['property_id', ...keys];
-  const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const id = crypto.randomUUID();
-  const sql = `INSERT INTO properties (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+// Contacts, properties, companies route through /api/db/create for duplicate detection.
+// skipDuplicateCheck defaults to false — caller can pass true to force create.
+export async function createProperty(fields, skipDuplicateCheck = false) {
+  return db.create('properties', fields, skipDuplicateCheck);
 }
 
-export async function createContact(fields) {
-  const keys = Object.keys(fields);
-  validateFieldKeys(keys, 'contacts');
-  const cols = ['contact_id', ...keys];
-  const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const id = crypto.randomUUID();
-  const sql = `INSERT INTO contacts (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+export async function createContact(fields, skipDuplicateCheck = false) {
+  return db.create('contacts', fields, skipDuplicateCheck);
 }
 
-export async function createCompany(fields) {
-  const keys = Object.keys(fields);
-  validateFieldKeys(keys, 'companies');
-  const cols = ['company_id', ...keys];
-  const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const id = crypto.randomUUID();
-  const sql = `INSERT INTO companies (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+export async function createCompany(fields, skipDuplicateCheck = false) {
+  return db.create('companies', fields, skipDuplicateCheck);
 }
 
-export async function createDeal(fields) {
-  const keys = Object.keys(fields);
-  validateFieldKeys(keys, 'deals');
-  const cols = ['deal_id', ...keys];
-  const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const id = crypto.randomUUID();
-  const sql = `INSERT INTO deals (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+export async function createDeal(fields, skipDuplicateCheck = false) {
+  return db.create('deals', fields, skipDuplicateCheck);
 }
 
-export async function createInteraction(fields) {
-  const keys = Object.keys(fields);
-  validateFieldKeys(keys, 'interactions');
-  const cols = ['interaction_id', ...keys];
-  const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const id = crypto.randomUUID();
-  const sql = `INSERT INTO interactions (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+export async function createInteraction(fields, skipDuplicateCheck = false) {
+  return db.create('interactions', fields, skipDuplicateCheck);
 }
 
-export async function createCampaign(fields) {
-  const keys = Object.keys(fields);
-  validateFieldKeys(keys, 'campaigns');
-  const cols = ['campaign_id', ...keys];
-  const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const id = crypto.randomUUID();
-  const sql = `INSERT INTO campaigns (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+export async function createCampaign(fields, skipDuplicateCheck = false) {
+  return db.create('campaigns', fields, skipDuplicateCheck);
 }
 
 // ============================================================
@@ -792,14 +758,8 @@ export async function getActionItem(id) {
   return query('SELECT * FROM action_items WHERE action_item_id = $1', [id]);
 }
 
-export async function createActionItem(fields) {
-  const keys = Object.keys(fields);
-  validateFieldKeys(keys, 'action_items');
-  const cols = ['action_item_id', ...keys];
-  const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const id = crypto.randomUUID();
-  const sql = `INSERT INTO action_items (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+export async function createActionItem(fields, skipDuplicateCheck = false) {
+  return db.create('action_items', fields, skipDuplicateCheck);
 }
 
 export async function updateActionItem(id, fields) {
@@ -915,14 +875,8 @@ export async function getLeaseComp(id) {
     WHERE lc.id = $1`, [id]);
 }
 
-export async function createLeaseComp(fields) {
-  const keys = Object.keys(fields);
-  validateFieldKeys(keys, 'lease_comps');
-  const cols = ['id', ...keys];
-  const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const id = crypto.randomUUID();
-  const sql = `INSERT INTO lease_comps (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+export async function createLeaseComp(fields, skipDuplicateCheck = false) {
+  return db.create('lease_comps', fields, skipDuplicateCheck);
 }
 
 export async function updateLeaseComp(id, fields) {
@@ -974,14 +928,8 @@ export async function getSaleComp(id) {
     WHERE sc.id = $1`, [id]);
 }
 
-export async function createSaleComp(fields) {
-  const keys = Object.keys(fields);
-  validateFieldKeys(keys, 'sale_comps');
-  const cols = ['id', ...keys];
-  const placeholders = cols.map((_, i) => `$${i + 1}`);
-  const id = crypto.randomUUID();
-  const sql = `INSERT INTO sale_comps (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
-  return query(sql, [id, ...Object.values(fields)]);
+export async function createSaleComp(fields, skipDuplicateCheck = false) {
+  return db.create('sale_comps', fields, skipDuplicateCheck);
 }
 
 export async function updateSaleComp(id, fields) {

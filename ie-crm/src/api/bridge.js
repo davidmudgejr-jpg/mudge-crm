@@ -55,6 +55,10 @@ export const db = {
     );
     return httpPost('/api/db/update', { entity, id, fields });
   },
+  create: (entity, fields, skipDuplicateCheck = false) => {
+    if (isElectron()) return httpPost('/api/db/create', { entity, fields, skipDuplicateCheck });
+    return httpPost('/api/db/create', { entity, fields, skipDuplicateCheck });
+  },
   status: () => {
     if (isElectron()) return window.iecrm.db.status();
     return httpGet('/api/db/status');

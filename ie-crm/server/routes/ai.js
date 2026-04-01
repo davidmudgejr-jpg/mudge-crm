@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const instantly = require('../services/instantly');
 const { normalizeRecord } = require('../utils/fieldNormalizer');
 const { validateColumn, quoteIdentifier, validateTable } = require('../utils/sqlSafety'); // SECURITY: Houston audit C4 — 2026-03-30
+const { matchContact, matchProperty, matchCompany } = require('../utils/compositeMatcher');
 
 const router = express.Router();
 
@@ -456,10 +457,51 @@ router.post('/sandbox/contact', async (req, res) => {
     const {
       full_name, first_name, email, phone_1, company_name, title, type,
       city, state, sources, source_urls, confidence_score, agent_name, notes,
+      skipDuplicateCheck,
     } = req.body;
 
     if (!agent_name) {
       return res.status(400).json({ error: 'agent_name is required' });
+    }
+
+    // Check for duplicates against live contacts AND existing sandbox contacts
+    if (!skipDuplicateCheck) {
+      const existingContacts = await pool.query(
+        `SELECT contact_id, full_name, email AS email_1, email_2, email_3, company_name FROM contacts`
+      );
+      const dupResult = matchContact(
+        { full_name, email, email_1: email },
+        existingContacts.rows
+      );
+      if (dupResult.match || dupResult.candidates?.length > 0) {
+        return res.status(200).json({
+          duplicateWarning: true,
+          match: dupResult.match,
+          candidates: dupResult.candidates || [],
+          level: dupResult.level,
+          message: 'Possible duplicate contact exists in live database',
+        });
+      }
+
+      // Also check sandbox for pending duplicates
+      const pendingSandbox = await pool.query(
+        `SELECT id, full_name, email FROM sandbox_contacts WHERE status = 'pending'`
+      );
+      if (pendingSandbox.rows.length > 0) {
+        const sandboxDup = matchContact(
+          { full_name, email, email_1: email },
+          pendingSandbox.rows.map(r => ({ contact_id: r.id, full_name: r.full_name, email_1: r.email }))
+        );
+        if (sandboxDup.match) {
+          return res.status(200).json({
+            duplicateWarning: true,
+            match: sandboxDup.match,
+            candidates: sandboxDup.candidates || [],
+            level: sandboxDup.level,
+            message: 'Duplicate already pending in sandbox',
+          });
+        }
+      }
     }
 
     const result = await pool.query(
@@ -760,6 +802,33 @@ router.post('/queue/approve/:table/:id', async (req, res) => {
     const item = updateResult.rows[0];
 
     if (table === 'contacts') {
+      // Check for duplicate contacts before promoting
+      const { skipDuplicateCheck } = req.body;
+      if (!skipDuplicateCheck) {
+        const existingContacts = await pool.query(
+          `SELECT contact_id, full_name, email AS email_1, email_2, email_3, company_name FROM contacts`
+        );
+        const dupResult = matchContact(
+          { full_name: item.full_name, email: item.email, email_1: item.email },
+          existingContacts.rows
+        );
+        if (dupResult.match || dupResult.candidates?.length > 0) {
+          // Revert the status change — don't promote yet
+          await pool.query(
+            `UPDATE ${sandboxTable} SET status = 'pending', reviewed_at = NULL WHERE id = $1`,
+            [id]
+          );
+          return res.json({
+            ok: false,
+            duplicateWarning: true,
+            match: dupResult.match,
+            candidates: dupResult.candidates || [],
+            level: dupResult.level,
+            sandboxId: id,
+          });
+        }
+      }
+
       const insertResult = await pool.query(
         `INSERT INTO contacts
            (full_name, first_name, email, phone_1, title, type,
@@ -2771,24 +2840,26 @@ router.post('/air/ingest', async (req, res) => {
     };
 
     // Helper: find or create property by address + city
-    // Uses fieldNormalizer so any source's field names work
+    // Uses compositeMatcher for fuzzy matching, falls back to create
+    // Load all properties once for matching across the full ingest
+    const allProperties = (await pool.query(
+      `SELECT property_id, property_address, city, zip FROM properties`
+    )).rows;
+
     async function findOrCreateProperty(rawEntry) {
       const norm = normalizeRecord(rawEntry, 'properties', 'air_sheet');
       const addr = (rawEntry.address || norm.property_address || '').trim();
       const city = (rawEntry.city || norm.city || '').trim();
       if (!addr) return null;
 
-      // Try to find existing property by address fuzzy match
-      const existing = await pool.query(
-        `SELECT property_id, property_address, city FROM properties
-         WHERE LOWER(property_address) = LOWER($1)
-         OR (LOWER(property_address) LIKE '%' || LOWER($2) || '%' AND LOWER(city) = LOWER($3))
-         LIMIT 1`,
-        [addr, addr.split(' ').slice(1).join(' '), city]
+      // Use compositeMatcher for consistent fuzzy matching
+      const matchResult = matchProperty(
+        { property_address: addr, city, zip: rawEntry.zip || '' },
+        allProperties
       );
 
-      if (existing.rows.length > 0) {
-        return existing.rows[0].property_id;
+      if (matchResult.match && matchResult.match.confidence >= 75) {
+        return matchResult.match.id;
       }
 
       // Create new property using normalized fields
@@ -2802,6 +2873,8 @@ router.post('/air/ingest', async (req, res) => {
          norm.property_name || rawEntry.property_name]
       );
       results.properties_created++;
+      // Add to in-memory list so subsequent entries in same batch can match
+      allProperties.push({ property_id: newProp.rows[0].property_id, property_address: addr, city, zip: rawEntry.zip || '' });
       return newProp.rows[0].property_id;
     }
 
@@ -2810,13 +2883,20 @@ router.post('/air/ingest', async (req, res) => {
       try {
         const propertyId = await findOrCreateProperty(listing);
 
-        // Check if already in market_tracking
-        const exists = await pool.query(
-          `SELECT id FROM market_tracking
-           WHERE LOWER(property_address) = LOWER($1) AND market_status = 'for_lease'
-           AND outcome_type IS NULL`,
-          [listing.address]
-        );
+        // Check if already in market_tracking — use air_entry_number first, fall back to address
+        const exists = listing.air_entry_number
+          ? await pool.query(
+              `SELECT id FROM market_tracking
+               WHERE air_entry_number = $1 AND market_status = 'for_lease'
+               AND first_seen_source = 'air_sheet'`,
+              [listing.air_entry_number]
+            )
+          : await pool.query(
+              `SELECT id FROM market_tracking
+               WHERE LOWER(property_address) = LOWER($1) AND market_status = 'for_lease'
+               AND outcome_type IS NULL`,
+              [listing.address]
+            );
 
         if (exists.rows.length === 0) {
           await pool.query(
@@ -2838,6 +2918,11 @@ router.post('/air/ingest', async (req, res) => {
           );
           results.market_tracking_created++;
         } else {
+          // Update last_air_sheet_date on existing record so we know it's still active
+          await pool.query(
+            `UPDATE market_tracking SET last_air_sheet_date = $1 WHERE id = $2`,
+            [parsed_date, exists.rows[0].id]
+          );
           results.market_tracking_updated++;
         }
 
@@ -2863,12 +2948,19 @@ router.post('/air/ingest', async (req, res) => {
       try {
         const propertyId = await findOrCreateProperty(listing);
 
-        const exists = await pool.query(
-          `SELECT id FROM market_tracking
-           WHERE LOWER(property_address) = LOWER($1) AND market_status = 'for_sale'
-           AND outcome_type IS NULL`,
-          [listing.address]
-        );
+        const exists = listing.air_entry_number
+          ? await pool.query(
+              `SELECT id FROM market_tracking
+               WHERE air_entry_number = $1 AND market_status = 'for_sale'
+               AND first_seen_source = 'air_sheet'`,
+              [listing.air_entry_number]
+            )
+          : await pool.query(
+              `SELECT id FROM market_tracking
+               WHERE LOWER(property_address) = LOWER($1) AND market_status = 'for_sale'
+               AND outcome_type IS NULL`,
+              [listing.address]
+            );
 
         if (exists.rows.length === 0) {
           await pool.query(
@@ -2887,6 +2979,10 @@ router.post('/air/ingest', async (req, res) => {
           );
           results.market_tracking_created++;
         } else {
+          await pool.query(
+            `UPDATE market_tracking SET last_air_sheet_date = $1 WHERE id = $2`,
+            [parsed_date, exists.rows[0].id]
+          );
           results.market_tracking_updated++;
         }
 
@@ -2911,13 +3007,19 @@ router.post('/air/ingest', async (req, res) => {
       try {
         const propertyId = await findOrCreateProperty(comp);
 
-        // Dedup: check if this comp already exists (same address + tenant + similar SF)
-        const exists = await pool.query(
-          `SELECT id FROM lease_comps
-           WHERE property_address = $1 AND LOWER(tenant_name) = LOWER($2)
-           AND air_sheet_date = $3`,
-          [comp.address, comp.tenant_name || '', parsed_date]
-        );
+        // Dedup: use air_entry_number first, fall back to address + tenant
+        const exists = comp.air_entry_number
+          ? await pool.query(
+              `SELECT id FROM lease_comps
+               WHERE air_entry_number = $1 AND source = 'air_sheet'`,
+              [comp.air_entry_number]
+            )
+          : await pool.query(
+              `SELECT id FROM lease_comps
+               WHERE LOWER(property_address) = LOWER($1)
+               AND LOWER(tenant_name) = LOWER($2)`,
+              [comp.address, comp.tenant_name || '']
+            );
 
         if (exists.rows.length === 0) {
           await pool.query(
@@ -2982,11 +3084,19 @@ router.post('/air/ingest', async (req, res) => {
       try {
         const propertyId = await findOrCreateProperty(comp);
 
-        const exists = await pool.query(
-          `SELECT id FROM sale_comps
-           WHERE property_address = $1 AND air_sheet_date = $2`,
-          [comp.address, parsed_date]
-        );
+        // Dedup: use air_entry_number first, fall back to address + sale_date
+        const exists = comp.air_entry_number
+          ? await pool.query(
+              `SELECT id FROM sale_comps
+               WHERE air_entry_number = $1`,
+              [comp.air_entry_number]
+            )
+          : await pool.query(
+              `SELECT id FROM sale_comps
+               WHERE LOWER(property_address) = LOWER($1)
+               AND sale_date = $2`,
+              [comp.address, comp.sale_date || parsed_date]
+            );
 
         if (exists.rows.length === 0) {
           await pool.query(

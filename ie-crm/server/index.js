@@ -16,6 +16,8 @@ const { mountAiRoutes } = require('./routes/ai');
 const { mountVerificationRoutes } = require('./routes/verification');
 const { mountContractRoutes } = require('./routes/contracts');
 const { uploadFile, deleteFile } = require('./services/fileUpload');
+const { normalizeAddress, parseAddress, normalizeCompanyName } = require('./utils/addressNormalizer');
+const { matchProperty, matchCompany, matchContact, detectTable } = require('./utils/compositeMatcher');
 
 // Load env
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
@@ -509,6 +511,18 @@ const SERVER_ALLOWED_COLS = {
   action_items: new Set([
     'title', 'description', 'status', 'priority', 'due_date', 'assigned_to', 'tags',
   ]),
+  lease_comps: new Set([
+    'property_id', 'company_id', 'tenant_name', 'property_type', 'space_use', 'space_type',
+    'sf', 'building_rba', 'floor_suite', 'sign_date', 'commencement_date', 'move_in_date',
+    'expiration_date', 'term_months', 'rate', 'escalations', 'rent_type', 'lease_type',
+    'concessions', 'free_rent_months', 'ti_psf',
+    'tenant_rep_company', 'tenant_rep_agents', 'landlord_rep_company', 'landlord_rep_agents',
+    'notes', 'source',
+  ]),
+  sale_comps: new Set([
+    'property_id', 'sale_date', 'sale_price', 'price_psf', 'price_plsf',
+    'cap_rate', 'sf', 'land_sf', 'buyer_name', 'seller_name', 'property_type', 'notes', 'source',
+  ]),
 };
 
 app.post('/api/db/update', async (req, res) => {
@@ -542,6 +556,83 @@ app.post('/api/db/update', async (req, res) => {
     res.json({ rows: result.rows, rowCount: result.rowCount });
   } catch (err) {
     console.error(`[db/update] ${entity} error:`, err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── Safe parameterized create endpoint with duplicate detection ──
+// compositeMatcher is required below with CSV import routes (matchProperty, matchCompany, matchContact)
+
+app.post('/api/db/create', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected' });
+  const { entity, fields, skipDuplicateCheck } = req.body;
+  if (!entity || !fields || typeof fields !== 'object') {
+    return res.status(400).json({ error: 'entity and fields required' });
+  }
+  const meta = ENTITY_TABLES[entity];
+  if (!meta) return res.status(400).json({ error: `Unknown entity: ${entity}` });
+
+  const allowed = SERVER_ALLOWED_COLS[entity];
+  const keys = Object.keys(fields);
+  if (keys.length === 0) return res.status(400).json({ error: 'No fields provided' });
+
+  // Validate all field names against whitelist
+  for (const k of keys) {
+    if (allowed && !allowed.has(k)) {
+      return res.status(400).json({ error: `Disallowed field "${k}" for ${entity}` });
+    }
+    if (!/^[a-z_][a-z0-9_]*$/.test(k)) {
+      return res.status(400).json({ error: `Invalid field name: ${k}` });
+    }
+  }
+
+  try {
+    // Duplicate detection for contacts, properties, companies
+    if (!skipDuplicateCheck && ['contacts', 'properties', 'companies'].includes(entity)) {
+      let matchResult = null;
+
+      if (entity === 'contacts') {
+        const existing = await pool.query(
+          `SELECT contact_id, full_name, email AS email_1, email_2, email_3, company_name FROM contacts`
+        );
+        matchResult = matchContact(
+          { full_name: fields.full_name, email: fields.email, email_1: fields.email },
+          existing.rows
+        );
+      } else if (entity === 'properties') {
+        const existing = await pool.query(
+          `SELECT property_id, property_address, city, zip FROM properties`
+        );
+        matchResult = matchProperty(
+          { property_address: fields.property_address, city: fields.city, zip: fields.zip },
+          existing.rows
+        );
+      } else if (entity === 'companies') {
+        const existing = await pool.query(
+          `SELECT company_id, company_name, city FROM companies`
+        );
+        matchResult = matchCompany(fields.company_name, existing.rows, fields.city);
+      }
+
+      if (matchResult && (matchResult.match || matchResult.candidates?.length > 0)) {
+        return res.json({
+          duplicateWarning: true,
+          match: matchResult.match,
+          candidates: matchResult.candidates || [],
+          level: matchResult.level,
+        });
+      }
+    }
+
+    // No duplicates (or skipped check) — insert
+    const id = require('crypto').randomUUID();
+    const cols = [meta.pk, ...keys];
+    const placeholders = cols.map((_, i) => `$${i + 1}`);
+    const sql = `INSERT INTO ${meta.table} (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
+    const result = await pool.query(sql, [id, ...Object.values(fields)]);
+    res.json({ rows: result.rows, rowCount: result.rowCount });
+  } catch (err) {
+    console.error(`[db/create] ${entity} error:`, err.message);
     res.status(400).json({ error: err.message });
   }
 });
@@ -898,8 +989,7 @@ app.post('/api/file/parse', async (req, res) => {
 // ============================================================
 // CSV IMPORT ROUTES
 // ============================================================
-const { normalizeAddress, parseAddress, normalizeCompanyName } = require('./utils/addressNormalizer');
-const { matchProperty, matchCompany, matchContact, detectTable } = require('./utils/compositeMatcher');
+// compositeMatcher and addressNormalizer already required at top of file
 
 // Column whitelist per table (matches database.js ALLOWED_COLS — import-safe subset, no IDs/timestamps)
 const IMPORT_COLS = {
