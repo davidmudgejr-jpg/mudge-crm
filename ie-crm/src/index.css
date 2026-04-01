@@ -4,7 +4,8 @@
 
 /* ============================================================
    THEME: CSS Custom Properties
-   Automatically switches based on macOS appearance setting.
+   Dark by default. Light mode activated by .light-mode class
+   on the root container (toggle button in sidebar).
    ============================================================ */
 :root {
   /* Dark theme — VS Code Dark+ inspired (promoted from dev-mode) */
@@ -54,36 +55,9 @@
   --spring-smooth: cubic-bezier(0.25, 0.46, 0.45, 0.94);
 }
 
-@media (prefers-color-scheme: light) {
-  :root {
-    --crm-bg: #f5f5f7;
-    --crm-sidebar: rgba(245,245,247,0.85);
-    --crm-card: #ffffff;
-    --crm-accent: #007AFF;
-    --crm-accent-hover: #0056CC;
-    --crm-text: #1d1d1f;
-    --crm-muted: #6e6e73;
-    --crm-success: #34C759;
-    --crm-border: rgba(0,0,0,0.12);
-    --crm-hover: rgba(0,0,0,0.05);
-
-    --crm-deep: #e8e8ed;
-    --crm-overlay: rgba(0, 0, 0, 0.22);
-    --crm-tooltip: #1c1c1e;
-    --crm-panel: rgba(255,255,255,0.65);
-
-    --crm-scroll-track: transparent;
-    --crm-scroll-thumb: rgba(0,0,0,0.15);
-    --crm-scroll-thumb-hover: rgba(0,0,0,0.25);
-
-    --crm-sql-keyword: #7c3aed;
-    --crm-sql-string: #059669;
-    --crm-sql-number: #d97706;
-    --crm-sql-comment: #94a3b8;
-
-    --crm-gradient-primary-shadow: 0 4px 14px rgba(0,122,255,0.25);
-  }
-}
+/* Light theme is now controlled ONLY by the .light-mode class (toggle button).
+   OS preference is read once on first load to set the initial state,
+   but after that the toggle works independently of system settings. */
 
 /* ============================================================
    LIGHT MODE: Applied via .light-mode class (toggle button) OR
@@ -141,35 +115,21 @@
 .light-mode .text-crm-muted\/40 { color: rgba(110,110,115,0.55) !important; }
 .light-mode .text-crm-muted\/30 { color: rgba(110,110,115,0.45) !important; }
 
-/* Also apply light theme via OS preference (for users who haven't toggled) */
-@media (prefers-color-scheme: light) {
-  /* Status/type badge text — use darker variants in light mode */
-  .text-emerald-400 { color: #059669 !important; } /* emerald-600 */
-  .text-red-400 { color: #dc2626 !important; } /* red-600 */
-  .text-yellow-400 { color: #ca8a04 !important; } /* yellow-600 */
-  .text-blue-400 { color: #2563eb !important; } /* blue-600 */
-  .text-purple-400 { color: #9333ea !important; } /* purple-600 */
-  .text-indigo-400 { color: #4f46e5 !important; } /* indigo-600 */
-  .text-orange-400 { color: #ea580c !important; } /* orange-600 */
-  .text-cyan-400 { color: #0891b2 !important; } /* cyan-600 */
-  .text-pink-400 { color: #db2777 !important; } /* pink-600 */
-  .text-green-400 { color: #16a34a !important; } /* green-600 */
-
-  /* Muted accent text */
-  .text-emerald-300 { color: #10b981 !important; } /* emerald-500 */
-  .text-red-300 { color: #ef4444 !important; } /* red-500 */
-  .text-blue-300 { color: #3b82f6 !important; } /* blue-500 */
-
-  /* Sidebar — needs opaque background and subtle shadow */
-  .bg-crm-sidebar {
-    box-shadow: 1px 0 0 var(--crm-border);
-  }
-
-  /* Empty cell "--" placeholder — darken for readability */
-  .text-crm-muted\/50 { color: rgba(110,110,115,0.65) !important; }
-  .text-crm-muted\/40 { color: rgba(110,110,115,0.55) !important; }
-  .text-crm-muted\/30 { color: rgba(110,110,115,0.45) !important; }
-}
+/* Light mode color overrides for hardcoded Tailwind utilities (class-based only) */
+.light-mode .text-emerald-400 { color: #059669 !important; }
+.light-mode .text-red-400 { color: #dc2626 !important; }
+.light-mode .text-yellow-400 { color: #ca8a04 !important; }
+.light-mode .text-blue-400 { color: #2563eb !important; }
+.light-mode .text-purple-400 { color: #9333ea !important; }
+.light-mode .text-indigo-400 { color: #4f46e5 !important; }
+.light-mode .text-orange-400 { color: #ea580c !important; }
+.light-mode .text-cyan-400 { color: #0891b2 !important; }
+.light-mode .text-pink-400 { color: #db2777 !important; }
+.light-mode .text-green-400 { color: #16a34a !important; }
+.light-mode .text-emerald-300 { color: #10b981 !important; }
+.light-mode .text-red-300 { color: #ef4444 !important; }
+.light-mode .text-blue-300 { color: #3b82f6 !important; }
+.light-mode .bg-crm-sidebar { box-shadow: 1px 0 0 var(--crm-border); }
 
 /* ============================================================
    DEVELOPER MODE: VS Code Dark+ inspired theme

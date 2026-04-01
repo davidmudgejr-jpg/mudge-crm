@@ -6,7 +6,11 @@ const DevModeContext = createContext(null);
 
 function readStoredDevMode() {
   try {
-    return localStorage.getItem(STORAGE_KEY) === 'true';
+    const stored = localStorage.getItem(STORAGE_KEY);
+    // If user has toggled before, respect their choice
+    if (stored !== null) return stored === 'true';
+    // First load: default to light mode if OS prefers light, dark otherwise
+    return window.matchMedia?.('(prefers-color-scheme: light)').matches ?? false;
   } catch {
     return false;
   }

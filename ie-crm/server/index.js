@@ -120,6 +120,20 @@ function initDatabase() {
     console.warn('[server] DATABASE_URL not set — database features disabled');
     return;
   }
+  // ── Fix pg driver DATE/TIMESTAMP parsing ──
+  // By default, pg converts DATE columns to JS Date objects at midnight UTC,
+  // which shifts dates by a day when displayed in Pacific time.
+  // Override: return DATE as raw "YYYY-MM-DD" strings, TIMESTAMP as raw ISO strings.
+  const pg = require('pg');
+  const TYPES = {
+    DATE: 1082,
+    TIMESTAMP: 1114,
+    TIMESTAMPTZ: 1184,
+  };
+  pg.types.setTypeParser(TYPES.DATE, (val) => val);           // "2026-03-31" stays "2026-03-31"
+  pg.types.setTypeParser(TYPES.TIMESTAMP, (val) => val);      // Keep raw string
+  pg.types.setTypeParser(TYPES.TIMESTAMPTZ, (val) => val);    // Keep raw string
+
   pool = new Pool({
     connectionString,
     ssl: (connectionString.includes('railway.app') || connectionString.includes('rlwy.net'))
@@ -128,8 +142,14 @@ function initDatabase() {
     max: 10,
     idleTimeoutMillis: 30000,
   });
+
+  // Set session timezone to Pacific so NOW() returns Pacific time
+  pool.on('connect', (client) => {
+    client.query("SET timezone = 'America/Los_Angeles'");
+  });
+
   pool.on('error', (err) => console.error('[server] Pool error:', err.message));
-  console.log('[server] Database pool created');
+  console.log('[server] Database pool created (timezone: America/Los_Angeles)');
 }
 
 // ============================================================

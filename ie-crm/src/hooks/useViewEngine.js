@@ -6,6 +6,7 @@ import { compileFilters } from '../utils/filterCompiler';
 import { listViews, createView, updateView, deleteView } from '../api/views';
 
 const LS_PREFIX = 'views_';
+const SORT_PREFIX = 'sort_'; // Fallback sort persistence when no view is active
 
 const SEED_VIEWS = {
   deals: [
@@ -37,6 +38,19 @@ function writeCache(entityType, views) {
   } catch { /* localStorage full — non-critical */ }
 }
 
+function readSortState(entityType) {
+  try {
+    const raw = localStorage.getItem(`${SORT_PREFIX}${entityType}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function writeSortState(entityType, sort) {
+  try {
+    localStorage.setItem(`${SORT_PREFIX}${entityType}`, JSON.stringify(sort));
+  } catch { /* non-critical */ }
+}
+
 function readActiveId(entityType) {
   try {
     return localStorage.getItem(`${LS_PREFIX}${entityType}_active`) || null;
@@ -63,14 +77,38 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
   const [filters, setFilters] = useState([]);
   const [filterLogic, setFilterLogic] = useState('AND');
 
-  // --- Sort state (uses page-specific default) ---
-  const [sort, setSort] = useState(defaultSort);
+  // --- Sort state (restore from localStorage, then page default) ---
+  const [sort, setSort] = useState(() => readSortState(entityType) || defaultSort);
 
   // --- Column state ---
   const [visibleColumnKeys, setVisibleColumnKeys] = useState(null); // null = show defaults
 
   // Ref to track if initial load has happened
   const loadedRef = useRef(false);
+
+  // Refs for auto-save on unmount (avoids stale closure in cleanup)
+  const dirtyRef = useRef(false);
+  const activeIdRef = useRef(activeViewId);
+  const stateRef = useRef({ filters, filterLogic, sort, visibleColumnKeys });
+  dirtyRef.current = isDirty;
+  activeIdRef.current = activeViewId;
+  stateRef.current = { filters, filterLogic, sort, visibleColumnKeys };
+
+  // Auto-save dirty view when component unmounts (navigating away)
+  useEffect(() => {
+    return () => {
+      if (dirtyRef.current && activeIdRef.current) {
+        const { filters: f, filterLogic: fl, sort: s, visibleColumnKeys: vc } = stateRef.current;
+        updateView(activeIdRef.current, {
+          filters: f,
+          filter_logic: fl,
+          sort_column: s.column,
+          sort_direction: s.direction,
+          visible_columns: vc,
+        }).catch(err => console.error('[useViewEngine] Auto-save on unmount failed:', err));
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // --- Derived: active view object ---
   const activeView = useMemo(
@@ -99,12 +137,14 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     writeActiveId(entityType, view.view_id);
     setFilters(view.filters || []);
     setFilterLogic(view.filter_logic || 'AND');
-    if (view.sort_column) {
-      setSort({ column: view.sort_column, direction: view.sort_direction || 'DESC' });
-    }
+    const viewSort = view.sort_column
+      ? { column: view.sort_column, direction: view.sort_direction || 'DESC' }
+      : defaultSort;
+    setSort(viewSort);
+    writeSortState(entityType, viewSort);
     setVisibleColumnKeys(view.visible_columns || null);
     setIsDirty(false);
-  }, [entityType]);
+  }, [entityType, defaultSort]);
 
   // --- Load views from server on mount ---
   useEffect(() => {
@@ -233,6 +273,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     setFilters([]);
     setFilterLogic('AND');
     setSort(defaultSort);
+    writeSortState(entityType, defaultSort);
     setVisibleColumnKeys(null);
     setIsDirty(false);
   }, [entityType, defaultSort, isDirty, activeViewId, filters, filterLogic, sort, visibleColumnKeys, views]);
@@ -245,13 +286,15 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
 
   const handleSort = useCallback((columnKey) => {
     setSort(prev => {
-      if (prev.column === columnKey) {
-        return { column: columnKey, direction: prev.direction === 'ASC' ? 'DESC' : 'ASC' };
-      }
-      return { column: columnKey, direction: 'ASC' };
+      const next = prev.column === columnKey
+        ? { column: columnKey, direction: prev.direction === 'ASC' ? 'DESC' : 'ASC' }
+        : { column: columnKey, direction: 'ASC' };
+      // Always persist sort to localStorage (instant, survives refresh)
+      writeSortState(entityType, next);
+      return next;
     });
     if (activeViewId) setIsDirty(true);
-  }, [activeViewId]);
+  }, [activeViewId, entityType]);
 
   const saveView = useCallback(async (name) => {
     console.log('[saveView] called with name:', name, 'activeViewId:', activeViewId, 'filters:', JSON.stringify(filters));
