@@ -749,7 +749,7 @@ export async function getActionItems({ limit = 200, offset = 0, orderBy = 'due_d
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'action_items', 'due_date');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT * FROM action_items ${whereClause} ORDER BY ${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
+  const sql = `SELECT * FROM action_items ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -862,7 +862,7 @@ export async function getLeaseComps({ limit = 200, offset = 0, orderBy = 'create
     FROM lease_comps lc
     LEFT JOIN properties p ON lc.property_id = p.property_id
     LEFT JOIN companies co ON lc.company_id = co.company_id
-    ${whereClause} ORDER BY lc.${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
+    ${whereClause} ORDER BY lc.${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -914,7 +914,7 @@ export async function getSaleComps({ limit = 200, offset = 0, orderBy = 'created
       p.drive_ins AS bldg_gl_doors, p.number_of_loading_docks AS bldg_dock_doors
     FROM sale_comps sc
     LEFT JOIN properties p ON sc.property_id = p.property_id
-    ${whereClause} ORDER BY sc.${safeOrder} ${safeDir} NULLS LAST LIMIT $${i++} OFFSET $${i++}`;
+    ${whereClause} ORDER BY sc.${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
