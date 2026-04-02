@@ -3522,5 +3522,22 @@ server.listen(PORT, () => {
     sendSonnetHeartbeat(); // Send immediately on startup
     setInterval(sendSonnetHeartbeat, 60000); // Then every 60 seconds
     console.log('[server] Houston Sonnet heartbeat: active (60s interval)');
+
+    // ── Auto-delete completed tasks older than 30 days ──
+    const cleanupCompletedTasks = async () => {
+      try {
+        const result = await pool.query(
+          `DELETE FROM action_items WHERE status = 'Done' AND date_completed IS NOT NULL AND date_completed < NOW() - INTERVAL '30 days' RETURNING action_item_id`
+        );
+        if (result.rowCount > 0) {
+          console.log(`[server] Cleaned up ${result.rowCount} completed task(s) older than 30 days`);
+        }
+      } catch (err) {
+        console.error('[server] Task cleanup failed:', err.message);
+      }
+    };
+    cleanupCompletedTasks(); // Run on startup
+    setInterval(cleanupCompletedTasks, 24 * 60 * 60 * 1000); // Then every 24 hours
+    console.log('[server] Task auto-cleanup: active (30-day retention)');
   }
 });
