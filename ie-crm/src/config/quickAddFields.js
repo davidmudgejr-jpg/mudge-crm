@@ -25,9 +25,20 @@ export const QUICK_ADD_FIELDS = {
 
   deal: [
     { key: 'deal_name', label: 'Deal Name', type: 'text', required: true, placeholder: '123 Main St - Lease' },
-    { key: 'deal_type', label: 'Type', type: 'select', options: ['Lease', 'Sale', 'Sublease', 'Renewal', 'Expansion', 'Other'] },
-    { key: 'status', label: 'Status', type: 'select', options: ['Prospecting', 'Active', 'Under Contract', 'Closed', 'Dead'] },
-    { key: 'repping', label: 'Repping', type: 'select', isArray: true, options: ['Landlord', 'Tenant', 'Buyer', 'Seller'] },
+    { key: 'deal_type', label: 'Type', type: 'select', options: ['Lease', 'Sale', 'Buy', 'Sublease', 'Renewal', 'Investment', 'Other'] },
+    { key: 'status', label: 'Status', type: 'select', options: ['Prospecting', 'Active', 'Lead', 'Long Leads', 'Under Contract', 'Closed', 'Deal fell through', 'Dead', 'Dead Lead'] },
+    { key: 'repping', label: 'Repping', type: 'select', isArray: true, options: ['Landlord', 'Tenant', 'Buyer', 'Seller', 'Dual'] },
+    { key: 'run_by', label: 'Run By', type: 'select', isArray: true, options: ['Dave Mudge', 'David Mudge Jr', 'Missy'] },
+    { key: 'deal_source', label: 'Source', type: 'select', isArray: true, options: ['Sarah', 'Mat/Ryan', 'Dave', 'Doorknock', 'Relationship', 'Referral', 'Loopnet', 'Email Campaign', 'Cold Email', 'Cold Call', 'Outside Broker', 'Creativity', 'Snailmail', 'Existing Tenant', 'Previous Deal', 'Sign Call', 'Sent Purchase Offer', 'Walk In', 'Reid', 'Listing', 'BOV', 'Lease vs Buy Analysis'] },
+    { key: 'sf', label: 'Square Feet', type: 'number', placeholder: '5000' },
+    { key: 'rate', label: 'Rate', type: 'number', placeholder: '1.25' },
+    { key: 'term', label: 'Term (months)', type: 'number', placeholder: '60' },
+    { key: 'price', label: 'Price', type: 'number', placeholder: '500000' },
+    { key: 'close_date', label: 'Close Date', type: 'date' },
+    { key: 'deadline', label: 'Deadline', type: 'date' },
+    { key: 'other_broker', label: 'Other Broker', type: 'text', placeholder: 'Broker name' },
+    { key: 'industry', label: 'Industry', type: 'text', placeholder: 'Manufacturing' },
+    { key: 'notes', label: 'Notes', type: 'textarea', placeholder: 'Deal details...' },
   ],
 
   interaction: [

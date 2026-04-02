@@ -42,7 +42,7 @@ const STATUS_COLORS = {
   'Dead Lead': 'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
 };
 
-const DEAL_TYPES = ['Lease', 'Sale', 'Purchase', 'Sub-Lease', 'Renewal', 'Other'];
+const DEAL_TYPES = ['Lease', 'Sale', 'Buy', 'Sublease', 'Renewal', 'Investment', 'Other'];
 const REPPING_OPTIONS = ['Landlord', 'Tenant', 'Buyer', 'Seller', 'Dual'];
 const RUN_BY_OPTIONS = ['Dave Mudge', 'David Mudge Jr', 'Missy'];
 
@@ -55,7 +55,7 @@ const DEAL_SOURCE_OPTIONS = [
 
 const GROUP_ORDERS = {
   status: ['Prospecting', 'Active', 'Lead', 'Long Leads', 'Under Contract', 'Closed', 'Deal fell through', 'Dead', 'Dead Lead'],
-  deal_type: ['Lease', 'Sale', 'Purchase', 'Sub-Lease', 'Renewal', 'Other'],
+  deal_type: ['Lease', 'Sale', 'Buy', 'Sublease', 'Renewal', 'Investment', 'Other'],
 };
 
 const DEAL_DEAD_REASON_OPTIONS = [
@@ -69,7 +69,7 @@ const DEAL_DEAD_REASON_OPTIONS = [
 const ALL_COLUMNS = [
   // Default visible
   { key: 'deal_name', label: 'Deal', defaultWidth: 180, editable: false, type: 'text', filterable: true, wrapText: true },
-  { key: 'deal_type', label: 'Type', defaultWidth: 100, type: 'select', filterable: true, editType: 'select', editOptions: DEAL_TYPES, filterOptions: ['Lease', 'Sale', 'Purchase', 'Sub-Lease', 'Renewal', 'Other'] },
+  { key: 'deal_type', label: 'Type', defaultWidth: 100, type: 'select', filterable: true, editType: 'select', editOptions: DEAL_TYPES, filterOptions: DEAL_TYPES },
   { key: 'status', label: 'Status', defaultWidth: 90, type: 'select', filterable: true,
     editType: 'select', editOptions: ['Prospecting', 'Active', 'Lead', 'Long Leads', 'Under Contract', 'Closed', 'Deal fell through', 'Dead', 'Dead Lead'],
     filterOptions: ['Prospecting', 'Active', 'Lead', 'Long Leads', 'Under Contract', 'Closed', 'Deal fell through', 'Dead', 'Dead Lead'],

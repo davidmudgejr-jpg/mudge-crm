@@ -15,7 +15,7 @@ import TasksSection from '../components/shared/TasksSection';
 import LeadsSection from '../components/shared/LeadsSection';
 
 export const STATUSES = ['Prospecting', 'Active', 'Under Contract', 'Closed', 'Dead'];
-export const DEAL_TYPES = ['Lease', 'Sale', 'Acquisition', 'Disposition', 'Investment', 'Development'];
+export const DEAL_TYPES = ['Lease', 'Sale', 'Buy', 'Sublease', 'Renewal', 'Investment', 'Other'];
 
 const STATUS_COLORS = {
   Active: 'bg-gradient-to-r from-[#30D158] to-[#34C759] text-white shadow-[0_2px_6px_rgba(48,209,88,0.3)]',
