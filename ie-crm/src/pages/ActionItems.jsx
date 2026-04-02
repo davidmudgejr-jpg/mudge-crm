@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getActionItems, updateActionItem } from '../api/database';
 import ActionItemDetail, { STATUSES } from './ActionItemDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
@@ -45,13 +45,14 @@ function parseResponsibility(val) {
   return String(val).split(',').map(s => s.trim()).filter(Boolean);
 }
 
-function TaskRow({ task, onToggleDone, onSelect, isNew }) {
+function TaskRow({ task, onToggleDone, onSelect, isNew, isTransitioning, onTransitionComplete }) {
   const [justCompleted, setJustCompleted] = useState(false);
   const [sliding, setSliding] = useState(false);
+  const transitionTimerRef = useRef(null);
 
   const isDone = task.status === 'Done' || justCompleted;
   const isDead = task.status === 'Dead';
-  const dimmed = (isDone && !justCompleted) || isDead;
+  const dimmed = (isDone && !justCompleted && !isTransitioning) || isDead;
 
   const today = new Date().toISOString().split('T')[0];
   const dueDay = task.due_date ? task.due_date.split('T')[0] : null;
@@ -72,10 +73,24 @@ function TaskRow({ task, onToggleDone, onSelect, isNew }) {
       onToggleDone(task);
     } else {
       setJustCompleted(true);
-      setTimeout(() => setSliding(true), 600);
-      setTimeout(() => onToggleDone(task), 800);
+      onToggleDone(task);
     }
   };
+
+  // When transitioning (completed but staying in active list), slide out after 5 seconds
+  useEffect(() => {
+    if (isTransitioning && isDone && !transitionTimerRef.current) {
+      transitionTimerRef.current = setTimeout(() => setSliding(true), 4500);
+      const completeTimer = setTimeout(() => {
+        if (onTransitionComplete) onTransitionComplete(task.action_item_id);
+      }, 5200);
+      return () => {
+        clearTimeout(transitionTimerRef.current);
+        clearTimeout(completeTimer);
+        transitionTimerRef.current = null;
+      };
+    }
+  }, [isTransitioning, isDone, task.action_item_id, onTransitionComplete]);
 
   return (
     <div
@@ -83,7 +98,7 @@ function TaskRow({ task, onToggleDone, onSelect, isNew }) {
         ${dimmed ? 'opacity-50' : ''} ${justCompleted && !sliding ? 'opacity-70' : ''}
         ${sliding ? 'opacity-0 -translate-x-4 max-h-0 py-0 overflow-hidden' : 'max-h-24'}
         ${isNew ? 'animate-live-insert' : ''} ${!sliding ? 'hover:bg-crm-hover/40' : ''}`}
-      style={sliding ? { transition: 'all 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)' } : undefined}
+      style={sliding ? { transition: 'all 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94)' } : undefined}
       onClick={() => !sliding && onSelect(task.action_item_id)}
     >
       <button
@@ -144,6 +159,8 @@ export default function ActionItems({ onCountChange }) {
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
   const [showCompleted, setShowCompleted] = useState(false);
+  const [transitioningIds, setTransitioningIds] = useState(new Set());
+  const suppressRefetchRef = useRef(0);
 
   const { myTasks, houstonTasks } = useMemo(() => {
     const my = [];
@@ -189,13 +206,26 @@ export default function ActionItems({ onCountChange }) {
   }, [search, filterStatus, activeView, orderBy, order, onCountChange]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  const { newRecordId } = useLiveUpdates('action_item', fetchData);
+
+  // Wrap fetchData to suppress live-update refetches during completion transitions
+  const guardedFetchData = useCallback(() => {
+    if (suppressRefetchRef.current > Date.now()) return;
+    fetchData();
+  }, [fetchData]);
+  const { newRecordId } = useLiveUpdates('action_item', guardedFetchData);
 
   const handleToggleDone = async (task) => {
     const newStatus = task.status === 'Done' ? 'Todo' : 'Done';
     const updates = { status: newStatus };
-    if (newStatus === 'Done') updates.date_completed = new Date().toISOString();
-    else updates.date_completed = null;
+    if (newStatus === 'Done') {
+      updates.date_completed = new Date().toISOString();
+      // Keep the task in the active list for 5+ seconds before moving to completed
+      setTransitioningIds(prev => new Set(prev).add(task.action_item_id));
+      // Suppress live-update refetches so the transition isn't interrupted
+      suppressRefetchRef.current = Date.now() + 7000;
+    } else {
+      updates.date_completed = null;
+    }
 
     // Optimistic update
     setRows(prev => prev.map(r =>
@@ -207,9 +237,23 @@ export default function ActionItems({ onCountChange }) {
       addToast(newStatus === 'Done' ? 'Task completed' : 'Task reopened');
     } catch (err) {
       console.error('Failed to update task:', err);
+      setTransitioningIds(prev => {
+        const next = new Set(prev);
+        next.delete(task.action_item_id);
+        return next;
+      });
       fetchData();
     }
   };
+
+  // Called when a task's slide-out animation finishes
+  const handleTransitionComplete = useCallback((id) => {
+    setTransitioningIds(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
 
   const showHoustonSection = houstonTasks.length > 0;
   const displayTasks = showHoustonSection ? myTasks : rows;
@@ -218,11 +262,12 @@ export default function ActionItems({ onCountChange }) {
     const active = [];
     const done = [];
     displayTasks.forEach(t => {
-      if (t.status === 'Done') done.push(t);
+      // Keep transitioning tasks in the active list so they can animate out
+      if (t.status === 'Done' && !transitioningIds.has(t.action_item_id)) done.push(t);
       else active.push(t);
     });
     return { activeTasks: active, doneTasks: done };
-  }, [displayTasks]);
+  }, [displayTasks, transitioningIds]);
 
   return (
     <div className="flex flex-col h-full">
@@ -310,7 +355,7 @@ export default function ActionItems({ onCountChange }) {
 
             <div className="divide-y divide-crm-border/30">
               {activeTasks.map((task) => (
-                <TaskRow key={task.action_item_id} task={task} onToggleDone={handleToggleDone} onSelect={setDetailId} isNew={task.action_item_id === newRecordId} />
+                <TaskRow key={task.action_item_id} task={task} onToggleDone={handleToggleDone} onSelect={setDetailId} isNew={task.action_item_id === newRecordId} isTransitioning={transitioningIds.has(task.action_item_id)} onTransitionComplete={handleTransitionComplete} />
               ))}
             </div>
 
