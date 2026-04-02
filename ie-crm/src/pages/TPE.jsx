@@ -5,6 +5,7 @@ import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import EmptyState from '../components/shared/EmptyState';
 import { useToast } from '../components/shared/Toast';
+import ExportPdfModal from '../components/shared/ExportPdfModal';
 import DashboardStrip from '../components/tpe/DashboardStrip';
 import TierBadge from '../components/tpe/TierBadge';
 import TpeDetailPanel from '../components/tpe/TpeDetailPanel';
@@ -93,6 +94,7 @@ export default function TPE({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   const [showTune, setShowTune] = useState(false);
   const [selected, setSelected] = useState(new Set());
+  const [exportOpen, setExportOpen] = useState(false);
 
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('tpe', ALL_COLUMNS);
 
@@ -267,6 +269,19 @@ export default function TPE({ onCountChange }) {
             resetDefaults={resetDefaults}
           />
 
+          {selected.size > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">{selected.size} selected</span>
+              <button
+                onClick={() => setExportOpen(true)}
+                className="text-xs bg-crm-card border border-crm-border hover:border-crm-accent/50 text-crm-text font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                Export PDF
+              </button>
+            </div>
+          )}
+
           <button
             onClick={fetchData}
             className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors"
@@ -325,6 +340,16 @@ export default function TPE({ onCountChange }) {
           onConfigChanged={fetchData}
         />
       )}
+
+      <ExportPdfModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        entityType="tpe"
+        entityLabel="TPE Properties"
+        selectedRows={sortedRows.filter(r => selected.has(r.property_id))}
+        primaryColumns={ALL_COLUMNS}
+        linkedData={null}
+      />
     </div>
   );
 }

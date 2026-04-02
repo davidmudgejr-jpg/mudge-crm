@@ -13,6 +13,7 @@ import FilterBar from '../components/shared/FilterBar';
 import FilterBuilder from '../components/shared/FilterBuilder';
 import NewViewModal from '../components/shared/NewViewModal';
 import LinkedChips from '../components/shared/LinkedChips';
+import ExportPdfModal from '../components/shared/ExportPdfModal';
 import ContactDetail from './ContactDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import LinkPickerModal from '../components/shared/LinkPickerModal';
@@ -117,6 +118,7 @@ export default function Contacts({ onCountChange }) {
   const { addToast } = useToast();
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [showCampaignPicker, setShowCampaignPicker] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
   const [activityModal, setActivityModal] = useState(null);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -332,6 +334,13 @@ export default function Contacts({ onCountChange }) {
                 >
                   Delete
                 </button>
+                <button
+                  onClick={() => setExportOpen(true)}
+                  className="text-xs bg-crm-card border border-crm-border hover:border-crm-accent/50 text-crm-text font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  Export PDF
+                </button>
               </div>
             )}
             <button
@@ -499,6 +508,16 @@ export default function Contacts({ onCountChange }) {
           onActivityCreated={fetchData}
         />
       )}
+
+      <ExportPdfModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        entityType="contacts"
+        entityLabel="Contacts"
+        selectedRows={augmentedRows.filter(r => selected.has(r.contact_id))}
+        primaryColumns={ALL_COLUMNS}
+        linkedData={linked}
+      />
     </div>
   );
 }

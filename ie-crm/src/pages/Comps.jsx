@@ -8,6 +8,7 @@ import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import CompDetail from './CompDetail';
 import CompManualEntryModal from '../components/shared/CompManualEntryModal';
 import { useToast } from '../components/shared/Toast';
+import ExportPdfModal from '../components/shared/ExportPdfModal';
 import EmptyState from '../components/shared/EmptyState';
 import { bulkOps } from '../api/bridge';
 import { useSlideOver } from '../components/shared/SlideOverContext';
@@ -145,6 +146,7 @@ export default function Comps({ onCountChange }) {
   const [orderBy, setOrderBy] = useState('created_at');
   const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
+  const [exportOpen, setExportOpen] = useState(false);
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
@@ -275,6 +277,13 @@ export default function Comps({ onCountChange }) {
               <div className="flex items-center gap-1.5">
                 <span className="text-xs text-crm-accent bg-crm-accent/10 px-2 py-1 rounded">{selected.size} selected</span>
                 <button onClick={handleBulkDelete} className="text-xs bg-red-600/80 hover:bg-red-600 text-white font-medium px-2 py-1 rounded transition-colors">Delete</button>
+                <button
+                  onClick={() => setExportOpen(true)}
+                  className="text-xs bg-crm-card border border-crm-border hover:border-crm-accent/50 text-crm-text font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  Export PDF
+                </button>
               </div>
             )}
             <button
@@ -412,6 +421,15 @@ export default function Comps({ onCountChange }) {
         />
       )}
 
+      <ExportPdfModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        entityType={activeTab === 'lease' ? 'lease_comps' : 'sale_comps'}
+        entityLabel={activeTab === 'lease' ? 'Lease Comps' : 'Sale Comps'}
+        selectedRows={rows.filter(r => selected.has(r.id))}
+        primaryColumns={activeTab === 'lease' ? LEASE_COLUMNS : SALE_COLUMNS}
+        linkedData={null}
+      />
     </div>
   );
 }

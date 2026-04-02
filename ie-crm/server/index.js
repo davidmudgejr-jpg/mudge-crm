@@ -2561,6 +2561,53 @@ app.delete('/api/views/:viewId', async (req, res) => {
 });
 
 // ============================================================
+// PDF EXPORT TEMPLATES
+// ============================================================
+
+// GET /api/pdf-templates?entity_type=contacts
+app.get('/api/pdf-templates', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected.' });
+    const { entity_type } = req.query;
+    const result = entity_type
+      ? await pool.query('SELECT * FROM pdf_templates WHERE entity_type = $1 ORDER BY created_at ASC', [entity_type])
+      : await pool.query('SELECT * FROM pdf_templates ORDER BY entity_type, created_at ASC');
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/pdf-templates — create a template
+app.post('/api/pdf-templates', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected.' });
+    const { entity_type, name, primary_fields, linked_types } = req.body;
+    if (!entity_type || !name?.trim()) return res.status(400).json({ error: 'entity_type and name required' });
+    const result = await pool.query(
+      `INSERT INTO pdf_templates (entity_type, name, primary_fields, linked_types, created_by)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [entity_type, name.trim(), JSON.stringify(primary_fields || []), JSON.stringify(linked_types || {}), req.user?.name || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/pdf-templates/:id
+app.delete('/api/pdf-templates/:id', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not connected.' });
+    const result = await pool.query('DELETE FROM pdf_templates WHERE id = $1 RETURNING id', [req.params.id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Template not found' });
+    res.json({ deleted: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================
 // HOUSTON VOICE — ElevenLabs Conversational AI (Custom LLM)
 // ============================================================
 const { buildPrompt: buildHoustonPrompt } = require('./services/houstonRAG');
