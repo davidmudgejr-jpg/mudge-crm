@@ -517,7 +517,7 @@ export default function Deals({ onCountChange }) {
         entityType="deals"
         entityLabel="Deals"
         selectedRows={augmentedRows.filter(r => selected.has(r.deal_id))}
-        primaryColumns={ALL_COLUMNS}
+        primaryColumns={allColumnsWithActivity}
         linkedData={linked}
       />
     </div>

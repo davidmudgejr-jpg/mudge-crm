@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import { LINKED_EXPORT_FIELDS, ENTITY_LINKED_TYPES } from '../../config/exportFields';
-import { fetchFullRecords, buildDataMatrix, buildPdfHtml, generatePdf } from '../../utils/pdfExport';
+import { fetchFullRecords, buildCardPdfHtml, generatePdf } from '../../utils/pdfExport';
 import { useToast } from './Toast';
 
 // ── Template persistence (cloud via API) ────────────────────────────
@@ -39,6 +39,18 @@ async function saveTemplateToServer(entityType, name, primaryFields, linkedTypes
 async function deleteTemplateFromServer(id) {
   return apiFetch(`/api/pdf-templates/${id}`, { method: 'DELETE' });
 }
+
+// Which field is the card title for each entity type
+const TITLE_KEY = {
+  properties: 'property_address',
+  contacts: 'full_name',
+  companies: 'company_name',
+  deals: 'deal_name',
+  campaigns: 'campaign_name',
+  lease_comps: 'property_address',
+  sale_comps: 'property_address',
+  tpe: 'property_address',
+};
 
 // ── Checkbox group ──────────────────────────────────────────────────
 function FieldCheckboxGroup({ fields, checked, onChange, label }) {
@@ -92,7 +104,7 @@ export default function ExportPdfModal({
 
   // Derive exportable primary fields (exclude linked_* columns and renderCell-only computed columns)
   const exportablePrimary = useMemo(() =>
-    primaryColumns.filter(c => !c.key.startsWith('linked_')),
+    primaryColumns.filter(c => !c.key.startsWith('linked_') && c.key !== 'linked_interactions'),
     [primaryColumns]
   );
 
@@ -212,13 +224,15 @@ export default function ExportPdfModal({
         }
       }
 
-      // Build matrix + HTML + PDF
-      const { columns, dataRows } = buildDataMatrix(selectedRows, primaryFields, linkedConfig, linkedRecordMaps);
-      const html = buildPdfHtml({
+      // Build card-based PDF
+      const html = buildCardPdfHtml({
         title: `${entityLabel} Export`,
-        columns,
-        dataRows,
+        selectedRows,
+        primaryFields,
+        linkedConfig,
+        linkedRecordMaps,
         logoUrl: '/logo.png',
+        titleKey: TITLE_KEY[entityType] || primaryFields[0]?.key,
       });
 
       const filename = `${entityLabel.toLowerCase()}_export_${new Date().toISOString().slice(0, 10)}.pdf`;

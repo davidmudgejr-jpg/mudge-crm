@@ -650,7 +650,7 @@ export default function Properties({ onCountChange }) {
         entityType="properties"
         entityLabel="Properties"
         selectedRows={augmentedRows.filter(r => selected.has(r.property_id))}
-        primaryColumns={ALL_COLUMNS}
+        primaryColumns={allColumnsWithActivity}
         linkedData={linked}
       />
     </div>
