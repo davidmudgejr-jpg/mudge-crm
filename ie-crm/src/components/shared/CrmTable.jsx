@@ -315,14 +315,20 @@ export default function CrmTable({
   filters,           // current filter array from useViewEngine
   onColumnFilter,    // (columnKey, conditions) => void — callback to update filters for a column
   newRecordId,       // ID of a just-created record — gets smooth insert animation
+  // Per-view column order (from useViewEngine)
+  viewColumnOrder,   // string[] | null — column key order from saved view
+  onColumnOrderChange, // (keys: string[]) => void — notify parent when user drags columns
 }) {
   /* ── Column order: drag-to-reorder with localStorage persistence ─── */
   const colOrderKey = `crm_column_order_${tableKey}`;
 
-  const [columnOrder, setColumnOrder] = useState(() => {
+  const [localColumnOrder, setLocalColumnOrder] = useState(() => {
     try { const s = localStorage.getItem(colOrderKey); return s ? JSON.parse(s) : null; }
     catch { return null; }
   });
+
+  // View-driven order takes precedence over localStorage
+  const columnOrder = viewColumnOrder ?? localColumnOrder;
   const [dragCol, setDragCol] = useState(null);
   const [dragOverCol, setDragOverCol] = useState(null);
 
@@ -364,11 +370,14 @@ export default function CrmTable({
     if (si === -1 || ti === -1) return;
     keys.splice(si, 1);
     keys.splice(ti, 0, dragCol);
-    setColumnOrder(keys);
+    // Always update localStorage as fallback
+    setLocalColumnOrder(keys);
     localStorage.setItem(colOrderKey, JSON.stringify(keys));
+    // If a view is active, notify parent to persist with the view
+    if (onColumnOrderChange) onColumnOrderChange(keys);
     setDragCol(null);
     setDragOverCol(null);
-  }, [dragCol, orderedColumns, colOrderKey]);
+  }, [dragCol, orderedColumns, colOrderKey, onColumnOrderChange]);
   /* ─────────────────────────────────────────────────────────────────── */
 
   const allColumns = [...orderedColumns, ...customColumns];

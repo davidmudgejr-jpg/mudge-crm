@@ -204,7 +204,6 @@ export default function ActionItems({ onCountChange }) {
     try {
       await updateActionItem(task.action_item_id, updates);
       addToast(newStatus === 'Done' ? 'Task completed' : 'Task reopened');
-      setTimeout(() => fetchData(), 1200);
     } catch (err) {
       console.error('Failed to update task:', err);
       fetchData();

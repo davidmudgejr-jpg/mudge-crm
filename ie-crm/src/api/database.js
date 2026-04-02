@@ -144,7 +144,8 @@ function sanitizeCol(col, table, fallback) {
 }
 
 function sanitizeDir(dir) {
-  return dir?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+  const baseDir = dir?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+  return `${baseDir} NULLS LAST`;
 }
 
 function validateFieldKeys(keys, table) {
@@ -171,7 +172,7 @@ const VALID_VIEW_TABLES = new Set([
 ]);
 
 // Map entity tables to their computed VIEWs (for formula columns)
-const TABLE_VIEW_MAP = { deals: 'deal_formulas' };
+const TABLE_VIEW_MAP = { deals: 'deal_formulas', campaigns: 'campaigns_with_counts' };
 
 export async function queryWithFilters(table, { whereClause = '', params = [], orderBy, order, limit = 200, offset = 0 } = {}) {
   if (!VALID_VIEW_TABLES.has(table)) throw new Error(`Invalid table: ${table}`);

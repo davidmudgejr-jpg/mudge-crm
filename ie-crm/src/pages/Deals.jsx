@@ -474,6 +474,8 @@ export default function Deals({ onCountChange }) {
             onDeleteRow={deleteRow}
             filters={view.filters}
             onColumnFilter={handleColumnFilter}
+            viewColumnOrder={view.columnOrder}
+            onColumnOrderChange={view.updateColumnOrder}
           />
         )}
       </div>

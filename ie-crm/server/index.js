@@ -2453,7 +2453,7 @@ app.get('/api/views', async (req, res) => {
 app.post('/api/views', async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
-    const { entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position } = req.body;
+    const { entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position, column_order } = req.body;
     if (!entity_type || !VALID_VIEW_ENTITY_TYPES.has(entity_type)) {
       return res.status(400).json({ error: 'Invalid or missing entity_type' });
     }
@@ -2461,8 +2461,8 @@ app.post('/api/views', async (req, res) => {
       return res.status(400).json({ error: 'view_name is required' });
     }
     const result = await pool.query(
-      `INSERT INTO saved_views (entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO saved_views (entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position, column_order)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
       [
         entity_type,
@@ -2473,6 +2473,7 @@ app.post('/api/views', async (req, res) => {
         sort_direction === 'ASC' ? 'ASC' : 'DESC',
         visible_columns ? JSON.stringify(visible_columns) : null,
         position || 0,
+        column_order ? JSON.stringify(column_order) : null,
       ]
     );
     res.status(201).json(result.rows[0]);
@@ -2520,13 +2521,13 @@ app.patch('/api/views/:viewId', async (req, res) => {
     }
 
     // Normal partial update
-    const allowed = ['view_name', 'filters', 'filter_logic', 'sort_column', 'sort_direction', 'visible_columns', 'is_default', 'position'];
+    const allowed = ['view_name', 'filters', 'filter_logic', 'sort_column', 'sort_direction', 'visible_columns', 'is_default', 'position', 'column_order'];
     const sets = [];
     const params = [viewId]; // $1 = viewId
     let i = 2;
     for (const key of allowed) {
       if (updates[key] !== undefined) {
-        const val = (key === 'filters' || key === 'visible_columns')
+        const val = (key === 'filters' || key === 'visible_columns' || key === 'column_order')
           ? JSON.stringify(updates[key])
           : updates[key];
         sets.push(`${key} = $${i}`);
