@@ -8,7 +8,7 @@ import { SlideOverHeader } from '../components/shared/SlideOver';
 import DetailSkeleton from '../components/shared/DetailSkeleton';
 import { formatDatePacific } from '../utils/timezone';
 
-export const STATUSES = ['Todo', 'Reminders', 'In progress', 'Done', 'Dead', 'Email', 'Needs and Wants'];
+export const STATUSES = ['Todo', 'Reminders', 'In progress', 'Follow Up', 'Done', 'Dead', 'Email', 'Needs and Wants'];
 const RESPONSIBILITY_OPTIONS = ['Dave Mudge', 'Missy', 'David Mudge Jr', 'Houston'];
 const SOURCE_OPTIONS = ['manual', 'houston_tpe', 'houston_lease', 'houston_general'];
 

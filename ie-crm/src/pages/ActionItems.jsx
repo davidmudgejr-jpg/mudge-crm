@@ -20,6 +20,7 @@ const CIRCLE_COLORS = {
 
 const STATUS_BADGE = {
   'In progress': 'bg-yellow-500/15 text-yellow-400',
+  'Follow Up': 'bg-orange-500/15 text-orange-400',
   Reminders: 'bg-blue-500/15 text-blue-400',
   Email: 'bg-cyan-500/15 text-cyan-400',
   'Needs and Wants': 'bg-purple-500/15 text-purple-400',
