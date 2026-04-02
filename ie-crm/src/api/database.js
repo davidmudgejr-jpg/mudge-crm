@@ -164,6 +164,99 @@ function validateJunction(table, cols) {
 }
 
 // ============================================================
+// FUZZY SEARCH (pg_trgm) — shared across all entity search
+// ============================================================
+
+// Text columns searchable per entity (no IDs, dates, or numerics)
+const SEARCH_COLUMNS = {
+  contacts: [
+    'full_name', 'first_name', 'email_1', 'email_2', 'email_3',
+    'phone_1', 'phone_2', 'phone_3', 'type', 'title',
+    'home_address', 'work_address', 'work_city', 'work_state', 'work_zip',
+    'client_level', 'active_need', 'notes', 'linkedin', 'data_source',
+    'property_type_interest',
+  ],
+  contacts_arrays: ['tags'],
+
+  properties: [
+    'property_address', 'property_name', 'city', 'county', 'state', 'zip',
+    'property_type', 'building_class', 'building_status',
+    'owner_name', 'owner_phone', 'owner_address', 'owner_city_state_zip', 'owner_email',
+    'leasing_company', 'broker_contact', 'building_park', 'market_name', 'submarket_name',
+    'zoning', 'features', 'notes', 'parcel_number',
+  ],
+  properties_arrays: ['tags'],
+
+  companies: [
+    'company_name', 'company_type', 'industry_type', 'website', 'city',
+    'company_hq', 'company_growth', 'notes', 'tenant_sic', 'tenant_naics', 'suite',
+  ],
+  companies_arrays: ['tags'],
+
+  deals: [
+    'deal_name', 'deal_type', 'status', 'notes',
+    'other_broker', 'industry', 'fell_through_reason',
+  ],
+  deals_arrays: ['run_by', 'repping', 'deal_source', 'tags'],
+
+  campaigns: ['name', 'type', 'status', 'notes', 'assignee'],
+  campaigns_arrays: [],
+
+  lease_comps: [
+    'tenant_name', 'property_type', 'space_use', 'space_type', 'floor_suite',
+    'rent_type', 'lease_type', 'escalations', 'concessions', 'notes', 'source',
+    'tenant_rep_company', 'tenant_rep_agents', 'landlord_rep_company', 'landlord_rep_agents', 'zoning',
+  ],
+  lease_comps_arrays: [],
+
+  sale_comps: ['buyer_name', 'seller_name', 'property_type', 'notes', 'source'],
+  sale_comps_arrays: [],
+};
+
+/**
+ * Build a SQL concat_ws expression for all searchable text columns
+ * @param {string} table - entity table name
+ * @param {string} [alias] - optional table alias prefix (e.g. 'c' → 'c.full_name')
+ */
+function getSearchExpr(table, alias) {
+  const prefix = alias ? `${alias}.` : '';
+  const textCols = SEARCH_COLUMNS[table] || [];
+  const arrayCols = SEARCH_COLUMNS[`${table}_arrays`] || [];
+  const parts = [
+    ...textCols.map(c => `${prefix}${c}`),
+    ...arrayCols.map(c => `array_to_string(${prefix}${c}, ' ')`),
+  ];
+  return `concat_ws(' ', ${parts.join(', ')})`;
+}
+
+/**
+ * Build fuzzy search WHERE condition + relevance score expression.
+ * Uses dual ILIKE (exact substring) + word_similarity (typo tolerance).
+ *
+ * word_similarity() compares the search term against individual words/substrings
+ * in the target text, so short search terms like "Jon" work well even against
+ * long concatenated text (unlike similarity() which dilutes short terms).
+ *
+ * @param {string} table - entity table name
+ * @param {string} searchTerm - user's search input
+ * @param {number} paramIndex - next $N index for query params
+ * @param {string} [alias] - optional table alias
+ * @returns {{ condition: string, scoreExpr: string, params: string[], nextParamIndex: number }}
+ */
+export function buildFuzzySearch(table, searchTerm, paramIndex, alias) {
+  const searchExpr = getSearchExpr(table, alias);
+  // ILIKE catches exact substrings; word_similarity catches typos against individual words
+  const condition = `(${searchExpr} ILIKE $${paramIndex} OR word_similarity($${paramIndex + 1}, ${searchExpr}) > 0.3)`;
+  const scoreExpr = `word_similarity($${paramIndex + 1}, ${searchExpr})`;
+  return {
+    condition,
+    scoreExpr,
+    params: [`%${searchTerm}%`, searchTerm],
+    nextParamIndex: paramIndex + 2,
+  };
+}
+
+// ============================================================
 // GENERIC FILTERED QUERY (for View Engine)
 // ============================================================
 const VALID_VIEW_TABLES = new Set([
@@ -204,16 +297,22 @@ export async function getProperties({ limit = 200, offset = 0, orderBy = 'create
   if (filters.property_type) { where.push(`property_type = $${i++}`); params.push(filters.property_type); }
   if (filters.priority) { where.push(`priority = $${i++}`); params.push(filters.priority); }
   if (filters.contacted) { where.push(`$${i++} = ANY(contacted)`); params.push(filters.contacted); }
+  let searchScore = null;
   if (filters.search) {
-    where.push(`(property_address ILIKE $${i} OR owner_name ILIKE $${i} OR city ILIKE $${i} OR property_name ILIKE $${i})`);
-    params.push(`%${filters.search}%`);
-    i++;
+    const fuzzy = buildFuzzySearch('properties', filters.search, i);
+    where.push(fuzzy.condition);
+    params.push(...fuzzy.params);
+    searchScore = fuzzy.scoreExpr;
+    i = fuzzy.nextParamIndex;
   }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'properties', 'created_at');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT * FROM properties ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+  const orderClause = searchScore
+    ? `${searchScore} DESC, ${safeOrder} ${safeDir}`
+    : `${safeOrder} ${safeDir}`;
+  const sql = `SELECT * FROM properties ${whereClause} ORDER BY ${orderClause} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -274,18 +373,24 @@ export async function getContacts({ limit = 200, offset = 0, orderBy = 'created_
   let i = 1;
 
   if (filters.type) { where.push(`type = $${i++}`); params.push(filters.type); }
+  let searchScore = null;
   if (filters.search) {
-    where.push(`(full_name ILIKE $${i} OR email ILIKE $${i} OR phone_1 ILIKE $${i})`);
-    params.push(`%${filters.search}%`);
-    i++;
+    const fuzzy = buildFuzzySearch('contacts', filters.search, i, 'c');
+    where.push(fuzzy.condition);
+    params.push(...fuzzy.params);
+    searchScore = fuzzy.scoreExpr;
+    i = fuzzy.nextParamIndex;
   }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'contacts', 'created_at');
   const safeDir = sanitizeDir(order);
+  const orderClause = searchScore
+    ? `${searchScore} DESC, ${safeOrder} ${safeDir}`
+    : `${safeOrder} ${safeDir}`;
   const sql = `SELECT c.*,
     (SELECT MAX(intr.date) FROM interaction_contacts ic JOIN interactions intr ON intr.interaction_id = ic.interaction_id WHERE ic.contact_id = c.contact_id) AS last_contacted
-  FROM contacts c ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+  FROM contacts c ${whereClause} ORDER BY ${orderClause} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -309,18 +414,24 @@ export async function getCompanies({ limit = 200, offset = 0, orderBy = 'created
   let params = [];
   let i = 1;
 
+  let searchScore = null;
   if (filters.search) {
-    where.push(`(company_name ILIKE $${i} OR city ILIKE $${i})`);
-    params.push(`%${filters.search}%`);
-    i++;
+    const fuzzy = buildFuzzySearch('companies', filters.search, i, 'co');
+    where.push(fuzzy.condition);
+    params.push(...fuzzy.params);
+    searchScore = fuzzy.scoreExpr;
+    i = fuzzy.nextParamIndex;
   }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'companies', 'created_at');
   const safeDir = sanitizeDir(order);
+  const orderClause = searchScore
+    ? `${searchScore} DESC, ${safeOrder} ${safeDir}`
+    : `${safeOrder} ${safeDir}`;
   const sql = `SELECT co.*,
     (SELECT MAX(intr.date) FROM interaction_companies ico JOIN interactions intr ON intr.interaction_id = ico.interaction_id WHERE ico.company_id = co.company_id) AS last_contacted
-  FROM companies co ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+  FROM companies co ${whereClause} ORDER BY ${orderClause} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -345,16 +456,22 @@ export async function getDeals({ limit = 200, offset = 0, orderBy = 'created_at'
   let i = 1;
 
   if (filters.status) { where.push(`status = $${i++}`); params.push(filters.status); }
+  let searchScore = null;
   if (filters.search) {
-    where.push(`(deal_name ILIKE $${i} OR deal_type ILIKE $${i})`);
-    params.push(`%${filters.search}%`);
-    i++;
+    const fuzzy = buildFuzzySearch('deals', filters.search, i, 'df');
+    where.push(fuzzy.condition);
+    params.push(...fuzzy.params);
+    searchScore = fuzzy.scoreExpr;
+    i = fuzzy.nextParamIndex;
   }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'deals', 'created_at');
   const safeDir = sanitizeDir(order);
-  const sql = `SELECT df.*, (SELECT COUNT(*) FROM interaction_deals id2 JOIN interactions i2 ON i2.interaction_id = id2.interaction_id WHERE id2.deal_id = df.deal_id AND i2.type = 'Lead') AS lead_count FROM deal_formulas df ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+  const orderClause = searchScore
+    ? `${searchScore} DESC, ${safeOrder} ${safeDir}`
+    : `${safeOrder} ${safeDir}`;
+  const sql = `SELECT df.*, (SELECT COUNT(*) FROM interaction_deals id2 JOIN interactions i2 ON i2.interaction_id = id2.interaction_id WHERE id2.deal_id = df.deal_id AND i2.type = 'Lead') AS lead_count FROM deal_formulas df ${whereClause} ORDER BY ${orderClause} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -632,51 +749,66 @@ export async function createCampaign(fields, skipDuplicateCheck = false) {
 // SEARCH FUNCTIONS (for link picker typeahead)
 // ============================================================
 export async function searchContacts(term) {
+  const searchExpr = getSearchExpr('contacts');
   const result = await query(
-    `SELECT contact_id, full_name, email, phone_1, type FROM contacts
-     WHERE full_name ILIKE $1 OR email ILIKE $1 OR phone_1 ILIKE $1
-     ORDER BY full_name LIMIT 20`,
-    [`%${term}%`]
+    `SELECT contact_id, full_name, email_1, phone_1, type,
+            word_similarity($2, ${searchExpr}) AS relevance
+     FROM contacts
+     WHERE ${searchExpr} ILIKE $1 OR word_similarity($2, ${searchExpr}) > 0.3
+     ORDER BY relevance DESC LIMIT 20`,
+    [`%${term}%`, term]
   );
   return result.rows;
 }
 
 export async function searchCompanies(term) {
+  const searchExpr = getSearchExpr('companies');
   const result = await query(
-    `SELECT company_id, company_name, city FROM companies
-     WHERE company_name ILIKE $1 OR city ILIKE $1
-     ORDER BY company_name LIMIT 20`,
-    [`%${term}%`]
+    `SELECT company_id, company_name, city,
+            word_similarity($2, ${searchExpr}) AS relevance
+     FROM companies
+     WHERE ${searchExpr} ILIKE $1 OR word_similarity($2, ${searchExpr}) > 0.3
+     ORDER BY relevance DESC LIMIT 20`,
+    [`%${term}%`, term]
   );
   return result.rows;
 }
 
 export async function searchProperties(term) {
+  const searchExpr = getSearchExpr('properties');
   const result = await query(
-    `SELECT property_id, property_address, property_name, city FROM properties
-     WHERE property_address ILIKE $1 OR property_name ILIKE $1 OR city ILIKE $1
-     ORDER BY property_address LIMIT 20`,
-    [`%${term}%`]
+    `SELECT property_id, property_address, property_name, city,
+            word_similarity($2, ${searchExpr}) AS relevance
+     FROM properties
+     WHERE ${searchExpr} ILIKE $1 OR word_similarity($2, ${searchExpr}) > 0.3
+     ORDER BY relevance DESC LIMIT 20`,
+    [`%${term}%`, term]
   );
   return result.rows;
 }
 
 export async function searchDeals(term) {
+  const searchExpr = getSearchExpr('deals');
   const result = await query(
-    `SELECT deal_id, deal_name, deal_type, status FROM deals
-     WHERE deal_name ILIKE $1 OR deal_type ILIKE $1
-     ORDER BY deal_name LIMIT 20`,
-    [`%${term}%`]
+    `SELECT deal_id, deal_name, deal_type, status,
+            word_similarity($2, ${searchExpr}) AS relevance
+     FROM deals
+     WHERE ${searchExpr} ILIKE $1 OR word_similarity($2, ${searchExpr}) > 0.3
+     ORDER BY relevance DESC LIMIT 20`,
+    [`%${term}%`, term]
   );
   return result.rows;
 }
 
 export async function searchCampaigns(term) {
+  const searchExpr = getSearchExpr('campaigns');
   const result = await query(
-    `SELECT campaign_id, name, type, status FROM campaigns
-     WHERE name ILIKE $1 OR type ILIKE $1
-     ORDER BY name LIMIT 20`,
-    [`%${term}%`]
+    `SELECT campaign_id, name, type, status,
+            word_similarity($2, ${searchExpr}) AS relevance
+     FROM campaigns
+     WHERE ${searchExpr} ILIKE $1 OR word_similarity($2, ${searchExpr}) > 0.3
+     ORDER BY relevance DESC LIMIT 20`,
+    [`%${term}%`, term]
   );
   return result.rows;
 }
@@ -706,16 +838,37 @@ export async function getCampaignContacts(campaignId) {
 // ============================================================
 // CAMPAIGNS
 // ============================================================
-export async function getCampaigns({ limit = 200, offset = 0 } = {}) {
-  return query(
-    `SELECT c.*, COUNT(cc.contact_id)::int AS contact_count
+export async function getCampaigns({ limit = 200, offset = 0, orderBy = 'modified', order = 'DESC', filters = {} } = {}) {
+  let where = [];
+  let params = [];
+  let i = 1;
+  let searchScore = null;
+
+  if (filters.type) { where.push(`c.type = $${i++}`); params.push(filters.type); }
+  if (filters.status) { where.push(`c.status = $${i++}`); params.push(filters.status); }
+  if (filters.search) {
+    const fuzzy = buildFuzzySearch('campaigns', filters.search, i, 'c');
+    where.push(fuzzy.condition);
+    params.push(...fuzzy.params);
+    searchScore = fuzzy.scoreExpr;
+    i = fuzzy.nextParamIndex;
+  }
+
+  const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const safeOrder = sanitizeCol(orderBy, 'campaigns', 'modified');
+  const safeDir = sanitizeDir(order);
+  const orderClause = searchScore
+    ? `${searchScore} DESC, c.${safeOrder} ${safeDir}`
+    : `c.${safeOrder} ${safeDir}`;
+  const sql = `SELECT c.*, COUNT(cc.contact_id)::int AS contact_count
      FROM campaigns c
      LEFT JOIN campaign_contacts cc ON c.campaign_id = cc.campaign_id
+     ${whereClause}
      GROUP BY c.campaign_id
-     ORDER BY c.modified DESC
-     LIMIT $1 OFFSET $2`,
-    [limit, offset]
-  );
+     ORDER BY ${orderClause}
+     LIMIT $${i++} OFFSET $${i++}`;
+  params.push(limit, offset);
+  return query(sql, params);
 }
 
 export async function getCampaign(id) {
@@ -849,20 +1002,26 @@ export async function getLeaseComps({ limit = 200, offset = 0, orderBy = 'create
   if (filters.property_type) { where.push(`property_type = $${i++}`); params.push(filters.property_type); }
   if (filters.rent_type) { where.push(`rent_type = $${i++}`); params.push(filters.rent_type); }
   if (filters.source) { where.push(`source = $${i++}`); params.push(filters.source); }
+  let searchScore = null;
   if (filters.search) {
-    where.push(`(tenant_name ILIKE $${i} OR floor_suite ILIKE $${i} OR property_type ILIKE $${i} OR tenant_rep_company ILIKE $${i} OR landlord_rep_company ILIKE $${i})`);
-    params.push(`%${filters.search}%`);
-    i++;
+    const fuzzy = buildFuzzySearch('lease_comps', filters.search, i, 'lc');
+    where.push(fuzzy.condition);
+    params.push(...fuzzy.params);
+    searchScore = fuzzy.scoreExpr;
+    i = fuzzy.nextParamIndex;
   }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'lease_comps', 'created_at');
   const safeDir = sanitizeDir(order);
+  const orderClause = searchScore
+    ? `${searchScore} DESC, lc.${safeOrder} ${safeDir}`
+    : `lc.${safeOrder} ${safeDir}`;
   const sql = `SELECT lc.*, p.property_address AS linked_property_address, co.company_name AS linked_company_name
     FROM lease_comps lc
     LEFT JOIN properties p ON lc.property_id = p.property_id
     LEFT JOIN companies co ON lc.company_id = co.company_id
-    ${whereClause} ORDER BY lc.${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+    ${whereClause} ORDER BY ${orderClause} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);
@@ -900,21 +1059,27 @@ export async function getSaleComps({ limit = 200, offset = 0, orderBy = 'created
 
   if (filters.property_type) { where.push(`property_type = $${i++}`); params.push(filters.property_type); }
   if (filters.source) { where.push(`source = $${i++}`); params.push(filters.source); }
+  let searchScore = null;
   if (filters.search) {
-    where.push(`(buyer_name ILIKE $${i} OR seller_name ILIKE $${i} OR property_type ILIKE $${i})`);
-    params.push(`%${filters.search}%`);
-    i++;
+    const fuzzy = buildFuzzySearch('sale_comps', filters.search, i, 'sc');
+    where.push(fuzzy.condition);
+    params.push(...fuzzy.params);
+    searchScore = fuzzy.scoreExpr;
+    i = fuzzy.nextParamIndex;
   }
 
   const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
   const safeOrder = sanitizeCol(orderBy, 'sale_comps', 'created_at');
   const safeDir = sanitizeDir(order);
+  const orderClause = searchScore
+    ? `${searchScore} DESC, sc.${safeOrder} ${safeDir}`
+    : `sc.${safeOrder} ${safeDir}`;
   const sql = `SELECT sc.*, p.property_address AS linked_property_address,
       p.ceiling_ht AS bldg_clear_height, p.power AS bldg_power,
       p.drive_ins AS bldg_gl_doors, p.number_of_loading_docks AS bldg_dock_doors
     FROM sale_comps sc
     LEFT JOIN properties p ON sc.property_id = p.property_id
-    ${whereClause} ORDER BY sc.${safeOrder} ${safeDir} LIMIT $${i++} OFFSET $${i++}`;
+    ${whereClause} ORDER BY ${orderClause} LIMIT $${i++} OFFSET $${i++}`;
   params.push(limit, offset);
 
   return query(sql, params);

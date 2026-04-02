@@ -270,35 +270,20 @@ export default function Campaigns({ onCountChange }) {
     setLoading(true);
     try {
       if (search || filterType || filterStatus) {
-        const result = await getCampaigns({ limit: 500 });
-        let filtered = result.rows || [];
-
-        // Client-side filtering (getCampaigns doesn't support server-side filters)
-        if (search) {
-          const q = search.toLowerCase();
-          filtered = filtered.filter((r) =>
-            (r.name || '').toLowerCase().includes(q) ||
-            (r.notes || '').toLowerCase().includes(q) ||
-            (r.type || '').toLowerCase().includes(q)
-          );
-        }
-        if (filterType) filtered = filtered.filter((r) => r.type === filterType);
-        if (filterStatus) filtered = filtered.filter((r) => r.status === filterStatus);
-
-        // Client-side sorting
-        filtered.sort((a, b) => {
-          const aVal = a[view.sort.column];
-          const bVal = b[view.sort.column];
-          if (aVal === null || aVal === undefined) return 1;
-          if (bVal === null || bVal === undefined) return -1;
-          const cmp = typeof aVal === 'string' ? aVal.localeCompare(bVal) : (aVal > bVal ? 1 : -1);
-          return view.sort.direction === 'ASC' ? cmp : -cmp;
+        const filters = {};
+        if (search) filters.search = search;
+        if (filterType) filters.type = filterType;
+        if (filterStatus) filters.status = filterStatus;
+        const result = await getCampaigns({
+          limit: 500,
+          orderBy: view.sort.column,
+          order: view.sort.direction,
+          filters,
         });
-
-        setRows(filtered);
-        // Keep totalCount as unfiltered total
-        setTotalCount((result.rows || []).length);
-        if (onCountChange) onCountChange(filtered.length);
+        const rows = result.rows || [];
+        setRows(rows);
+        setTotalCount(rows.length);
+        if (onCountChange) onCountChange(rows.length);
       } else {
         const [result, total] = await Promise.all([
           queryWithFilters('campaigns', {
@@ -441,7 +426,7 @@ export default function Campaigns({ onCountChange }) {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search campaigns..."
+              placeholder="Search all fields..."
               className="w-full bg-crm-hover border-0 rounded-[10px] pl-9 pr-3 py-2.5 text-sm text-crm-text placeholder-crm-muted focus:outline-none focus:ring-2 focus:ring-crm-accent/30"
             />
           </div>

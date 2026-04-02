@@ -342,7 +342,7 @@ export default function Comps({ onCountChange }) {
             </svg>
             <input
               type="text" value={search} onChange={(e) => setSearch(e.target.value)}
-              placeholder={activeTab === 'lease' ? 'Search tenant, rep, type...' : 'Search buyer, seller, type...'}
+              placeholder="Search all fields..."
               className="w-full bg-crm-hover border-0 rounded-[10px] pl-9 pr-3 py-2.5 text-sm text-crm-text placeholder-crm-muted focus:outline-none focus:ring-2 focus:ring-crm-accent/30"
             />
           </div>

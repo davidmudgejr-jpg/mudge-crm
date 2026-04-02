@@ -130,11 +130,17 @@ export default function TPE({ onCountChange }) {
     }
     if (search) {
       const q = search.toLowerCase();
+      const searchFields = [
+        'property_address', 'address', 'property_name', 'city', 'county', 'state', 'zip',
+        'property_type', 'building_class', 'building_status',
+        'owner_name', 'owner_phone', 'owner_address', 'owner_city_state_zip', 'owner_email',
+        'leasing_company', 'broker_contact', 'building_park', 'market_name', 'submarket_name',
+        'zoning', 'features', 'notes', 'parcel_number', 'call_reason',
+        'tpe_tier', 'owner_call_status', 'tenant_call_status',
+      ];
       filtered = filtered.filter((r) =>
-        (r.address || '').toLowerCase().includes(q) ||
-        (r.city || '').toLowerCase().includes(q) ||
-        (r.owner_name || '').toLowerCase().includes(q) ||
-        (r.call_reason || '').toLowerCase().includes(q)
+        searchFields.some(f => (r[f] || '').toLowerCase().includes(q)) ||
+        (Array.isArray(r.tags) && r.tags.some(t => (t || '').toLowerCase().includes(q)))
       );
     }
     return filtered;
@@ -257,7 +263,7 @@ export default function TPE({ onCountChange }) {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search address, owner, city..."
+              placeholder="Search all fields..."
               className="w-full bg-crm-hover border-0 rounded-[10px] pl-9 pr-3 py-2.5 text-sm text-crm-text placeholder-crm-muted focus:outline-none focus:ring-2 focus:ring-crm-accent/30"
             />
           </div>

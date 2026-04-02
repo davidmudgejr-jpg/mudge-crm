@@ -301,9 +301,10 @@ export default function Properties({ onCountChange }) {
           extraConds.push(`priority = $${params.length}`);
         }
         if (search) {
-          params.push(`%${search}%`);
-          const i = params.length;
-          extraConds.push(`(property_address ILIKE $${i} OR owner_name ILIKE $${i} OR city ILIKE $${i} OR property_name ILIKE $${i})`);
+          const { buildFuzzySearch } = await import('../api/database.js');
+          const fuzzy = buildFuzzySearch('properties', search, params.length + 1);
+          extraConds.push(fuzzy.condition);
+          params.push(...fuzzy.params);
         }
 
         if (extraConds.length) {
@@ -478,7 +479,7 @@ export default function Properties({ onCountChange }) {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search address, owner, city..."
+              placeholder="Search all fields..."
               className="w-full bg-crm-hover border-0 rounded-[10px] pl-9 pr-3 py-2.5 text-sm text-crm-text placeholder-crm-muted focus:outline-none focus:ring-2 focus:ring-crm-accent/30"
             />
           </div>
