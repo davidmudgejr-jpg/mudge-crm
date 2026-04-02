@@ -4,29 +4,29 @@ import ENTITY_TYPES from '../../config/entityTypes';
 
 export const CHIP_STYLES = {
   contact: {
-    background: 'linear-gradient(135deg, rgba(175,82,222,0.18), rgba(94,92,230,0.18))',
-    color: '#BF5AF2',
-    boxShadow: '0 1px 4px rgba(175,82,222,0.15), inset 0 1px 0 rgba(255,255,255,0.08)',
+    background: 'var(--chip-contact-bg)',
+    color: 'var(--chip-contact-color)',
+    boxShadow: 'var(--chip-contact-shadow)',
   },
   property: {
-    background: 'linear-gradient(135deg, rgba(0,122,255,0.18), rgba(88,86,214,0.18))',
-    color: '#64D2FF',
-    boxShadow: '0 1px 4px rgba(0,122,255,0.15), inset 0 1px 0 rgba(255,255,255,0.08)',
+    background: 'var(--chip-property-bg)',
+    color: 'var(--chip-property-color)',
+    boxShadow: 'var(--chip-property-shadow)',
   },
   company: {
-    background: 'linear-gradient(135deg, rgba(255,214,10,0.18), rgba(255,159,10,0.18))',
-    color: '#FFD60A',
-    boxShadow: '0 1px 4px rgba(255,214,10,0.15), inset 0 1px 0 rgba(255,255,255,0.08)',
+    background: 'var(--chip-company-bg)',
+    color: 'var(--chip-company-color)',
+    boxShadow: 'var(--chip-company-shadow)',
   },
   deal: {
-    background: 'linear-gradient(135deg, rgba(255,159,10,0.18), rgba(255,69,58,0.18))',
-    color: '#FF9F0A',
-    boxShadow: '0 1px 4px rgba(255,159,10,0.15), inset 0 1px 0 rgba(255,255,255,0.08)',
+    background: 'var(--chip-deal-bg)',
+    color: 'var(--chip-deal-color)',
+    boxShadow: 'var(--chip-deal-shadow)',
   },
   campaign: {
-    background: 'linear-gradient(135deg, rgba(48,209,88,0.18), rgba(90,200,250,0.18))',
-    color: '#30D158',
-    boxShadow: '0 1px 4px rgba(48,209,88,0.15), inset 0 1px 0 rgba(255,255,255,0.08)',
+    background: 'var(--chip-campaign-bg)',
+    color: 'var(--chip-campaign-color)',
+    boxShadow: 'var(--chip-campaign-shadow)',
   },
 };
 
@@ -51,7 +51,7 @@ export default function LinkedChips({ items, type, labelKey, max = 2 }) {
       {shown.map((item, i) => (
         <span
           key={i}
-          className={`text-[10px] leading-tight px-1.5 py-0.5 rounded-full font-medium truncate max-w-[120px] cursor-pointer hover:brightness-125 hover:scale-[1.02] transition-all ${!chipStyle ? 'bg-crm-border text-crm-muted' : ''}`}
+          className={`text-xs leading-snug px-2 py-1 rounded-full font-medium truncate max-w-[150px] cursor-pointer hover:brightness-125 hover:scale-[1.02] transition-all ${!chipStyle ? 'bg-crm-border text-crm-muted' : ''}`}
           style={{
             transitionTimingFunction: 'cubic-bezier(0.175, 0.885, 0.32, 1.275)',
             ...(chipStyle || {}),
@@ -66,7 +66,7 @@ export default function LinkedChips({ items, type, labelKey, max = 2 }) {
         </span>
       ))}
       {overflow > 0 && (
-        <span className="text-[10px] text-crm-muted px-1">+{overflow}</span>
+        <span className="text-xs text-crm-muted px-1">+{overflow}</span>
       )}
     </div>
   );

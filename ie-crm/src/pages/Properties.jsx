@@ -56,7 +56,10 @@ const ALL_COLUMNS = [
   { key: 'units', label: 'Units', defaultWidth: 60, format: 'number', editType: 'number', defaultVisible: false },
   { key: 'stories', label: 'Stories', defaultWidth: 60, format: 'number', editType: 'number', defaultVisible: false },
   { key: 'parking_spaces', label: 'Parking Spaces', defaultWidth: 90, format: 'number', editType: 'number', defaultVisible: false },
-  { key: 'price_per_sqft', label: 'Price/SF', defaultWidth: 90, format: 'currency', editType: 'number', defaultVisible: false },
+  { key: 'price_per_sqft', label: 'Price/SF', defaultWidth: 90, defaultVisible: false, editable: false, renderCell: (_, row) => {
+    if (!row?.last_sale_price || !row?.rba || row.rba === 0) return <span className="text-crm-muted">--</span>;
+    return `$${(row.last_sale_price / row.rba).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  }},
   // RBA already shown as 'Bldg SF' above
   { key: 'far', label: 'FAR', defaultWidth: 60, defaultVisible: false, editable: false, renderCell: (_, row) => {
     if (!row?.rba || !row?.land_sf || row.land_sf === 0) return <span className="text-crm-muted">--</span>;

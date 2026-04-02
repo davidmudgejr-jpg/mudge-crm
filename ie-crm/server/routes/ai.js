@@ -3877,6 +3877,288 @@ router.patch('/dedup/:id', async (req, res) => {
 });
 
 // ============================================================
+// CONTACT & COMPANY DEDUP SCANNERS
+// ============================================================
+
+// 60. POST /api/ai/dedup/scan-contacts — Find duplicate contacts
+router.post('/dedup/scan-contacts', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    // Strategy 1: Exact email match (HIGH confidence)
+    const emailMatches = await pool.query(`
+      SELECT a.contact_id AS a_id, a.full_name AS a_name, a.email_1 AS a_email,
+             b.contact_id AS b_id, b.full_name AS b_name, b.email_1 AS b_email,
+             COALESCE(
+               NULLIF(a.email_1,''), NULLIF(a.email_2,''), NULLIF(a.email_3,'')
+             ) AS matched_email
+      FROM contacts a JOIN contacts b ON a.contact_id < b.contact_id
+      WHERE (
+        (a.email_1 IS NOT NULL AND a.email_1 != '' AND a.email_1 IN (b.email_1, b.email_2, b.email_3))
+        OR (a.email_2 IS NOT NULL AND a.email_2 != '' AND a.email_2 IN (b.email_1, b.email_2, b.email_3))
+        OR (a.email_3 IS NOT NULL AND a.email_3 != '' AND a.email_3 IN (b.email_1, b.email_2, b.email_3))
+      )
+    `);
+
+    // Strategy 2: Same name + same linked company (MEDIUM confidence)
+    const nameCompanyMatches = await pool.query(`
+      SELECT DISTINCT a.contact_id AS a_id, a.full_name AS a_name, a.email_1 AS a_email,
+             b.contact_id AS b_id, b.full_name AS b_name, b.email_1 AS b_email
+      FROM contacts a
+      JOIN contacts b ON a.contact_id < b.contact_id
+        AND LOWER(TRIM(a.full_name)) = LOWER(TRIM(b.full_name))
+      JOIN contact_companies ca ON ca.contact_id = a.contact_id
+      JOIN contact_companies cb ON cb.contact_id = b.contact_id
+        AND ca.company_id = cb.company_id
+      WHERE a.full_name IS NOT NULL AND a.full_name != ''
+      LIMIT 200
+    `);
+
+    // Strategy 3: Same name + same phone (MEDIUM confidence)
+    const namePhoneMatches = await pool.query(`
+      SELECT a.contact_id AS a_id, a.full_name AS a_name, a.email_1 AS a_email,
+             b.contact_id AS b_id, b.full_name AS b_name, b.email_1 AS b_email
+      FROM contacts a JOIN contacts b ON a.contact_id < b.contact_id
+        AND LOWER(TRIM(a.full_name)) = LOWER(TRIM(b.full_name))
+      WHERE a.full_name IS NOT NULL AND a.full_name != ''
+        AND (
+          (a.phone_1 IS NOT NULL AND a.phone_1 != '' AND a.phone_1 IN (b.phone_1, b.phone_2, b.phone_3))
+          OR (a.phone_2 IS NOT NULL AND a.phone_2 != '' AND a.phone_2 IN (b.phone_1, b.phone_2, b.phone_3))
+          OR (a.phone_3 IS NOT NULL AND a.phone_3 != '' AND a.phone_3 IN (b.phone_1, b.phone_2, b.phone_3))
+        )
+      LIMIT 200
+    `);
+
+    // Helper: build contact summary
+    async function buildContactSummary(contactId) {
+      const [companies, properties, deals, interactions, actionItems] = await Promise.all([
+        pool.query('SELECT COUNT(*) FROM contact_companies WHERE contact_id = $1', [contactId]),
+        pool.query('SELECT COUNT(*) FROM property_contacts WHERE contact_id = $1', [contactId]),
+        pool.query('SELECT COUNT(*) FROM deal_contacts WHERE contact_id = $1', [contactId]),
+        pool.query('SELECT COUNT(*) FROM interaction_contacts WHERE contact_id = $1', [contactId]),
+        pool.query('SELECT COUNT(*) FROM action_item_contacts WHERE contact_id = $1', [contactId]),
+      ]);
+      return {
+        companies: parseInt(companies.rows[0].count),
+        properties: parseInt(properties.rows[0].count),
+        deals: parseInt(deals.rows[0].count),
+        interactions: parseInt(interactions.rows[0].count),
+        action_items: parseInt(actionItems.rows[0].count),
+        total_linked: parseInt(companies.rows[0].count) + parseInt(properties.rows[0].count) +
+          parseInt(deals.rows[0].count) + parseInt(interactions.rows[0].count) +
+          parseInt(actionItems.rows[0].count),
+      };
+    }
+
+    let created = 0, skipped = 0;
+    const allMatches = [
+      ...emailMatches.rows.map(r => ({ ...r, confidence: 'high', match_type: 'exact_email' })),
+      ...nameCompanyMatches.rows.map(r => ({ ...r, confidence: 'medium', match_type: 'same_name_company' })),
+      ...namePhoneMatches.rows.map(r => ({ ...r, confidence: 'medium', match_type: 'same_name_phone' })),
+    ];
+
+    const seenPairs = new Set();
+    for (const match of allMatches) {
+      const pairKey = [match.a_id, match.b_id].sort().join('|');
+      if (seenPairs.has(pairKey)) { skipped++; continue; }
+      seenPairs.add(pairKey);
+
+      try {
+        const existing = await pool.query(
+          `SELECT id FROM contact_dedup_candidates
+           WHERE (contact_a_id = $1 AND contact_b_id = $2)
+              OR (contact_a_id = $2 AND contact_b_id = $1)`,
+          [match.a_id, match.b_id]
+        );
+        if (existing.rows.length > 0) { skipped++; continue; }
+
+        const [summA, summB] = await Promise.all([
+          buildContactSummary(match.a_id),
+          buildContactSummary(match.b_id),
+        ]);
+
+        const reason = match.match_type === 'exact_email'
+          ? `Same email address: ${match.matched_email || match.a_email}`
+          : match.match_type === 'same_name_company'
+          ? `Same name "${match.a_name}" linked to same company`
+          : `Same name "${match.a_name}" with matching phone number`;
+
+        await pool.query(
+          `INSERT INTO contact_dedup_candidates
+             (contact_a_id, contact_b_id, confidence, match_type, match_reason,
+              entity_a_summary, entity_b_summary, scan_date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_DATE)
+           ON CONFLICT (contact_a_id, contact_b_id) DO NOTHING`,
+          [
+            match.a_id, match.b_id, match.confidence, match.match_type, reason,
+            JSON.stringify({ name: match.a_name, email: match.a_email, ...summA }),
+            JSON.stringify({ name: match.b_name, email: match.b_email, ...summB }),
+          ]
+        );
+        created++;
+      } catch (err) {
+        console.error(`[Dedup] Contact pair error ${match.a_id}/${match.b_id}:`, err.message);
+      }
+    }
+
+    res.json({
+      ok: true,
+      scan_date: new Date().toISOString().slice(0, 10),
+      candidates_found: created,
+      duplicates_skipped: skipped,
+      strategies: {
+        exact_email: emailMatches.rows.length,
+        same_name_company: nameCompanyMatches.rows.length,
+        same_name_phone: namePhoneMatches.rows.length,
+      },
+    });
+  } catch (err) {
+    console.error('[AI API] POST /dedup/scan-contacts error:', err.message);
+    res.status(500).json({ error: 'Failed to run contact dedup scan' });
+  }
+});
+
+// 61. POST /api/ai/dedup/scan-companies — Find duplicate companies
+router.post('/dedup/scan-companies', async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { normalizeCompanyName, similarity } = require('../utils/addressNormalizer');
+
+    // Load all companies
+    const { rows: allCompanies } = await pool.query(
+      `SELECT company_id, company_name, city FROM companies WHERE company_name IS NOT NULL AND TRIM(company_name) != ''`
+    );
+
+    // Build normalized name map
+    const normalized = allCompanies.map(c => ({
+      ...c,
+      norm: normalizeCompanyName(c.company_name),
+    })).filter(c => c.norm);
+
+    // Strategy 1: Exact normalized name match (HIGH confidence)
+    const exactMatches = [];
+    const normGroups = {};
+    for (const c of normalized) {
+      const key = c.norm;
+      if (!normGroups[key]) normGroups[key] = [];
+      normGroups[key].push(c);
+    }
+    for (const group of Object.values(normGroups)) {
+      if (group.length < 2) continue;
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          exactMatches.push({
+            a_id: group[i].company_id, a_name: group[i].company_name, a_city: group[i].city,
+            b_id: group[j].company_id, b_name: group[j].company_name, b_city: group[j].city,
+            confidence: 'high', match_type: 'exact_normalized_name',
+          });
+        }
+      }
+    }
+
+    // Strategy 2: Fuzzy name match (MEDIUM confidence, similarity >= 0.85)
+    const fuzzyMatches = [];
+    for (let i = 0; i < normalized.length && fuzzyMatches.length < 300; i++) {
+      for (let j = i + 1; j < normalized.length && fuzzyMatches.length < 300; j++) {
+        if (normalized[i].norm === normalized[j].norm) continue; // already caught by exact
+        const sim = similarity(normalized[i].norm, normalized[j].norm);
+        if (sim >= 0.85) {
+          fuzzyMatches.push({
+            a_id: normalized[i].company_id, a_name: normalized[i].company_name, a_city: normalized[i].city,
+            b_id: normalized[j].company_id, b_name: normalized[j].company_name, b_city: normalized[j].city,
+            confidence: 'medium', match_type: 'fuzzy_name', match_score: Math.round(sim * 100),
+          });
+        }
+      }
+    }
+
+    // Helper: build company summary
+    async function buildCompanySummary(companyId) {
+      const [contacts, properties, deals, interactions, actionItems, leaseComps] = await Promise.all([
+        pool.query('SELECT COUNT(*) FROM contact_companies WHERE company_id = $1', [companyId]),
+        pool.query('SELECT COUNT(*) FROM property_companies WHERE company_id = $1', [companyId]),
+        pool.query('SELECT COUNT(*) FROM deal_companies WHERE company_id = $1', [companyId]),
+        pool.query('SELECT COUNT(*) FROM interaction_companies WHERE company_id = $1', [companyId]),
+        pool.query('SELECT COUNT(*) FROM action_item_companies WHERE company_id = $1', [companyId]),
+        pool.query('SELECT COUNT(*) FROM lease_comps WHERE company_id = $1', [companyId]),
+      ]);
+      return {
+        contacts: parseInt(contacts.rows[0].count),
+        properties: parseInt(properties.rows[0].count),
+        deals: parseInt(deals.rows[0].count),
+        interactions: parseInt(interactions.rows[0].count),
+        action_items: parseInt(actionItems.rows[0].count),
+        lease_comps: parseInt(leaseComps.rows[0].count),
+        total_linked: parseInt(contacts.rows[0].count) + parseInt(properties.rows[0].count) +
+          parseInt(deals.rows[0].count) + parseInt(interactions.rows[0].count) +
+          parseInt(actionItems.rows[0].count) + parseInt(leaseComps.rows[0].count),
+      };
+    }
+
+    let created = 0, skipped = 0;
+    const allMatches = [...exactMatches, ...fuzzyMatches];
+    const seenPairs = new Set();
+
+    for (const match of allMatches) {
+      const pairKey = [match.a_id, match.b_id].sort().join('|');
+      if (seenPairs.has(pairKey)) { skipped++; continue; }
+      seenPairs.add(pairKey);
+
+      try {
+        const existing = await pool.query(
+          `SELECT id FROM company_dedup_candidates
+           WHERE (company_a_id = $1 AND company_b_id = $2)
+              OR (company_a_id = $2 AND company_b_id = $1)`,
+          [match.a_id, match.b_id]
+        );
+        if (existing.rows.length > 0) { skipped++; continue; }
+
+        const [summA, summB] = await Promise.all([
+          buildCompanySummary(match.a_id),
+          buildCompanySummary(match.b_id),
+        ]);
+
+        const reason = match.match_type === 'exact_normalized_name'
+          ? `Both normalize to same name: "${match.a_name}" / "${match.b_name}"`
+          : `Fuzzy name match (${match.match_score}%): "${match.a_name}" ≈ "${match.b_name}"`;
+
+        await pool.query(
+          `INSERT INTO company_dedup_candidates
+             (company_a_id, company_b_id, confidence, match_type, match_score, match_reason,
+              entity_a_summary, entity_b_summary, scan_date)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_DATE)
+           ON CONFLICT (company_a_id, company_b_id) DO NOTHING`,
+          [
+            match.a_id, match.b_id, match.confidence, match.match_type,
+            match.match_score || null, reason,
+            JSON.stringify({ name: match.a_name, city: match.a_city, ...summA }),
+            JSON.stringify({ name: match.b_name, city: match.b_city, ...summB }),
+          ]
+        );
+        created++;
+      } catch (err) {
+        console.error(`[Dedup] Company pair error ${match.a_id}/${match.b_id}:`, err.message);
+      }
+    }
+
+    res.json({
+      ok: true,
+      scan_date: new Date().toISOString().slice(0, 10),
+      candidates_found: created,
+      duplicates_skipped: skipped,
+      strategies: {
+        exact_normalized_name: exactMatches.length,
+        fuzzy_name: fuzzyMatches.length,
+      },
+    });
+  } catch (err) {
+    console.error('[AI API] POST /dedup/scan-companies error:', err.message);
+    res.status(500).json({ error: 'Failed to run company dedup scan' });
+  }
+});
+
+// ============================================================
 // INSTANTLY.AI PROXY — Direct access to Instantly API for agents + dashboard
 // ============================================================
 

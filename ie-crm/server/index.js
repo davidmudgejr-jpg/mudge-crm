@@ -3131,6 +3131,300 @@ app.post('/api/dedup/merge', requireAuth, async (req, res) => {
 });
 
 // ============================================================
+// CONTACT DEDUP REVIEW ENDPOINTS
+// ============================================================
+
+app.get('/api/dedup/contact-candidates', requireAuth, async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const { rows } = await pool.query(`
+      SELECT dc.*,
+             ca.full_name AS name_a, ca.email_1 AS email_a, ca.phone_1 AS phone_a, ca.title AS title_a,
+             cb.full_name AS name_b, cb.email_1 AS email_b, cb.phone_1 AS phone_b, cb.title AS title_b
+      FROM contact_dedup_candidates dc
+      JOIN contacts ca ON ca.contact_id = dc.contact_a_id
+      JOIN contacts cb ON cb.contact_id = dc.contact_b_id
+      WHERE dc.status = $1
+      ORDER BY
+        CASE dc.confidence WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+        dc.created_at DESC
+    `, [status]);
+    res.json({ rows, total: rows.length });
+  } catch (err) {
+    console.error('[dedup] contact list error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/dedup/contact-stats', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT status, count(*)::int AS count FROM contact_dedup_candidates GROUP BY status`
+    );
+    const stats = { pending: 0, merged: 0, dismissed: 0, deferred: 0 };
+    rows.forEach(r => { stats[r.status] = r.count; });
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/dedup/contact-resolve', requireAuth, async (req, res) => {
+  try {
+    const { candidateId, status, notes } = req.body;
+    if (!['dismissed', 'deferred'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be dismissed or deferred' });
+    }
+    await pool.query(`
+      UPDATE contact_dedup_candidates
+      SET status = $1, resolved_by = $2, resolved_at = NOW(), merge_notes = $3, updated_at = NOW()
+      WHERE id = $4
+    `, [status, req.user?.username || 'user', notes || null, candidateId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[dedup] contact resolve error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/dedup/contact-merge', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { candidateId, keepId, removeId } = req.body;
+    if (!keepId || !removeId || keepId === removeId) {
+      return res.status(400).json({ error: 'Invalid keepId/removeId' });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Backfill NULL fields in keeper from dupe
+    const { rows: [keeper] } = await client.query('SELECT * FROM contacts WHERE contact_id = $1', [keepId]);
+    const { rows: [dupe] } = await client.query('SELECT * FROM contacts WHERE contact_id = $1', [removeId]);
+    if (!keeper || !dupe) throw new Error('Contact not found');
+
+    const skipCols = new Set(['contact_id', 'created_at', 'updated_at']);
+    const fills = [], vals = [];
+    let paramIdx = 1;
+    for (const [col, val] of Object.entries(dupe)) {
+      if (skipCols.has(col)) continue;
+      if (val != null && val !== '' && (keeper[col] == null || keeper[col] === '')) {
+        fills.push(`"${col}" = $${paramIdx}`);
+        vals.push(val);
+        paramIdx++;
+      }
+    }
+    if (fills.length > 0) {
+      vals.push(keepId);
+      await client.query(`UPDATE contacts SET ${fills.join(', ')}, updated_at = NOW() WHERE contact_id = $${paramIdx}`, vals);
+    }
+
+    // 2. Reassign junction table links
+    const junctions = [
+      'contact_companies', 'property_contacts', 'deal_contacts',
+      'interaction_contacts', 'action_item_contacts', 'campaign_contacts',
+    ];
+    let movedLinks = 0;
+    for (const table of junctions) {
+      // Delete conflicting rows first
+      try {
+        await client.query(
+          `DELETE FROM ${table} WHERE contact_id = $1 AND EXISTS (
+            SELECT 1 FROM ${table} k WHERE k.contact_id = $2 AND k.ctid != ${table}.ctid
+          )`, [removeId, keepId]
+        ).catch(() => {});
+        // Move remaining
+        const { rowCount } = await client.query(
+          `UPDATE ${table} SET contact_id = $1 WHERE contact_id = $2`, [keepId, removeId]
+        );
+        movedLinks += rowCount;
+      } catch (e) {
+        if (e.message.includes('duplicate key') || e.message.includes('unique constraint')) {
+          await client.query(`DELETE FROM ${table} WHERE contact_id = $1`, [removeId]);
+        }
+      }
+    }
+
+    // 3. Delete the duplicate
+    await client.query('DELETE FROM contacts WHERE contact_id = $1', [removeId]);
+
+    // 4. Update candidate record
+    await client.query(`
+      UPDATE contact_dedup_candidates
+      SET status = 'merged', resolved_by = $1, resolved_at = NOW(),
+          merge_notes = $2, updated_at = NOW()
+      WHERE id = $3
+    `, [req.user?.username || 'user', `Merged. ${fills.length} fields filled, ${movedLinks} links moved.`, candidateId]);
+
+    // 5. Auto-dismiss other candidates referencing the removed contact
+    await client.query(`
+      UPDATE contact_dedup_candidates
+      SET status = 'dismissed', resolved_by = 'auto', resolved_at = NOW(),
+          merge_notes = 'Auto-dismissed: contact was merged in another candidate', updated_at = NOW()
+      WHERE status = 'pending' AND (contact_a_id = $1 OR contact_b_id = $1)
+    `, [removeId]);
+
+    await client.query('COMMIT');
+    res.json({ ok: true, fieldsFilled: fills.length, linksMoved: movedLinks });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[dedup] contact merge error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// COMPANY DEDUP REVIEW ENDPOINTS
+// ============================================================
+
+app.get('/api/dedup/company-candidates', requireAuth, async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const { rows } = await pool.query(`
+      SELECT dc.*,
+             ca.company_name AS name_a, ca.company_type AS type_a, ca.city AS city_a, ca.industry_type AS industry_a,
+             cb.company_name AS name_b, cb.company_type AS type_b, cb.city AS city_b, cb.industry_type AS industry_b
+      FROM company_dedup_candidates dc
+      JOIN companies ca ON ca.company_id = dc.company_a_id
+      JOIN companies cb ON cb.company_id = dc.company_b_id
+      WHERE dc.status = $1
+      ORDER BY
+        CASE dc.confidence WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+        dc.created_at DESC
+    `, [status]);
+    res.json({ rows, total: rows.length });
+  } catch (err) {
+    console.error('[dedup] company list error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/dedup/company-stats', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT status, count(*)::int AS count FROM company_dedup_candidates GROUP BY status`
+    );
+    const stats = { pending: 0, merged: 0, dismissed: 0, deferred: 0 };
+    rows.forEach(r => { stats[r.status] = r.count; });
+    res.json(stats);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/dedup/company-resolve', requireAuth, async (req, res) => {
+  try {
+    const { candidateId, status, notes } = req.body;
+    if (!['dismissed', 'deferred'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be dismissed or deferred' });
+    }
+    await pool.query(`
+      UPDATE company_dedup_candidates
+      SET status = $1, resolved_by = $2, resolved_at = NOW(), merge_notes = $3, updated_at = NOW()
+      WHERE id = $4
+    `, [status, req.user?.username || 'user', notes || null, candidateId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[dedup] company resolve error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/dedup/company-merge', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { candidateId, keepId, removeId } = req.body;
+    if (!keepId || !removeId || keepId === removeId) {
+      return res.status(400).json({ error: 'Invalid keepId/removeId' });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Backfill NULL fields in keeper from dupe
+    const { rows: [keeper] } = await client.query('SELECT * FROM companies WHERE company_id = $1', [keepId]);
+    const { rows: [dupe] } = await client.query('SELECT * FROM companies WHERE company_id = $1', [removeId]);
+    if (!keeper || !dupe) throw new Error('Company not found');
+
+    const skipCols = new Set(['company_id', 'created_at', 'updated_at']);
+    const fills = [], vals = [];
+    let paramIdx = 1;
+    for (const [col, val] of Object.entries(dupe)) {
+      if (skipCols.has(col)) continue;
+      if (val != null && val !== '' && (keeper[col] == null || keeper[col] === '')) {
+        fills.push(`"${col}" = $${paramIdx}`);
+        vals.push(val);
+        paramIdx++;
+      }
+    }
+    if (fills.length > 0) {
+      vals.push(keepId);
+      await client.query(`UPDATE companies SET ${fills.join(', ')}, updated_at = NOW() WHERE company_id = $${paramIdx}`, vals);
+    }
+
+    // 2. Reassign junction table links
+    const fkTables = [
+      'contact_companies', 'property_companies', 'deal_companies',
+      'interaction_companies', 'action_item_companies', 'tenant_growth',
+    ];
+    let movedLinks = 0;
+    for (const table of fkTables) {
+      try {
+        await client.query(
+          `DELETE FROM ${table} WHERE company_id = $1 AND EXISTS (
+            SELECT 1 FROM ${table} k WHERE k.company_id = $2 AND k.ctid != ${table}.ctid
+          )`, [removeId, keepId]
+        ).catch(() => {});
+        const { rowCount } = await client.query(
+          `UPDATE ${table} SET company_id = $1 WHERE company_id = $2`, [keepId, removeId]
+        );
+        movedLinks += rowCount;
+      } catch (e) {
+        if (e.message.includes('duplicate key') || e.message.includes('unique constraint')) {
+          await client.query(`DELETE FROM ${table} WHERE company_id = $1`, [removeId]);
+        }
+      }
+    }
+
+    // 3. Reassign lease_comps
+    try {
+      const { rowCount } = await client.query(
+        'UPDATE lease_comps SET company_id = $1 WHERE company_id = $2', [keepId, removeId]
+      );
+      movedLinks += rowCount;
+    } catch (e) { /* no company_id col or conflict — skip */ }
+
+    // 4. Delete the duplicate
+    await client.query('DELETE FROM companies WHERE company_id = $1', [removeId]);
+
+    // 5. Update candidate record
+    await client.query(`
+      UPDATE company_dedup_candidates
+      SET status = 'merged', resolved_by = $1, resolved_at = NOW(),
+          merge_notes = $2, updated_at = NOW()
+      WHERE id = $3
+    `, [req.user?.username || 'user', `Merged. ${fills.length} fields filled, ${movedLinks} links moved.`, candidateId]);
+
+    // 6. Auto-dismiss other candidates referencing the removed company
+    await client.query(`
+      UPDATE company_dedup_candidates
+      SET status = 'dismissed', resolved_by = 'auto', resolved_at = NOW(),
+          merge_notes = 'Auto-dismissed: company was merged in another candidate', updated_at = NOW()
+      WHERE status = 'pending' AND (company_a_id = $1 OR company_b_id = $1)
+    `, [removeId]);
+
+    await client.query('COMMIT');
+    res.json({ ok: true, fieldsFilled: fills.length, linksMoved: movedLinks });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[dedup] company merge error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
 // SERVE STATIC FRONTEND (production)
 // ============================================================
 const distPath = path.join(__dirname, '..', 'dist');

@@ -109,19 +109,30 @@ export default function formatCell(value, format) {
         />
       );
 
-    case 'url':
+    case 'url': {
+      const href = value.startsWith('http') ? value : `https://${value}`;
+      const display = value.replace(/^https?:\/\/(www\.)?/, '').slice(0, 35);
       return (
-        <a
-          href={value}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          className="text-crm-accent hover:underline truncate"
-          title={value}
-        >
-          Open ↗
-        </a>
+        <span className="group flex items-center gap-1 min-w-0">
+          <a
+            href={href}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="text-crm-accent hover:underline truncate"
+            title={value}
+          >
+            {display}
+          </a>
+          <span
+            className="opacity-0 group-hover:opacity-60 transition-opacity cursor-pointer text-crm-muted shrink-0"
+            title="Edit URL"
+          >
+            ✎
+          </span>
+        </span>
       );
+    }
 
     case 'email':
       return (

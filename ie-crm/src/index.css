@@ -50,6 +50,23 @@
   --crm-gradient-info: linear-gradient(135deg, #007AFF, #5AC8FA);
   --crm-gradient-purple: linear-gradient(135deg, #AF52DE, #BF5AF2);
 
+  /* Linked chip colors (entity-specific) */
+  --chip-contact-bg: linear-gradient(135deg, rgba(175,82,222,0.18), rgba(94,92,230,0.18));
+  --chip-contact-color: #BF5AF2;
+  --chip-contact-shadow: 0 1px 4px rgba(175,82,222,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+  --chip-property-bg: linear-gradient(135deg, rgba(0,122,255,0.18), rgba(88,86,214,0.18));
+  --chip-property-color: #64D2FF;
+  --chip-property-shadow: 0 1px 4px rgba(0,122,255,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+  --chip-company-bg: linear-gradient(135deg, rgba(255,214,10,0.18), rgba(255,159,10,0.18));
+  --chip-company-color: #FFD60A;
+  --chip-company-shadow: 0 1px 4px rgba(255,214,10,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+  --chip-deal-bg: linear-gradient(135deg, rgba(255,159,10,0.18), rgba(255,69,58,0.18));
+  --chip-deal-color: #FF9F0A;
+  --chip-deal-shadow: 0 1px 4px rgba(255,159,10,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+  --chip-campaign-bg: linear-gradient(135deg, rgba(48,209,88,0.18), rgba(90,200,250,0.18));
+  --chip-campaign-color: #30D158;
+  --chip-campaign-shadow: 0 1px 4px rgba(48,209,88,0.15), inset 0 1px 0 rgba(255,255,255,0.08);
+
   /* Spring easing curves */
   --spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
   --spring-smooth: cubic-bezier(0.25, 0.46, 0.45, 0.94);
@@ -94,6 +111,23 @@
   --crm-dev-type: #059669;
 
   --crm-gradient-primary-shadow: 0 4px 14px rgba(0,122,255,0.25);
+
+  /* Light-mode chip colors — darker text for readability on white */
+  --chip-contact-bg: linear-gradient(135deg, rgba(175,82,222,0.12), rgba(94,92,230,0.12));
+  --chip-contact-color: #7C3AED;
+  --chip-contact-shadow: 0 1px 4px rgba(175,82,222,0.10), inset 0 1px 0 rgba(255,255,255,0.3);
+  --chip-property-bg: linear-gradient(135deg, rgba(0,122,255,0.12), rgba(88,86,214,0.12));
+  --chip-property-color: #0369A1;
+  --chip-property-shadow: 0 1px 4px rgba(0,122,255,0.10), inset 0 1px 0 rgba(255,255,255,0.3);
+  --chip-company-bg: linear-gradient(135deg, rgba(255,214,10,0.12), rgba(255,159,10,0.12));
+  --chip-company-color: #92400E;
+  --chip-company-shadow: 0 1px 4px rgba(255,214,10,0.10), inset 0 1px 0 rgba(255,255,255,0.3);
+  --chip-deal-bg: linear-gradient(135deg, rgba(255,159,10,0.12), rgba(255,69,58,0.12));
+  --chip-deal-color: #C2410C;
+  --chip-deal-shadow: 0 1px 4px rgba(255,159,10,0.10), inset 0 1px 0 rgba(255,255,255,0.3);
+  --chip-campaign-bg: linear-gradient(135deg, rgba(48,209,88,0.12), rgba(90,200,250,0.12));
+  --chip-campaign-color: #15803D;
+  --chip-campaign-shadow: 0 1px 4px rgba(48,209,88,0.10), inset 0 1px 0 rgba(255,255,255,0.3);
 }
 
 /* Light mode color adjustments for hardcoded Tailwind utilities */
