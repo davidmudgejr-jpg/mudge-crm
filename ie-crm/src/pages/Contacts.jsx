@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { getContacts, linkRecords, updateContact, queryWithFilters, countWithFilters } from '../api/database';
+import { getContacts, linkRecords, updateContact, queryWithFilters, countWithFilters, createCampaign } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
@@ -18,6 +18,7 @@ import ExportPdfModal from '../components/shared/ExportPdfModal';
 import ContactDetail from './ContactDetail';
 import QuickAddModal from '../components/shared/QuickAddModal';
 import LinkPickerModal from '../components/shared/LinkPickerModal';
+import CreateCampaignModal from '../components/shared/CreateCampaignModal';
 import ActivityCellPreview from '../components/shared/ActivityCellPreview';
 import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
@@ -303,6 +304,40 @@ export default function Contacts({ onCountChange }) {
     }
   };
 
+  // Create Campaign from view — bulk-creates a campaign and links all visible (or selected) contacts
+  const [showCreateCampaign, setShowCreateCampaign] = useState(false);
+  const [createCampaignLoading, setCreateCampaignLoading] = useState(false);
+
+  const createCampaignContactIds = useMemo(() => {
+    if (selected.size > 0) return [...selected];
+    return augmentedRows.map(r => r.contact_id);
+  }, [selected, augmentedRows]);
+
+  const handleCreateCampaign = async ({ name, type, status }) => {
+    setCreateCampaignLoading(true);
+    try {
+      const result = await createCampaign({ name, type, status });
+      const campaignId = result.rows?.[0]?.campaign_id;
+      if (!campaignId) throw new Error('Campaign creation returned no ID');
+
+      // Bulk-link contacts (parallel, ON CONFLICT DO NOTHING preserves existing links)
+      await Promise.all(
+        createCampaignContactIds.map((contactId) =>
+          linkRecords('campaign_contacts', 'campaign_id', campaignId, 'contact_id', contactId)
+        )
+      );
+
+      addToast(`${createCampaignContactIds.length} contact(s) added to "${name}"`);
+      setShowCreateCampaign(false);
+      setSelected(new Set());
+    } catch (err) {
+      console.error('Create campaign failed:', err);
+      addToast(`Failed to create campaign: ${err.message}`, 'error', 4000);
+    } finally {
+      setCreateCampaignLoading(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex-shrink-0 px-6 py-4 border-b border-crm-border">
@@ -344,6 +379,15 @@ export default function Contacts({ onCountChange }) {
                 </button>
               </div>
             )}
+            <button
+              onClick={() => setShowCreateCampaign(true)}
+              className="text-xs bg-crm-card border border-crm-border hover:border-crm-accent/50 text-crm-text font-medium px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z" />
+              </svg>
+              Create Campaign
+            </button>
             <button
               onClick={() => setShowQuickAdd(true)}
               className="text-xs btn-primary px-3 py-1.5 flex items-center gap-1"
@@ -494,6 +538,15 @@ export default function Contacts({ onCountChange }) {
           entityType="campaign"
           onLink={handleBulkCampaign}
           onClose={() => setShowCampaignPicker(false)}
+        />
+      )}
+
+      {showCreateCampaign && (
+        <CreateCampaignModal
+          contactCount={createCampaignContactIds.length}
+          onSubmit={handleCreateCampaign}
+          onClose={() => setShowCreateCampaign(false)}
+          loading={createCampaignLoading}
         />
       )}
 
