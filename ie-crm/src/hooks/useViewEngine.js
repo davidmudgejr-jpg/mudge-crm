@@ -84,22 +84,25 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
   const [visibleColumnKeys, setVisibleColumnKeys] = useState(null); // null = show defaults
   const [columnOrder, setColumnOrder] = useState(null); // null = use CrmTable localStorage fallback
 
+  // --- Group state ---
+  const [groupByColumn, setGroupByColumn] = useState(null); // null = no grouping
+
   // Ref to track if initial load has happened
   const loadedRef = useRef(false);
 
   // Refs for auto-save on unmount (avoids stale closure in cleanup)
   const dirtyRef = useRef(false);
   const activeIdRef = useRef(activeViewId);
-  const stateRef = useRef({ filters, filterLogic, sort, visibleColumnKeys, columnOrder });
+  const stateRef = useRef({ filters, filterLogic, sort, visibleColumnKeys, columnOrder, groupByColumn });
   dirtyRef.current = isDirty;
   activeIdRef.current = activeViewId;
-  stateRef.current = { filters, filterLogic, sort, visibleColumnKeys, columnOrder };
+  stateRef.current = { filters, filterLogic, sort, visibleColumnKeys, columnOrder, groupByColumn };
 
   // Auto-save dirty view when component unmounts (navigating away)
   useEffect(() => {
     return () => {
       if (dirtyRef.current && activeIdRef.current) {
-        const { filters: f, filterLogic: fl, sort: s, visibleColumnKeys: vc, columnOrder: co } = stateRef.current;
+        const { filters: f, filterLogic: fl, sort: s, visibleColumnKeys: vc, columnOrder: co, groupByColumn: gb } = stateRef.current;
         updateView(activeIdRef.current, {
           filters: f,
           filter_logic: fl,
@@ -107,6 +110,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
           sort_direction: s.direction,
           visible_columns: vc,
           column_order: co,
+          group_by_column: gb,
         }).catch(err => console.error('[useViewEngine] Auto-save on unmount failed:', err));
       }
     };
@@ -146,6 +150,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     writeSortState(entityType, viewSort);
     setVisibleColumnKeys(view.visible_columns || null);
     setColumnOrder(view.column_order || null);
+    setGroupByColumn(view.group_by_column || null);
     setIsDirty(false);
   }, [entityType, defaultSort]);
 
@@ -242,6 +247,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
           sort_direction: sort.direction,
           visible_columns: visibleColumnKeys,
           column_order: columnOrder,
+          group_by_column: groupByColumn,
         });
         const next = views.map(v => v.view_id === activeViewId ? updated : v);
         setViews(next);
@@ -252,7 +258,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     }
     const view = views.find(v => v.view_id === viewId);
     if (view) applyViewState(view);
-  }, [views, applyViewState, isDirty, activeViewId, filters, filterLogic, sort, visibleColumnKeys, columnOrder, entityType]);
+  }, [views, applyViewState, isDirty, activeViewId, filters, filterLogic, sort, visibleColumnKeys, columnOrder, groupByColumn, entityType]);
 
   const resetToAll = useCallback(async () => {
     // Auto-save dirty view before clearing
@@ -265,6 +271,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
           sort_direction: sort.direction,
           visible_columns: visibleColumnKeys,
           column_order: columnOrder,
+          group_by_column: groupByColumn,
         });
         const next = views.map(v => v.view_id === activeViewId ? updated : v);
         setViews(next);
@@ -281,6 +288,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     writeSortState(entityType, defaultSort);
     setVisibleColumnKeys(null);
     setColumnOrder(null);
+    setGroupByColumn(null);
     setIsDirty(false);
   }, [entityType, defaultSort, isDirty, activeViewId, filters, filterLogic, sort, visibleColumnKeys, columnOrder, views]);
 
@@ -313,6 +321,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
       sort_direction: sort.direction,
       visible_columns: visibleColumnKeys,
       column_order: columnOrder,
+      group_by_column: groupByColumn,
       position: views.length,
     };
 
@@ -325,6 +334,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
         sort_direction: sort.direction,
         visible_columns: visibleColumnKeys,
         column_order: columnOrder,
+        group_by_column: groupByColumn,
       });
       const next = views.map(v => v.view_id === activeViewId ? updated : v);
       setViews(next);
@@ -359,6 +369,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
       sort_direction: sort.direction,
       visible_columns: visibleColumnKeys,
       column_order: columnOrder,
+      group_by_column: groupByColumn,
       position: views.length,
     };
     // Always POST — never PATCH
@@ -402,6 +413,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
       sort_direction: source.sort_direction,
       visible_columns: source.visible_columns,
       column_order: source.column_order,
+      group_by_column: source.group_by_column,
       position: views.length,
     });
     const next = [...views, created];
@@ -417,6 +429,11 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     setViews(serverViews);
     writeCache(entityType, serverViews);
   }, [entityType]);
+
+  const updateGroupBy = useCallback((column) => {
+    setGroupByColumn(column || null);
+    if (activeViewId) setIsDirty(true);
+  }, [activeViewId]);
 
   const updateColumnOrder = useCallback((newOrder) => {
     setColumnOrder(newOrder);
@@ -459,6 +476,10 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
     setVisibleColumnKeys,
     columnOrder,
     updateColumnOrder,
+
+    // Group state
+    groupByColumn,
+    updateGroupBy,
 
     // Actions
     applyView,

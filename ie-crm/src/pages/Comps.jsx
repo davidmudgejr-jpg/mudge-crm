@@ -5,6 +5,7 @@ import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import GroupByButton from '../components/shared/GroupByButton';
 import CompDetail from './CompDetail';
 import CompManualEntryModal from '../components/shared/CompManualEntryModal';
 import { useToast } from '../components/shared/Toast';
@@ -147,6 +148,7 @@ export default function Comps({ onCountChange }) {
   const [order, setOrder] = useState('DESC');
   const [selected, setSelected] = useState(new Set());
   const [exportOpen, setExportOpen] = useState(false);
+  const [groupByColumn, setGroupByColumn] = useState(null);
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
@@ -360,6 +362,7 @@ export default function Comps({ onCountChange }) {
             hiddenFieldIds={custom.hiddenFieldIds}
             onToggleCustomColumn={custom.toggleCustomFieldVisibility}
           />
+          <GroupByButton columns={activeTab === 'lease' ? LEASE_COLUMNS : SALE_COLUMNS} groupByColumn={groupByColumn} onGroupByChange={setGroupByColumn} />
           <button onClick={fetchData} className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors">Refresh</button>
         </div>
       </div>
@@ -397,6 +400,10 @@ export default function Comps({ onCountChange }) {
             onSelectOnly={selectOnly}
             onShiftSelect={shiftSelect}
             onDeleteRow={deleteRow}
+            groupByColumn={groupByColumn}
+            groupOrders={{}}
+            columnDefs={activeTab === 'lease' ? LEASE_COLUMNS : SALE_COLUMNS}
+            onGroupByColumn={setGroupByColumn}
           />
         )}
       </div>

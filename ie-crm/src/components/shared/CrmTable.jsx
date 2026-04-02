@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { useColumnResize } from '../../hooks/useColumnResize';
 import defaultFormatCell from './formatCell';
 import AddFieldPanel from './AddFieldPanel';
@@ -6,6 +6,8 @@ import { FIELD_TYPE_MAP } from '../../config/fieldTypes';
 import InlineTableCellEditor from './InlineTableCellEditor';
 import ContextMenu from './ContextMenu';
 import ColumnFilterPopover from './ColumnFilterPopover';
+import { groupAndSort } from '../../utils/groupRows';
+import GroupHeader from './GroupHeader';
 
 /* ── Inline cell editor for custom fields ───────────────────────────── */
 
@@ -108,7 +110,7 @@ function InlineCellEditor({ value, fieldDef, typeDef, onSave, onCancel }) {
 
 /* ── Column header with rename / delete or hide ──────────────────────── */
 
-function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide, onResizeStart, deleteDisabled }) {
+function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide, onResizeStart, deleteDisabled, onGroupBy }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [nameVal, setNameVal] = useState(col.label);
@@ -198,6 +200,14 @@ function ColumnHeader({ col, onSort, orderBy, order, onRename, onDelete, onHide,
           >
             Hide field
           </button>
+          {onGroupBy && (
+            <button
+              onClick={() => { onGroupBy(col.key); setMenuOpen(false); }}
+              className="w-full text-left px-3 py-1.5 text-xs text-crm-text hover:bg-crm-hover transition-colors"
+            >
+              Group by this column
+            </button>
+          )}
           {deleteDisabled ? (
             <div
               className="w-full text-left px-3 py-1.5 text-xs text-crm-muted/40 cursor-not-allowed"
@@ -318,6 +328,11 @@ export default function CrmTable({
   // Per-view column order (from useViewEngine)
   viewColumnOrder,   // string[] | null — column key order from saved view
   onColumnOrderChange, // (keys: string[]) => void — notify parent when user drags columns
+  // Grouping
+  groupByColumn,     // string | null — column key to group by
+  groupOrders,       // { [columnKey]: string[] } — custom sort orders for groups
+  columnDefs,        // ALL_COLUMNS — for aggregate type detection
+  onGroupByColumn,   // (column: string | null) => void — update grouping
 }) {
   /* ── Column order: drag-to-reorder with localStorage persistence ─── */
   const colOrderKey = `crm_column_order_${tableKey}`;
@@ -389,6 +404,43 @@ export default function CrmTable({
   const [contextMenu, setContextMenu] = useState(null); // { x, y, row }
   const [filterPopover, setFilterPopover] = useState(null); // { column, anchorRect }
   const addBtnRef = useRef(null);
+
+  /* ── Grouping ────────────────────────────────────────────────────── */
+  const groupedData = useMemo(() => {
+    if (!groupByColumn || !rows.length) return null;
+    return groupAndSort(rows, groupByColumn, columnDefs || columns, groupOrders || {});
+  }, [rows, groupByColumn, columnDefs, columns, groupOrders]);
+
+  const [collapsedGroups, setCollapsedGroups] = useState(new Set());
+  const prevGroupByRef = useRef(groupByColumn);
+
+  useEffect(() => {
+    if (groupByColumn !== prevGroupByRef.current) {
+      if (groupByColumn && groupedData) {
+        // Default: all collapsed
+        setCollapsedGroups(new Set(groupedData.map(g => g.groupValue)));
+      } else {
+        setCollapsedGroups(new Set());
+      }
+      prevGroupByRef.current = groupByColumn;
+    }
+  }, [groupByColumn, groupedData]);
+
+  const toggleGroup = useCallback((groupValue) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupValue)) next.delete(groupValue);
+      else next.add(groupValue);
+      return next;
+    });
+  }, []);
+
+  const groupByLabel = useMemo(() => {
+    if (!groupByColumn) return '';
+    const col = (columnDefs || columns).find(c => c.key === groupByColumn);
+    return col?.label || groupByColumn;
+  }, [groupByColumn, columnDefs, columns]);
+  /* ────────────────────────────────────────────────────────────────── */
 
   const allSelected = selected.size === rows.length && rows.length > 0;
 
@@ -465,6 +517,7 @@ export default function CrmTable({
                         order={order}
                         onRename={onRenameColumn}
                         onHide={onHideColumn}
+                        onGroupBy={onGroupByColumn}
                         deleteDisabled
                         onResizeStart={onResizeStart}
                       />
@@ -549,166 +602,193 @@ export default function CrmTable({
         </thead>
         <tbody>
           {emptyBody}
-          {!noColumnsVisible && rows.map((row, idx) => {
-            const id = row[idField];
-            const isSelected = selected.has(id);
-            const extraClass = rowClassName ? rowClassName(row) : '';
-            return (
-              <tr
-                key={id}
-                onClick={(e) => {
-                  if (e.metaKey) {
-                    onToggleSelect(id);
-                  } else if (e.shiftKey && onShiftSelect) {
-                    onShiftSelect(id);
-                  } else {
-                    onRowClick(row);
-                  }
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  setContextMenu({ x: e.clientX, y: e.clientY, row });
-                }}
-                className={`border-b border-crm-border/30 cursor-pointer ${
-                  newRecordId && row[idField] === newRecordId ? 'animate-live-insert' : 'animate-row-appear'
-                } ${
-                  isSelected
-                    ? 'bg-crm-accent/15 shadow-[0_8px_24px_rgba(0,0,0,0.35),inset_0_0_0_1px_rgba(255,255,255,0.1)] -translate-y-[3px]'
-                    : 'hover:bg-crm-hover hover:-translate-y-[2px] hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] active:scale-[0.995]'
-                } ${extraClass}`}
-                style={{
-                  '--row-index': idx,
-                  animationDelay: `calc(var(--row-index, 0) * 30ms)`,
-                  transition: 'transform 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94), background-color 150ms ease',
-                  borderRadius: '8px',
-                  ...(idx % 2 === 1 ? { backgroundColor: 'rgba(255,255,255,0.02)' } : {}),
-                }}
-              >
-                <td
-                  className="px-3 py-2.5 sticky left-0 bg-crm-bg z-[5]"
-                  onClick={(e) => e.stopPropagation()}
+          {!noColumnsVisible && (() => {
+            const colSpan = allColumns.length + (onAddField ? 2 : 1);
+
+            const renderRow = (row, idx) => {
+              const id = row[idField];
+              const isSelected = selected.has(id);
+              const extraClass = rowClassName ? rowClassName(row) : '';
+              return (
+                <tr
+                  key={id}
+                  onClick={(e) => {
+                    if (e.metaKey) {
+                      onToggleSelect(id);
+                    } else if (e.shiftKey && onShiftSelect) {
+                      onShiftSelect(id);
+                    } else {
+                      onRowClick(row);
+                    }
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenu({ x: e.clientX, y: e.clientY, row });
+                  }}
+                  className={`border-b border-crm-border/30 cursor-pointer ${
+                    newRecordId && row[idField] === newRecordId ? 'animate-live-insert' : 'animate-row-appear'
+                  } ${
+                    isSelected
+                      ? 'bg-crm-accent/15 shadow-[0_8px_24px_rgba(0,0,0,0.35),inset_0_0_0_1px_rgba(255,255,255,0.1)] -translate-y-[3px]'
+                      : 'hover:bg-crm-hover hover:-translate-y-[2px] hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] active:scale-[0.995]'
+                  } ${extraClass}`}
+                  style={{
+                    '--row-index': idx,
+                    animationDelay: `calc(var(--row-index, 0) * 30ms)`,
+                    transition: 'transform 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94), background-color 150ms ease',
+                    borderRadius: '8px',
+                    ...(idx % 2 === 1 ? { backgroundColor: 'rgba(255,255,255,0.02)' } : {}),
+                  }}
                 >
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={() => onToggleSelect(id)}
-                    className="rounded border-crm-border"
-                  />
-                </td>
+                  <td
+                    className="px-3 py-2.5 sticky left-0 bg-crm-bg z-[5]"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => onToggleSelect(id)}
+                      className="rounded border-crm-border"
+                    />
+                  </td>
 
-                {/* Regular cells (matching header order) — with inline editing */}
-                {orderedColumns.map((col) => {
-                  const cellValue = row[col.key];
-                  const isEditable = col.editable !== false
-                    && !col.key.startsWith('linked_')
-                    && !!onCellSave;
-                  const isEditing = editingCell?.rowId === id && editingCell?.colKey === col.key;
+                  {/* Regular cells (matching header order) — with inline editing */}
+                  {orderedColumns.map((col) => {
+                    const cellValue = row[col.key];
+                    const isEditable = col.editable !== false
+                      && !col.key.startsWith('linked_')
+                      && !!onCellSave;
+                    const isEditing = editingCell?.rowId === id && editingCell?.colKey === col.key;
 
-                  return (
-                    <td
-                      key={col.key}
-                      className={`px-3 py-2.5${col.wrapText ? ' whitespace-normal break-words' : ' text-ellipsis whitespace-nowrap'}${isEditing ? ' overflow-visible relative z-20' : col.wrapText ? '' : ' overflow-hidden'}${isEditable && !isEditing ? ' cursor-cell' : ''}`}
-                      style={{
-                        width: widths[col.key] || col.defaultWidth || 150,
-                        minWidth: widths[col.key] || col.defaultWidth || 150,
-                        ...(col.wrapText ? {} : { maxWidth: widths[col.key] || col.defaultWidth || 150 }),
-                      }}
-                      onClick={isEditable ? (e) => {
-                        e.stopPropagation();
-                        if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
-                      } : undefined}
-                    >
-                      {isEditing ? (
-                        <InlineTableCellEditor
-                          value={cellValue}
-                          column={col}
-                          onSave={(val) => {
-                            onCellSave(id, col.key, val);
-                            setEditingCell(null);
-                          }}
-                          onCancel={() => setEditingCell(null)}
-                        />
-                      ) : (
-                        col.renderCell
-                          ? col.renderCell(cellValue, row)
-                          : fmt(cellValue, col.format)
-                      )}
-                    </td>
-                  );
-                })}
-
-                {/* Custom field cells */}
-                {customColumns.map((col) => {
-                  const cellValue = customValues?.[id]?.[col.key] ?? null;
-                  const isEditing =
-                    editingCell?.rowId === id && editingCell?.colKey === col.key;
-                  const typeDef = col._typeDef || FIELD_TYPE_MAP[col._fieldDef?.type] || {};
-
-                  return (
-                    <td
-                      key={col.key}
-                      className={`px-3 py-2.5 text-ellipsis whitespace-nowrap${isEditing ? ' overflow-visible relative z-20' : ' overflow-hidden'}`}
-                      style={{
-                        width: widths[col.key] || col.defaultWidth || 150,
-                        minWidth: widths[col.key] || col.defaultWidth || 150,
-                        maxWidth: widths[col.key] || col.defaultWidth || 150,
-                      }}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
-                      }}
-                    >
-                      {isEditing ? (
-                        <InlineCellEditor
-                          value={cellValue}
-                          fieldDef={col._fieldDef}
-                          typeDef={typeDef}
-                          onSave={(val) => {
-                            onCustomCellChange?.(id, col.key, val);
-                            setEditingCell(null);
-                          }}
-                          onCancel={() => setEditingCell(null)}
-                        />
-                      ) : (
-                        // Display mode
-                        typeDef.inputType === 'checkbox' ? (
-                          <span
-                            className="cursor-pointer select-none"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onCustomCellChange?.(id, col.key, !cellValue);
+                    return (
+                      <td
+                        key={col.key}
+                        className={`px-3 py-2.5${col.wrapText ? ' whitespace-normal break-words' : ' text-ellipsis whitespace-nowrap'}${isEditing ? ' overflow-visible relative z-20' : col.wrapText ? '' : ' overflow-hidden'}${isEditable && !isEditing ? ' cursor-cell' : ''}`}
+                        style={{
+                          width: widths[col.key] || col.defaultWidth || 150,
+                          minWidth: widths[col.key] || col.defaultWidth || 150,
+                          ...(col.wrapText ? {} : { maxWidth: widths[col.key] || col.defaultWidth || 150 }),
+                        }}
+                        onClick={isEditable ? (e) => {
+                          e.stopPropagation();
+                          if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
+                        } : undefined}
+                      >
+                        {isEditing ? (
+                          <InlineTableCellEditor
+                            value={cellValue}
+                            column={col}
+                            onSave={(val) => {
+                              onCellSave(id, col.key, val);
+                              setEditingCell(null);
                             }}
-                          >
-                            {cellValue ? (
-                              <span className="text-crm-accent text-base">✓</span>
-                            ) : (
-                              <span className="w-4 h-4 inline-block border border-crm-border rounded" />
-                            )}
-                          </span>
-                        ) : cellValue != null && cellValue !== '' ? (
-                          typeDef.inputType === 'textarea' ? (
-                            <ExpandableTextCell
-                              value={cellValue}
-                              onStartEdit={() => setEditingCell({ rowId: id, colKey: col.key })}
-                            />
-                          ) : (
-                            fmt(cellValue, col.format)
-                          )
+                            onCancel={() => setEditingCell(null)}
+                          />
                         ) : (
-                          <span className="text-crm-muted text-xs opacity-50 hover:opacity-100 transition-opacity">
-                            {typeDef.placeholder || 'Click to edit'}
-                          </span>
-                        )
-                      )}
-                    </td>
-                  );
-                })}
+                          col.renderCell
+                            ? col.renderCell(cellValue, row)
+                            : fmt(cellValue, col.format)
+                        )}
+                      </td>
+                    );
+                  })}
 
-                {/* Empty cell for add-field column */}
-                {onAddField && <td className="px-2 py-2.5 w-10" />}
-              </tr>
-            );
-          })}
+                  {/* Custom field cells */}
+                  {customColumns.map((col) => {
+                    const cellValue = customValues?.[id]?.[col.key] ?? null;
+                    const isEditing =
+                      editingCell?.rowId === id && editingCell?.colKey === col.key;
+                    const typeDef = col._typeDef || FIELD_TYPE_MAP[col._fieldDef?.type] || {};
+
+                    return (
+                      <td
+                        key={col.key}
+                        className={`px-3 py-2.5 text-ellipsis whitespace-nowrap${isEditing ? ' overflow-visible relative z-20' : ' overflow-hidden'}`}
+                        style={{
+                          width: widths[col.key] || col.defaultWidth || 150,
+                          minWidth: widths[col.key] || col.defaultWidth || 150,
+                          maxWidth: widths[col.key] || col.defaultWidth || 150,
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!isEditing) setEditingCell({ rowId: id, colKey: col.key });
+                        }}
+                      >
+                        {isEditing ? (
+                          <InlineCellEditor
+                            value={cellValue}
+                            fieldDef={col._fieldDef}
+                            typeDef={typeDef}
+                            onSave={(val) => {
+                              onCustomCellChange?.(id, col.key, val);
+                              setEditingCell(null);
+                            }}
+                            onCancel={() => setEditingCell(null)}
+                          />
+                        ) : (
+                          // Display mode
+                          typeDef.inputType === 'checkbox' ? (
+                            <span
+                              className="cursor-pointer select-none"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onCustomCellChange?.(id, col.key, !cellValue);
+                              }}
+                            >
+                              {cellValue ? (
+                                <span className="text-crm-accent text-base">✓</span>
+                              ) : (
+                                <span className="w-4 h-4 inline-block border border-crm-border rounded" />
+                              )}
+                            </span>
+                          ) : cellValue != null && cellValue !== '' ? (
+                            typeDef.inputType === 'textarea' ? (
+                              <ExpandableTextCell
+                                value={cellValue}
+                                onStartEdit={() => setEditingCell({ rowId: id, colKey: col.key })}
+                              />
+                            ) : (
+                              fmt(cellValue, col.format)
+                            )
+                          ) : (
+                            <span className="text-crm-muted text-xs opacity-50 hover:opacity-100 transition-opacity">
+                              {typeDef.placeholder || 'Click to edit'}
+                            </span>
+                          )
+                        )}
+                      </td>
+                    );
+                  })}
+
+                  {/* Empty cell for add-field column */}
+                  {onAddField && <td className="px-2 py-2.5 w-10" />}
+                </tr>
+              );
+            };
+
+            // Grouped rendering
+            if (groupedData) {
+              return groupedData.map((group) => (
+                <React.Fragment key={group.groupValue}>
+                  <GroupHeader
+                    groupLabel={groupByLabel}
+                    groupValue={group.displayValue}
+                    rowCount={group.rows.length}
+                    aggregates={group.aggregates}
+                    visibleColumns={orderedColumns}
+                    collapsed={collapsedGroups.has(group.groupValue)}
+                    onToggle={() => toggleGroup(group.groupValue)}
+                    colSpan={colSpan}
+                  />
+                  {!collapsedGroups.has(group.groupValue) &&
+                    group.rows.map((row, idx) => renderRow(row, idx))}
+                </React.Fragment>
+              ));
+            }
+
+            // Flat rendering (no grouping)
+            return rows.map((row, idx) => renderRow(row, idx));
+          })()}
         </tbody>
       </table>
       {contextMenu && (

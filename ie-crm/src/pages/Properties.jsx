@@ -8,6 +8,7 @@ import useDetailPanel from '../hooks/useDetailPanel';
 import useViewEngine from '../hooks/useViewEngine';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import GroupByButton from '../components/shared/GroupByButton';
 import ViewBar from '../components/shared/ViewBar';
 import FilterBar from '../components/shared/FilterBar';
 import FilterBuilder from '../components/shared/FilterBuilder';
@@ -125,8 +126,10 @@ const ALL_COLUMNS = [
   { key: 'landvision_url', label: 'Landvision', defaultWidth: 80, defaultVisible: false, format: 'url' },
   { key: 'google_maps_url', label: 'Google Maps', defaultWidth: 80, defaultVisible: false, format: 'url' },
   { key: 'zoning_map_url', label: 'Zoning Map', defaultWidth: 80, defaultVisible: false, format: 'url' },
-  { key: 'lease_comp_count', label: 'Lease Comps', defaultWidth: 90, type: 'number', filterable: true, format: 'number', defaultVisible: false },
-  { key: 'sale_comp_count', label: 'Sale Comps', defaultWidth: 90, type: 'number', filterable: true, format: 'number', defaultVisible: false },
+  { key: 'lease_comp_count', label: 'Lease Comps', defaultWidth: 90, type: 'number', filterable: true, editable: false, defaultVisible: false,
+    renderCell: (val) => val > 0 ? <span className="text-crm-accent cursor-pointer hover:underline">{val}</span> : <span className="text-crm-muted">0</span> },
+  { key: 'sale_comp_count', label: 'Sale Comps', defaultWidth: 90, type: 'number', filterable: true, editable: false, defaultVisible: false,
+    renderCell: (val) => val > 0 ? <span className="text-crm-accent cursor-pointer hover:underline">{val}</span> : <span className="text-crm-muted">0</span> },
   { key: 'building_status', label: 'Building Status', defaultWidth: 120, type: 'select', filterable: true, editType: 'select', editOptions: ['Existing', 'Under Construction', 'Proposed', 'Final Planning', 'Demolished', 'Abandoned'], filterOptions: ['Existing', 'Under Construction', 'Proposed', 'Final Planning', 'Demolished', 'Abandoned'], defaultVisible: false },
   { key: 'listing_first_seen_date', label: 'Listed Since', defaultWidth: 100, type: 'date', filterable: true, format: 'date', defaultVisible: false },
   { key: 'listing_url', label: 'Listing URL', defaultWidth: 80, defaultVisible: false, format: 'url' },
@@ -227,7 +230,7 @@ export default function Properties({ onCountChange }) {
     // Inject dynamic filterOptions for city and county
     const result = ALL_COLUMNS.map(col => {
       if (col.key === 'city' && cityOptions.length > 0) {
-        return { ...col, type: 'select', filterOptions: cityOptions };
+        return { ...col, type: 'select', editType: 'select', editOptions: cityOptions, filterOptions: cityOptions };
       }
       return col;
     });
@@ -506,6 +509,7 @@ export default function Properties({ onCountChange }) {
             hiddenFieldIds={hiddenFieldIds}
             onToggleCustomColumn={toggleCustomFieldVisibility}
           />
+          <GroupByButton columns={ALL_COLUMNS} groupByColumn={view.groupByColumn} onGroupByChange={view.updateGroupBy} />
           <button
             onClick={fetchData}
             className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors"
@@ -612,6 +616,10 @@ export default function Properties({ onCountChange }) {
           onColumnFilter={handleColumnFilter}
           viewColumnOrder={view.columnOrder}
           onColumnOrderChange={view.updateColumnOrder}
+          groupByColumn={view.groupByColumn}
+          groupOrders={{}}
+          columnDefs={ALL_COLUMNS}
+          onGroupByColumn={view.updateGroupBy}
         />
         )}
       </div>

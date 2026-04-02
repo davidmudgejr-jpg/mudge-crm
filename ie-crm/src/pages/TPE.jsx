@@ -3,6 +3,7 @@ import { updateProperty } from '../api/database';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import GroupByButton from '../components/shared/GroupByButton';
 import EmptyState from '../components/shared/EmptyState';
 import { useToast } from '../components/shared/Toast';
 import ExportPdfModal from '../components/shared/ExportPdfModal';
@@ -94,6 +95,7 @@ export default function TPE({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   const [showTune, setShowTune] = useState(false);
   const [selected, setSelected] = useState(new Set());
+  const [groupByColumn, setGroupByColumn] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
 
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('tpe', ALL_COLUMNS);
@@ -268,6 +270,7 @@ export default function TPE({ onCountChange }) {
             hideAll={hideAll}
             resetDefaults={resetDefaults}
           />
+          <GroupByButton columns={ALL_COLUMNS} groupByColumn={groupByColumn} onGroupByChange={setGroupByColumn} />
 
           {selected.size > 0 && (
             <div className="flex items-center gap-1.5">
@@ -319,6 +322,10 @@ export default function TPE({ onCountChange }) {
             onHideColumn={toggleColumn}
             emptyMessage={tierFilter ? `No ${tierFilter}-tier properties found` : 'No properties match your search'}
             emptySubMessage="Try adjusting your filters"
+            groupByColumn={groupByColumn}
+            groupOrders={{}}
+            columnDefs={ALL_COLUMNS}
+            onGroupByColumn={setGroupByColumn}
           />
         )}
       </div>

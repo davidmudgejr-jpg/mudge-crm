@@ -9,6 +9,7 @@ import useDetailPanel from '../hooks/useDetailPanel';
 import useViewEngine from '../hooks/useViewEngine';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
+import GroupByButton from '../components/shared/GroupByButton';
 import ViewBar from '../components/shared/ViewBar';
 import FilterBar from '../components/shared/FilterBar';
 import FilterBuilder from '../components/shared/FilterBuilder';
@@ -290,6 +291,7 @@ export default function Companies({ onCountChange }) {
             hiddenFieldIds={hiddenFieldIds}
             onToggleCustomColumn={toggleCustomFieldVisibility}
           />
+          <GroupByButton columns={ALL_COLUMNS} groupByColumn={view.groupByColumn} onGroupByChange={view.updateGroupBy} />
           <button onClick={fetchData} className="bg-crm-card border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-muted hover:text-crm-text hover:border-crm-accent/50 transition-colors">Refresh</button>
         </div>
       </div>
@@ -382,6 +384,10 @@ export default function Companies({ onCountChange }) {
             onColumnFilter={handleColumnFilter}
             viewColumnOrder={view.columnOrder}
             onColumnOrderChange={view.updateColumnOrder}
+            groupByColumn={view.groupByColumn}
+            groupOrders={{}}
+            columnDefs={ALL_COLUMNS}
+            onGroupByColumn={view.updateGroupBy}
           />
         )}
       </div>
