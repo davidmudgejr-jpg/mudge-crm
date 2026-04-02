@@ -509,7 +509,8 @@ const SERVER_ALLOWED_COLS = {
     'name', 'status', 'sent_date', 'subject', 'body', 'notes', 'tags',
   ]),
   action_items: new Set([
-    'title', 'description', 'status', 'priority', 'due_date', 'assigned_to', 'tags',
+    'name', 'notes', 'notes_on_date', 'responsibility', 'high_priority',
+    'status', 'due_date', 'date_completed', 'source',
   ]),
   lease_comps: new Set([
     'property_id', 'company_id', 'tenant_name', 'property_type', 'space_use', 'space_type',
