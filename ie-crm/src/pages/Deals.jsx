@@ -113,6 +113,7 @@ const ALL_COLUMNS = [
   { key: 'fell_through_reason', label: 'Fell Through', defaultWidth: 120, defaultVisible: false },
   { key: 'escrow_url', label: 'Escrow', defaultWidth: 80, defaultVisible: false },
   { key: 'surveys_brochures_url', label: 'Surveys/Brochures', defaultWidth: 80, defaultVisible: false },
+  { key: 'notes', label: 'Notes', defaultWidth: 200, type: 'text', editable: true, wrapText: true, defaultVisible: false },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags', defaultVisible: false },
   // Computed formula columns (from deal_formulas VIEW)
   { key: 'team_gross_computed', label: 'Team Gross', defaultWidth: 110, type: 'number', filterable: true, defaultVisible: true,
