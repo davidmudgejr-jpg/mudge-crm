@@ -4,6 +4,7 @@ import TYPE_ICONS, { INTERACTION_TYPES, getTypeInfo } from '../config/typeIcons'
 import InteractionDetail, { formatDate, formatTime } from './InteractionDetail';
 import NewInteractionModal from '../components/shared/NewInteractionModal';
 import useViewEngine from '../hooks/useViewEngine';
+import useFetchGuard from '../hooks/useFetchGuard';
 import ViewBar from '../components/shared/ViewBar';
 import FilterBar from '../components/shared/FilterBar';
 import FilterBuilder from '../components/shared/FilterBuilder';
@@ -38,8 +39,10 @@ export default function Interactions({ onCountChange }) {
   const [newViewModalOpen, setNewViewModalOpen] = useState(false);
   const [reopenNewViewAfterFilter, setReopenNewViewAfterFilter] = useState(false);
   const view = useViewEngine('interactions', ALL_COLUMNS, { defaultSort: { column: 'date', direction: 'DESC' } });
+  const guard = useFetchGuard();
 
   const fetchData = useCallback(async () => {
+    const { isStale } = guard();
     setLoading(true);
     try {
       if (search || filterType) {
@@ -47,6 +50,7 @@ export default function Interactions({ onCountChange }) {
         if (search) filters.search = search;
         if (filterType) filters.type = filterType;
         const result = await getInteractions({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(result.rows?.length || 0);
         if (onCountChange) onCountChange(result.rows?.length || 0);
@@ -55,17 +59,18 @@ export default function Interactions({ onCountChange }) {
           queryWithFilters('interactions', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
           countWithFilters('interactions', view.sqlFilters || {}),
         ]);
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(total);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch interactions:', err);
-      setRows([]);
+      if (!isStale()) setRows([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
+  }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, guard]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates('interaction', fetchData);

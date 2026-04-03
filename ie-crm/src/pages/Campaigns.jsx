@@ -4,6 +4,7 @@ import { bulkOps } from '../api/bridge';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
 import useViewEngine from '../hooks/useViewEngine';
+import useFetchGuard from '../hooks/useFetchGuard';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import GroupByButton from '../components/shared/GroupByButton';
@@ -260,6 +261,7 @@ export default function Campaigns({ onCountChange }) {
   const [newViewModalOpen, setNewViewModalOpen] = useState(false);
   const [reopenNewViewAfterFilter, setReopenNewViewAfterFilter] = useState(false);
   const view = useViewEngine('campaigns', ALL_COLUMNS, { defaultSort: { column: 'modified', direction: 'DESC' } });
+  const guard = useFetchGuard();
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
@@ -267,6 +269,7 @@ export default function Campaigns({ onCountChange }) {
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('campaigns', ALL_COLUMNS);
 
   const fetchData = useCallback(async () => {
+    const { isStale } = guard();
     setLoading(true);
     try {
       if (search || filterType || filterStatus) {
@@ -280,6 +283,7 @@ export default function Campaigns({ onCountChange }) {
           order: view.sort.direction,
           filters,
         });
+        if (isStale()) return;
         const rows = result.rows || [];
         setRows(rows);
         setTotalCount(rows.length);
@@ -294,17 +298,18 @@ export default function Campaigns({ onCountChange }) {
           }),
           countWithFilters('campaigns', view.sqlFilters || {}),
         ]);
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(total);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch campaigns:', err);
-      setRows([]);
+      if (!isStale()) setRows([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, [search, filterType, filterStatus, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
+  }, [search, filterType, filterStatus, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, guard]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 

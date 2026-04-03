@@ -2456,9 +2456,10 @@ app.post('/api/views', async (req, res) => {
     if (!view_name || !view_name.trim()) {
       return res.status(400).json({ error: 'view_name is required' });
     }
+    const createdBy = req.user?.display_name || null;
     const result = await pool.query(
-      `INSERT INTO saved_views (entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position, column_order, group_by_column)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO saved_views (entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position, column_order, group_by_column, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
       [
         entity_type,
@@ -2471,6 +2472,7 @@ app.post('/api/views', async (req, res) => {
         position || 0,
         column_order ? JSON.stringify(column_order) : null,
         group_by_column || null,
+        createdBy,
       ]
     );
     res.status(201).json(result.rows[0]);

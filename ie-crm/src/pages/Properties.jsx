@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getProperties, updateProperty, queryWithFilters, countWithFilters, query } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
@@ -24,6 +24,8 @@ import EmptyState from '../components/shared/EmptyState';
 import PhotoUploadCell from '../components/shared/PhotoUploadCell';
 import PivotButton from '../components/shared/PivotButton';
 import usePivotFilter from '../hooks/usePivotFilter';
+import { readPivot } from '../utils/pivotNav';
+import useFetchGuard from '../hooks/useFetchGuard';
 import { applyLinkedFilters, splitLinkedFilters } from '../utils/linkedFilter';
 import { bulkOps } from '../api/bridge';
 import useLiveUpdates from '../hooks/useLiveUpdates';
@@ -176,11 +178,13 @@ export default function Properties({ onCountChange }) {
   const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
   const [newViewModalOpen, setNewViewModalOpen] = useState(false);
   const [reopenNewViewAfterFilter, setReopenNewViewAfterFilter] = useState(false);
-  const view = useViewEngine('properties', ALL_COLUMNS);
+  const hasPivotOnMount = useRef(!!readPivot('properties')).current;
+  const view = useViewEngine('properties', ALL_COLUMNS, { suppressRestore: hasPivotOnMount });
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
   const { pivotFilter, dismiss: dismissPivot, mergeFilters: mergePivotFilters } = usePivotFilter('properties');
+  const guard = useFetchGuard();
 
   const saveViewWithPivot = useCallback(async (name) => {
     const mergedFilters = pivotFilter?.ids?.length ? mergePivotFilters(view.filters) : view.filters;
@@ -269,6 +273,7 @@ export default function Properties({ onCountChange }) {
   }, [rows, linked, view.filters]);
 
   const fetchData = useCallback(async () => {
+    const { isStale } = guard();
     setLoading(true);
     try {
       // Pivot filter overrides everything
@@ -283,6 +288,7 @@ export default function Properties({ onCountChange }) {
           }),
           countWithFilters('properties', pivotWhere),
         ]);
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(total);
         if (onCountChange) onCountChange(result.rows?.length || 0);
@@ -327,17 +333,18 @@ export default function Properties({ onCountChange }) {
           }),
           countWithFilters('properties', mergedFilters),
         ]);
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(total);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch properties:', err);
-      setRows([]);
+      if (!isStale()) setRows([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, [search, filterType, filterPriority, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter]);
+  }, [search, filterType, filterPriority, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter, guard]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates('property', fetchData);

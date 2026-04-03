@@ -15,6 +15,7 @@ import { bulkOps } from '../api/bridge';
 import { useSlideOver } from '../components/shared/SlideOverContext';
 import useDetailPanel from '../hooks/useDetailPanel';
 import useLiveUpdates from '../hooks/useLiveUpdates';
+import useFetchGuard from '../hooks/useFetchGuard';
 
 const PROPERTY_TYPES = ['Industrial', 'Office', 'Retail', 'Multifamily', 'Land', 'Mixed-Use'];
 const RENT_TYPES = ['NNN', 'GRS', 'MGR'];
@@ -152,6 +153,7 @@ export default function Comps({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
+  const guard = useFetchGuard();
 
   // Column visibility for both tabs
   const leaseVis = useColumnVisibility('lease_comps', LEASE_COLUMNS);
@@ -164,6 +166,7 @@ export default function Comps({ onCountChange }) {
   const custom = activeTab === 'lease' ? leaseCustom : saleCustom;
 
   const fetchData = useCallback(async () => {
+    const { isStale } = guard();
     setLoading(true);
     try {
       const filters = {};
@@ -178,17 +181,18 @@ export default function Comps({ onCountChange }) {
         countWithFilters(table, {}),
       ]);
 
+      if (isStale()) return;
       const resultRows = result.rows || [];
       setRows(resultRows);
       setTotalCount(total);
       if (onCountChange) onCountChange(resultRows.length);
     } catch (err) {
       console.error(`Failed to fetch ${activeTab} comps:`, err);
-      setRows([]);
+      if (!isStale()) setRows([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, [search, filterType, orderBy, order, activeTab, onCountChange]);
+  }, [search, filterType, orderBy, order, activeTab, onCountChange, guard]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates(['lease_comp', 'sale_comp'], fetchData);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getContacts, linkRecords, updateContact, queryWithFilters, countWithFilters, createCampaign } from '../api/database';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
 import { useCustomFields } from '../hooks/useCustomFields';
@@ -24,6 +24,8 @@ import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import usePivotFilter from '../hooks/usePivotFilter';
+import { readPivot } from '../utils/pivotNav';
+import useFetchGuard from '../hooks/useFetchGuard';
 import { bulkOps } from '../api/bridge';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
@@ -130,11 +132,13 @@ export default function Contacts({ onCountChange }) {
   const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
   const [newViewModalOpen, setNewViewModalOpen] = useState(false);
   const [reopenNewViewAfterFilter, setReopenNewViewAfterFilter] = useState(false);
-  const view = useViewEngine('contacts', ALL_COLUMNS);
+  const hasPivotOnMount = useRef(!!readPivot('contacts')).current;
+  const view = useViewEngine('contacts', ALL_COLUMNS, { suppressRestore: hasPivotOnMount });
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
   const { pivotFilter, dismiss: dismissPivot, mergeFilters: mergePivotFilters } = usePivotFilter('contacts');
+  const guard = useFetchGuard();
 
   // Wrap view save to bake pivot IDs into the view's filters
   const saveViewWithPivot = useCallback(async (name) => {
@@ -179,6 +183,7 @@ export default function Contacts({ onCountChange }) {
   }, [rows, linked]);
 
   const fetchData = useCallback(async () => {
+    const { isStale } = guard();
     setLoading(true);
     try {
       // Pivot filter: contact_id IN (...) from cross-tab navigation
@@ -188,6 +193,7 @@ export default function Contacts({ onCountChange }) {
           queryWithFilters('contacts', { ...pivotWhere, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
           countWithFilters('contacts', pivotWhere),
         ]);
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(total);
         if (onCountChange) onCountChange(result.rows?.length || 0);
@@ -196,6 +202,7 @@ export default function Contacts({ onCountChange }) {
         if (search) filters.search = search;
         if (filterType) filters.type = filterType;
         const result = await getContacts({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(result.rows?.length || 0);
         if (onCountChange) onCountChange(result.rows?.length || 0);
@@ -204,17 +211,18 @@ export default function Contacts({ onCountChange }) {
           queryWithFilters('contacts', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
           countWithFilters('contacts', view.sqlFilters || {}),
         ]);
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(total);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch contacts:', err);
-      setRows([]);
+      if (!isStale()) setRows([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter]);
+  }, [search, filterType, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter, guard]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates('contact', fetchData);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getDeals, updateDeal, queryWithFilters, countWithFilters } from '../api/database';
 import { bulkOps } from '../api/bridge';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
@@ -7,6 +7,7 @@ import useColumnVisibility from '../hooks/useColumnVisibility';
 import useLinkedRecords from '../hooks/useLinkedRecords';
 import useDetailPanel from '../hooks/useDetailPanel';
 import useViewEngine from '../hooks/useViewEngine';
+import useFetchGuard from '../hooks/useFetchGuard';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import GroupByButton from '../components/shared/GroupByButton';
@@ -25,6 +26,7 @@ import EmptyState from '../components/shared/EmptyState';
 import PhotoUploadCell from '../components/shared/PhotoUploadCell';
 import PivotButton from '../components/shared/PivotButton';
 import usePivotFilter from '../hooks/usePivotFilter';
+import { readPivot } from '../utils/pivotNav';
 import { applyLinkedFilters, splitLinkedFilters } from '../utils/linkedFilter';
 import { playDealSound } from '../utils/dealSound';
 import useLiveUpdates from '../hooks/useLiveUpdates';
@@ -145,11 +147,13 @@ export default function Deals({ onCountChange }) {
   const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
   const [newViewModalOpen, setNewViewModalOpen] = useState(false);
   const [reopenNewViewAfterFilter, setReopenNewViewAfterFilter] = useState(false);
-  const view = useViewEngine('deals', ALL_COLUMNS);
+  const hasPivotOnMount = useRef(!!readPivot('deals')).current;
+  const view = useViewEngine('deals', ALL_COLUMNS, { suppressRestore: hasPivotOnMount });
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
   const { pivotFilter, dismiss: dismissPivot, mergeFilters: mergePivotFilters } = usePivotFilter('deals');
+  const guard = useFetchGuard();
 
   const saveViewWithPivot = useCallback(async (name) => {
     const mergedFilters = pivotFilter?.ids?.length ? mergePivotFilters(view.filters) : view.filters;
@@ -215,6 +219,7 @@ export default function Deals({ onCountChange }) {
   }, [rows, linked, view.filters]);
 
   const fetchData = useCallback(async () => {
+    const { isStale } = guard();
     setLoading(true);
     try {
       if (pivotFilter?.ids?.length) {
@@ -223,12 +228,14 @@ export default function Deals({ onCountChange }) {
           queryWithFilters('deals', { ...pivotWhere, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
           countWithFilters('deals', pivotWhere),
         ]);
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(total);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       } else if (search) {
         const filters = { search };
         const result = await getDeals({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(result.rows?.length || 0);
         if (onCountChange) onCountChange(result.rows?.length || 0);
@@ -237,17 +244,18 @@ export default function Deals({ onCountChange }) {
           queryWithFilters('deals', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
           countWithFilters('deals', view.sqlFilters || {}),
         ]);
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(total);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch deals:', err);
-      setRows([]);
+      if (!isStale()) setRows([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter]);
+  }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter, guard]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates('deal', fetchData);

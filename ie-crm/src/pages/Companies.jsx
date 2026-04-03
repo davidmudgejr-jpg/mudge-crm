@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getCompanies, updateCompany, queryWithFilters, countWithFilters } from '../api/database';
 import { bulkOps } from '../api/bridge';
 import { useFormulaColumns } from '../hooks/useFormulaColumns';
@@ -23,6 +23,9 @@ import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import PivotButton from '../components/shared/PivotButton';
+import usePivotFilter from '../hooks/usePivotFilter';
+import { readPivot } from '../utils/pivotNav';
+import useFetchGuard from '../hooks/useFetchGuard';
 import { applyLinkedFilters, splitLinkedFilters } from '../utils/linkedFilter';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
@@ -78,10 +81,20 @@ export default function Companies({ onCountChange }) {
   const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
   const [newViewModalOpen, setNewViewModalOpen] = useState(false);
   const [reopenNewViewAfterFilter, setReopenNewViewAfterFilter] = useState(false);
-  const view = useViewEngine('companies', ALL_COLUMNS);
+  const hasPivotOnMount = useRef(!!readPivot('companies')).current;
+  const view = useViewEngine('companies', ALL_COLUMNS, { suppressRestore: hasPivotOnMount });
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
+  const { pivotFilter, dismiss: dismissPivot, mergeFilters: mergePivotFilters } = usePivotFilter('companies');
+  const guard = useFetchGuard();
+
+  const saveViewWithPivot = useCallback(async (name) => {
+    const mergedFilters = pivotFilter?.ids?.length ? mergePivotFilters(view.filters) : view.filters;
+    const result = await view.createNewView(name, { overrideFilters: mergedFilters });
+    if (pivotFilter) dismissPivot();
+    return result;
+  }, [pivotFilter, view, mergePivotFilters, dismissPivot]);
   const { formulas, evaluateFormulas } = useFormulaColumns('companies');
   const { customColumns, allCustomColumns, hiddenFieldIds, addField, updateField, removeField, hideField, toggleCustomFieldVisibility, setValue, values } = useCustomFields('companies');
 
@@ -131,11 +144,29 @@ export default function Companies({ onCountChange }) {
   }, [rows, linked, view.filters]);
 
   const fetchData = useCallback(async () => {
+    const { isStale } = guard();
     setLoading(true);
     try {
-      if (search) {
+      // Pivot filter overrides everything
+      if (pivotFilter?.ids?.length) {
+        const pivotWhere = { whereClause: 'WHERE company_id = ANY($1)', params: [pivotFilter.ids] };
+        const [result, total] = await Promise.all([
+          queryWithFilters('companies', {
+            ...pivotWhere,
+            orderBy: view.sort.column,
+            order: view.sort.direction,
+            limit: 500,
+          }),
+          countWithFilters('companies', pivotWhere),
+        ]);
+        if (isStale()) return;
+        setRows(result.rows || []);
+        setTotalCount(total);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
+      } else if (search) {
         const filters = { search };
         const result = await getCompanies({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(result.rows?.length || 0);
         if (onCountChange) onCountChange(result.rows?.length || 0);
@@ -144,17 +175,18 @@ export default function Companies({ onCountChange }) {
           queryWithFilters('companies', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
           countWithFilters('companies', view.sqlFilters || {}),
         ]);
+        if (isStale()) return;
         setRows(result.rows || []);
         setTotalCount(total);
         if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch companies:', err);
-      setRows([]);
+      if (!isStale()) setRows([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange]);
+  }, [search, pivotFilter, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, guard]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   const { newRecordId } = useLiveUpdates('company', fetchData);
@@ -303,15 +335,15 @@ export default function Companies({ onCountChange }) {
         isDirty={view.isDirty}
         activeView={view.activeView}
         filters={view.filters}
-        applyView={view.applyView}
-        resetToAll={view.resetToAll}
-        saveView={view.saveView}
-        createNewView={view.createNewView}
+        applyView={(...args) => { dismissPivot(); view.applyView(...args); }}
+        resetToAll={() => { dismissPivot(); view.resetToAll(); }}
+        saveView={pivotFilter ? saveViewWithPivot : view.saveView}
+        createNewView={pivotFilter ? saveViewWithPivot : view.createNewView}
         renameView={view.renameView}
-        deleteView={view.deleteView}
+        deleteView={(...args) => { dismissPivot(); view.deleteView(...args); }}
         duplicateView={view.duplicateView}
         setDefault={view.setDefault}
-        onNewView={() => { view.resetToAll(); setNewViewModalOpen(true); }}
+        onNewView={() => { dismissPivot(); view.resetToAll(); setNewViewModalOpen(true); }}
       />
       <FilterBar
         filters={view.filters}
@@ -321,8 +353,15 @@ export default function Companies({ onCountChange }) {
         totalCount={totalCount}
         filteredCount={augmentedRows.length}
         activeViewId={view.activeViewId}
-        onSaveAsView={(name) => view.createNewView(name)}
+        onSaveAsView={pivotFilter ? saveViewWithPivot : (name) => view.createNewView(name)}
+        hasPivot={!!pivotFilter}
       >
+        {pivotFilter && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded-md bg-purple-500/15 text-purple-400 border border-purple-500/25">
+            {pivotFilter.label} ({pivotFilter.ids.length})
+            <button onClick={dismissPivot} className="ml-0.5 hover:text-purple-200">×</button>
+          </span>
+        )}
         <PivotButton rows={augmentedRows} linkedKey="linked_contacts" idField="contact_id" target="contacts" label="Contacts" sourceLabel={view.activeView?.view_name ? `From Companies: ${view.activeView.view_name}` : 'From Companies'} />
         <PivotButton rows={augmentedRows} linkedKey="linked_properties" idField="property_id" target="properties" label="Properties" sourceLabel={view.activeView?.view_name ? `From Companies: ${view.activeView.view_name}` : 'From Companies'} />
         <PivotButton rows={augmentedRows} linkedKey="linked_deals" idField="deal_id" target="deals" label="Deals" sourceLabel={view.activeView?.view_name ? `From Companies: ${view.activeView.view_name}` : 'From Companies'} />

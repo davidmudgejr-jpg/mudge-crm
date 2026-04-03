@@ -67,7 +67,7 @@ function writeActiveId(entityType, id) {
   } catch { /* non-critical */ }
 }
 
-export default function useViewEngine(entityType, columnDefs, { defaultSort = { column: 'created_at', direction: 'DESC' } } = {}) {
+export default function useViewEngine(entityType, columnDefs, { defaultSort = { column: 'created_at', direction: 'DESC' }, suppressRestore = false } = {}) {
   // --- View list ---
   const [views, setViews] = useState(() => readCache(entityType) || []);
   const [activeViewId, setActiveViewId] = useState(() => readActiveId(entityType));
@@ -89,6 +89,7 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
 
   // Ref to track if initial load has happened
   const loadedRef = useRef(false);
+  const suppressRestoreRef = useRef(suppressRestore);
 
   // Refs for auto-save on unmount (avoids stale closure in cleanup)
   const dirtyRef = useRef(false);
@@ -195,14 +196,17 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
         }
 
         // Auto-apply default view if no active selection
+        // Skip when suppressRestore is set (e.g., pivot navigation active)
         if (!loadedRef.current) {
           loadedRef.current = true;
-          const savedId = readActiveId(entityType);
-          const target = savedId
-            ? serverViews.find(v => v.view_id === savedId)
-            : serverViews.find(v => v.is_default);
-          if (target) {
-            applyViewState(target);
+          if (!suppressRestoreRef.current) {
+            const savedId = readActiveId(entityType);
+            const target = savedId
+              ? serverViews.find(v => v.view_id === savedId)
+              : serverViews.find(v => v.is_default);
+            if (target) {
+              applyViewState(target);
+            }
           }
         }
       } catch (err) {

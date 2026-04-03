@@ -6,6 +6,7 @@ import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import { formatDatePacific } from '../utils/timezone';
 import useDetailPanel from '../hooks/useDetailPanel';
+import useFetchGuard from '../hooks/useFetchGuard';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
 const CIRCLE_COLORS = {
@@ -172,7 +173,9 @@ export default function ActionItems({ onCountChange }) {
     return { myTasks: my, houstonTasks: houston };
   }, [rows]);
 
+  const guard = useFetchGuard();
   const fetchData = useCallback(async () => {
+    const { isStale } = guard();
     setLoading(true);
     try {
       const filters = {};
@@ -183,6 +186,7 @@ export default function ActionItems({ onCountChange }) {
       if (viewTab?.filter) filters.responsibility = viewTab.filter;
 
       const result = await getActionItems({ limit: 500, orderBy, order, filters });
+      if (isStale()) return;
       let resultRows = result.rows || [];
 
       if (activeView === 'today') {
@@ -199,11 +203,11 @@ export default function ActionItems({ onCountChange }) {
       if (onCountChange) onCountChange(count);
     } catch (err) {
       console.error('Failed to fetch action items:', err);
-      setRows([]);
+      if (!isStale()) setRows([]);
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
-  }, [search, filterStatus, activeView, orderBy, order, onCountChange]);
+  }, [search, filterStatus, activeView, orderBy, order, onCountChange, guard]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
