@@ -48,7 +48,16 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
   const [error, setError] = useState(null);
   const [showNewInteraction, setShowNewInteraction] = useState(false);
 
-  const saveField = useAutoSave(updateDeal, resolvedId, setDeal, onRefresh);
+  const CALC_FIELDS = new Set(['rate', 'sf', 'term', 'increases', 'deal_type', 'commission_rate']);
+  const baseSave = useAutoSave(updateDeal, resolvedId, setDeal, onRefresh);
+  const saveField = async (field, value) => {
+    await baseSave(field, value);
+    // Reload deal from VIEW to refresh computed price/commission columns
+    if (CALC_FIELDS.has(field)) {
+      const res = await getDeal(resolvedId);
+      if (res.rows?.[0]) setDeal(res.rows[0]);
+    }
+  };
   const parseInt0 = (v) => (v ? parseInt(v, 10) : null);
   const parseFloat0 = (v) => (v ? parseFloat(v) : null);
 
@@ -168,7 +177,8 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
           <InlineField label="Term" value={deal.term} field="term" onSave={saveField} />
           <InlineField label="Square Feet" value={deal.sf} field="sf" type="number" onSave={saveField} parse={parseInt0} format={(v) => v?.toLocaleString()} />
           <InlineField label="Rate" value={deal.rate} field="rate" type="number" onSave={saveField} parse={parseFloat0} format={(v) => v ? '$' + Number(v).toLocaleString() : null} />
-          <InlineField label="Price" value={deal.price} field="price" type="number" onSave={saveField} parse={parseFloat0} format={(v) => v ? '$' + Number(v).toLocaleString() : null} />
+          <InlineField label="Escalation %" value={deal.increases} field="increases" type="number" onSave={saveField} parse={parseFloat0} format={(v) => v ? v + '%' : null} />
+          <InlineField label="Price" value={deal.price_computed} field="price_computed" readOnly format={(v) => v ? '$' + Number(v).toLocaleString(undefined, { maximumFractionDigits: 0 }) : null} />
           <InlineField label="Commission Rate" value={deal.commission_rate} field="commission_rate" type="number" onSave={saveField} parse={parseFloat0} format={(v) => v ? v + '%' : null} />
           <InlineField label="Gross Fee" value={deal.gross_fee_potential} field="gross_fee_potential" type="number" onSave={saveField} parse={parseFloat0} format={(v) => v ? '$' + Number(v).toLocaleString() : null} />
           <InlineField label="Net Potential" value={deal.net_potential} field="net_potential" type="number" onSave={saveField} parse={parseFloat0} format={(v) => v ? '$' + Number(v).toLocaleString() : null} />

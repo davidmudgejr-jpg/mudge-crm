@@ -97,7 +97,13 @@ const ALL_COLUMNS = [
   // Hidden by default
   { key: 'deal_source', label: 'Source', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: DEAL_SOURCE_OPTIONS, defaultVisible: false },
   { key: 'term', label: 'Term (mo)', defaultWidth: 80, type: 'number', filterable: true, format: 'number', defaultVisible: false },
-  { key: 'price', label: 'Price', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', defaultVisible: false },
+  { key: 'price_computed', label: 'Price', defaultWidth: 110, type: 'number', filterable: true, editable: false, defaultVisible: false,
+    renderCell: (val) => {
+      if (!val && val !== 0) return <span className="text-crm-muted">--</span>;
+      const n = Number(val);
+      return <span className="font-medium">${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>;
+    },
+  },
   { key: 'commission_rate', label: 'Commission %', defaultWidth: 100, type: 'number', filterable: true, defaultVisible: false,
     renderCell: (val) => val ? <span>{Number(val)}%</span> : <span className="text-crm-muted">--</span>,
   },
@@ -307,6 +313,8 @@ export default function Deals({ onCountChange }) {
     }
   }, [selected, fetchData, addToast]);
 
+  const CALC_FIELDS = new Set(['rate', 'sf', 'term', 'increases', 'deal_type', 'commission_rate']);
+
   const handleCellSave = useCallback(async (rowId, field, value) => {
     let oldValue;
     setRows((prev) => prev.map((r) => {
@@ -316,6 +324,8 @@ export default function Deals({ onCountChange }) {
     try {
       await updateDeal(rowId, { [field]: value });
       addToast('Saved', 'success', 1500);
+      // Refetch to update computed columns (price, gross, net) from the VIEW
+      if (CALC_FIELDS.has(field)) fetchData();
     } catch (err) {
       setRows((prev) => prev.map((r) =>
         r.deal_id === rowId ? { ...r, [field]: oldValue } : r

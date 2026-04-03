@@ -478,7 +478,7 @@ export async function getDeals({ limit = 200, offset = 0, orderBy = 'created_at'
 }
 
 export async function getDeal(id) {
-  return query('SELECT * FROM deals WHERE deal_id = $1', [id]);
+  return query('SELECT * FROM deal_formulas WHERE deal_id = $1', [id]);
 }
 
 export async function updateDeal(id, fields) {
