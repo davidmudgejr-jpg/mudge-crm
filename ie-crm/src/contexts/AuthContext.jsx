@@ -216,8 +216,10 @@ export function AuthProvider({ children }) {
     return () => { window.fetch = originalFetch; };
   }, [user, refreshToken]);
 
+  const token = localStorage.getItem(TOKEN_KEY);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refreshToken }}>
+    <AuthContext.Provider value={{ user, token, loading, login, logout, refreshToken }}>
       {children}
     </AuthContext.Provider>
   );
