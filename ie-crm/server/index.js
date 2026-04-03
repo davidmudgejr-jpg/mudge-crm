@@ -18,6 +18,7 @@ const { mountContractRoutes } = require('./routes/contracts');
 const { uploadFile, deleteFile } = require('./services/fileUpload');
 const { normalizeAddress, parseAddress, normalizeCompanyName } = require('./utils/addressNormalizer');
 const { matchProperty, matchCompany, matchContact, detectTable } = require('./utils/compositeMatcher');
+const { buildClusters } = require('./utils/clusterBuilder');
 
 // Load env
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
@@ -3468,6 +3469,521 @@ app.post('/api/dedup/company-merge', requireAuth, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[dedup] company merge error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// ============================================================
+// CLUSTER-BASED DEDUP ENDPOINTS (v2)
+// ============================================================
+
+// Centralized config for all entity types
+const DEDUP_CONFIG = {
+  property: {
+    table: 'properties', idCol: 'property_id',
+    candidateTable: 'dedup_candidates', idACol: 'property_a_id', idBCol: 'property_b_id',
+    displayCol: 'property_address',
+    junctions: [
+      { table: 'property_contacts', col: 'property_id' },
+      { table: 'property_companies', col: 'property_id' },
+      { table: 'property_deals', col: 'property_id' },
+      { table: 'deal_properties', col: 'property_id' },
+      { table: 'interaction_properties', col: 'property_id' },
+      { table: 'action_item_properties', col: 'property_id' },
+    ],
+    directTables: [
+      { table: 'lease_comps', col: 'property_id' },
+      { table: 'sale_comps', col: 'property_id' },
+    ],
+    skipCols: new Set(['property_id', 'created_at', 'updated_at', 'normalized_address']),
+  },
+  contact: {
+    table: 'contacts', idCol: 'contact_id',
+    candidateTable: 'contact_dedup_candidates', idACol: 'contact_a_id', idBCol: 'contact_b_id',
+    displayCol: 'full_name',
+    junctions: [
+      { table: 'contact_companies', col: 'contact_id' },
+      { table: 'property_contacts', col: 'contact_id' },
+      { table: 'deal_contacts', col: 'contact_id' },
+      { table: 'interaction_contacts', col: 'contact_id' },
+      { table: 'action_item_contacts', col: 'contact_id' },
+      { table: 'campaign_contacts', col: 'contact_id' },
+    ],
+    directTables: [],
+    skipCols: new Set(['contact_id', 'created_at', 'updated_at']),
+  },
+  company: {
+    table: 'companies', idCol: 'company_id',
+    candidateTable: 'company_dedup_candidates', idACol: 'company_a_id', idBCol: 'company_b_id',
+    displayCol: 'company_name',
+    junctions: [
+      { table: 'contact_companies', col: 'company_id' },
+      { table: 'property_companies', col: 'company_id' },
+      { table: 'deal_companies', col: 'company_id' },
+      { table: 'interaction_companies', col: 'company_id' },
+      { table: 'action_item_companies', col: 'company_id' },
+    ],
+    directTables: [
+      { table: 'tenant_growth', col: 'company_id' },
+      { table: 'lease_comps', col: 'company_id' },
+    ],
+    skipCols: new Set(['company_id', 'created_at', 'updated_at']),
+  },
+};
+
+// Count linked records for an entity
+async function countLinkedRecords(pool, entityType, entityId) {
+  const cfg = DEDUP_CONFIG[entityType];
+  const counts = {};
+  for (const j of [...cfg.junctions, ...cfg.directTables]) {
+    try {
+      const { rows } = await pool.query(
+        `SELECT count(*)::int AS n FROM ${j.table} WHERE ${j.col} = $1`, [entityId]
+      );
+      counts[j.table] = rows[0]?.n || 0;
+    } catch { counts[j.table] = 0; }
+  }
+  counts.total = Object.values(counts).reduce((s, n) => s + n, 0);
+  return counts;
+}
+
+// GET /api/dedup/clusters — clustered dedup candidates with full entity records
+app.get('/api/dedup/clusters', requireAuth, async (req, res) => {
+  try {
+    const entityType = req.query.entityType || 'property';
+    const status = req.query.status || 'pending';
+    const cfg = DEDUP_CONFIG[entityType];
+    if (!cfg) return res.status(400).json({ error: 'Invalid entityType' });
+
+    // 1. Fetch all candidates for this status
+    const { rows: candidates } = await pool.query(
+      `SELECT * FROM ${cfg.candidateTable} WHERE status = $1
+       ORDER BY CASE confidence WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, created_at DESC`,
+      [status]
+    );
+
+    // 2. Build clusters via Union-Find
+    const clusters = buildClusters(candidates, cfg.idACol, cfg.idBCol);
+
+    // 3. Collect all unique entity IDs across all clusters
+    const allIds = new Set();
+    for (const cl of clusters) {
+      for (const id of cl.entityIds) allIds.add(id);
+    }
+    if (allIds.size === 0) return res.json({ clusters: [], stats: {} });
+
+    // 4. Batch-fetch full records
+    const idArr = [...allIds];
+    const placeholders = idArr.map((_, i) => `$${i + 1}`).join(',');
+    const { rows: entities } = await pool.query(
+      `SELECT * FROM ${cfg.table} WHERE ${cfg.idCol} IN (${placeholders})`, idArr
+    );
+    const entityMap = new Map(entities.map(e => [e[cfg.idCol], e]));
+
+    // 5. Batch-fetch linked record counts
+    const linkCountMap = new Map();
+    await Promise.all(idArr.map(async (id) => {
+      linkCountMap.set(id, await countLinkedRecords(pool, entityType, id));
+    }));
+
+    // 6. Assemble response
+    const result = clusters.map(cl => ({
+      clusterId: cl.clusterId,
+      confidence: cl.confidence,
+      matchTypes: cl.matchTypes,
+      candidateIds: cl.candidates.map(c => c.id),
+      entities: cl.entityIds.map(id => ({
+        ...entityMap.get(id),
+        _linkedCounts: linkCountMap.get(id) || {},
+      })).filter(e => e[cfg.idCol]), // filter out any deleted entities
+    }));
+
+    // Also fetch stats
+    const { rows: statsRows } = await pool.query(
+      `SELECT status, count(*)::int AS count FROM ${cfg.candidateTable} GROUP BY status`
+    );
+    const stats = { pending: 0, merged: 0, dismissed: 0, deferred: 0 };
+    for (const r of statsRows) stats[r.status] = r.count;
+
+    res.json({ clusters: result, stats });
+  } catch (err) {
+    console.error('[dedup] clusters error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dedup/cluster-merge — field-level multi-record merge
+app.post('/api/dedup/cluster-merge', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { entityType, keeperId, removeIds, fieldOverrides = {} } = req.body;
+    const cfg = DEDUP_CONFIG[entityType];
+    if (!cfg) return res.status(400).json({ error: 'Invalid entityType' });
+    if (!keeperId || !removeIds || removeIds.length === 0) {
+      return res.status(400).json({ error: 'keeperId and removeIds required' });
+    }
+
+    await client.query('BEGIN');
+
+    // 1. Snapshot all records for audit
+    const allIds = [keeperId, ...removeIds];
+    const ph = allIds.map((_, i) => `$${i + 1}`).join(',');
+    const { rows: allRecords } = await client.query(
+      `SELECT * FROM ${cfg.table} WHERE ${cfg.idCol} IN (${ph})`, allIds
+    );
+    const recordMap = new Map(allRecords.map(r => [r[cfg.idCol], r]));
+    const keeper = recordMap.get(keeperId);
+    if (!keeper) throw new Error('Keeper record not found');
+
+    const keeperSnapshot = { ...keeper };
+    const removedSnapshots = removeIds.map(id => recordMap.get(id)).filter(Boolean);
+
+    // 2. Apply explicit field overrides to keeper
+    let overrideCount = 0;
+    const overrideSets = [];
+    const overrideVals = [];
+    let pi = 1;
+    for (const [field, { value }] of Object.entries(fieldOverrides)) {
+      if (cfg.skipCols.has(field)) continue;
+      overrideSets.push(`${field} = $${pi}`);
+      overrideVals.push(value);
+      pi++;
+      overrideCount++;
+    }
+    if (overrideSets.length > 0) {
+      overrideVals.push(keeperId);
+      await client.query(
+        `UPDATE ${cfg.table} SET ${overrideSets.join(', ')}, updated_at = NOW() WHERE ${cfg.idCol} = $${pi}`,
+        overrideVals
+      );
+    }
+
+    // 3. Backfill remaining NULLs from removed records (first non-null wins)
+    // Re-fetch keeper after overrides
+    const { rows: [updatedKeeper] } = await client.query(
+      `SELECT * FROM ${cfg.table} WHERE ${cfg.idCol} = $1`, [keeperId]
+    );
+    const fills = [];
+    const fillVals = [];
+    let fi = 1;
+    for (const col of Object.keys(updatedKeeper)) {
+      if (cfg.skipCols.has(col)) continue;
+      if (updatedKeeper[col] != null && updatedKeeper[col] !== '') continue;
+      // Find first non-null from removes
+      for (const rid of removeIds) {
+        const rec = recordMap.get(rid);
+        if (rec && rec[col] != null && rec[col] !== '') {
+          fills.push(`${col} = $${fi}`);
+          fillVals.push(rec[col]);
+          fi++;
+          break;
+        }
+      }
+    }
+    if (fills.length > 0) {
+      fillVals.push(keeperId);
+      await client.query(
+        `UPDATE ${cfg.table} SET ${fills.join(', ')}, updated_at = NOW() WHERE ${cfg.idCol} = $${fi}`,
+        fillVals
+      );
+    }
+
+    // 4. Reassign junction tables for each removed record
+    let movedLinks = 0;
+    const junctionChanges = [];
+    for (const removeId of removeIds) {
+      for (const { table: jTable, col: jCol } of cfg.junctions) {
+        try {
+          const otherCols = (await client.query(
+            `SELECT column_name FROM information_schema.columns WHERE table_name = $1 AND column_name != $2 AND column_name != 'role'`,
+            [jTable, jCol]
+          )).rows.map(r => r.column_name);
+
+          let deleted = 0;
+          if (otherCols.length > 0) {
+            for (const oc of otherCols) {
+              const { rowCount } = await client.query(
+                `DELETE FROM ${jTable} WHERE ${jCol} = $1 AND ${oc} IN (SELECT ${oc} FROM ${jTable} WHERE ${jCol} = $2)`,
+                [removeId, keeperId]
+              );
+              deleted += rowCount;
+            }
+          }
+          const { rowCount } = await client.query(
+            `UPDATE ${jTable} SET ${jCol} = $1 WHERE ${jCol} = $2`, [keeperId, removeId]
+          );
+          movedLinks += rowCount;
+          if (rowCount > 0 || deleted > 0) {
+            junctionChanges.push({ table: jTable, removeId, moved: rowCount, deleted });
+          }
+        } catch (e) { /* table may not exist */ }
+      }
+
+      // 5. Reassign direct tables (comps, tenant_growth)
+      for (const { table: dTable, col: dCol } of cfg.directTables) {
+        try {
+          const { rowCount } = await client.query(
+            `UPDATE ${dTable} SET ${dCol} = $1 WHERE ${dCol} = $2`, [keeperId, removeId]
+          );
+          movedLinks += rowCount;
+        } catch (e) { /* table may not exist */ }
+      }
+    }
+
+    // 6. Delete removed records
+    for (const removeId of removeIds) {
+      await client.query(`DELETE FROM ${cfg.table} WHERE ${cfg.idCol} = $1`, [removeId]);
+    }
+
+    // 7. Mark all related candidates as merged
+    for (const removeId of removeIds) {
+      await client.query(`
+        UPDATE ${cfg.candidateTable}
+        SET status = 'merged', resolved_by = $1, resolved_at = NOW(),
+            merge_notes = 'Cluster merge', updated_at = NOW()
+        WHERE status = 'pending' AND (${cfg.idACol} = $2 OR ${cfg.idBCol} = $2 OR ${cfg.idACol} = $3 OR ${cfg.idBCol} = $3)
+      `, [req.user?.username || 'user', removeId, keeperId]);
+    }
+
+    // 8. Write audit record
+    const { rows: [audit] } = await client.query(`
+      INSERT INTO dedup_merge_audit (entity_type, keeper_id, removed_ids, keeper_snapshot, removed_snapshots, field_overrides, junction_changes, merged_by)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      RETURNING id
+    `, [entityType, keeperId, removeIds, JSON.stringify(keeperSnapshot), JSON.stringify(removedSnapshots),
+        JSON.stringify(fieldOverrides), JSON.stringify(junctionChanges), req.user?.username || 'user']);
+
+    await client.query('COMMIT');
+    res.json({ ok: true, fieldsFilled: fills.length, fieldsOverridden: overrideCount, linksMoved: movedLinks, auditId: audit.id });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[dedup] cluster-merge error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/dedup/undo-merge — reverse a merge using audit snapshot
+app.post('/api/dedup/undo-merge', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { auditId } = req.body;
+    if (!auditId) return res.status(400).json({ error: 'auditId required' });
+
+    const { rows: [audit] } = await client.query(
+      'SELECT * FROM dedup_merge_audit WHERE id = $1', [auditId]
+    );
+    if (!audit) return res.status(404).json({ error: 'Audit record not found' });
+    if (audit.undone) return res.status(400).json({ error: 'Already undone' });
+
+    const cfg = DEDUP_CONFIG[audit.entity_type];
+    if (!cfg) return res.status(400).json({ error: 'Invalid entity type in audit' });
+
+    await client.query('BEGIN');
+
+    const keeperSnapshot = typeof audit.keeper_snapshot === 'string' ? JSON.parse(audit.keeper_snapshot) : audit.keeper_snapshot;
+    const removedSnapshots = typeof audit.removed_snapshots === 'string' ? JSON.parse(audit.removed_snapshots) : audit.removed_snapshots;
+
+    // 1. Restore keeper to pre-merge state
+    const keeperCols = Object.keys(keeperSnapshot).filter(c => !cfg.skipCols.has(c) && c !== cfg.idCol);
+    if (keeperCols.length > 0) {
+      const sets = keeperCols.map((c, i) => `${c} = $${i + 1}`);
+      const vals = keeperCols.map(c => keeperSnapshot[c]);
+      vals.push(audit.keeper_id);
+      await client.query(
+        `UPDATE ${cfg.table} SET ${sets.join(', ')} WHERE ${cfg.idCol} = $${vals.length}`, vals
+      );
+    }
+
+    // 2. Re-insert removed records
+    for (const snap of removedSnapshots) {
+      const cols = Object.keys(snap);
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(',');
+      const vals = cols.map(c => snap[c]);
+      await client.query(
+        `INSERT INTO ${cfg.table} (${cols.join(',')}) VALUES (${placeholders}) ON CONFLICT (${cfg.idCol}) DO NOTHING`, vals
+      );
+    }
+
+    // 3. Re-open related candidates
+    for (const rid of audit.removed_ids) {
+      await client.query(`
+        UPDATE ${cfg.candidateTable}
+        SET status = 'pending', resolved_by = NULL, resolved_at = NULL,
+            merge_notes = 'Reopened via undo', updated_at = NOW()
+        WHERE (${cfg.idACol} = $1 OR ${cfg.idBCol} = $1 OR ${cfg.idACol} = $2 OR ${cfg.idBCol} = $2)
+          AND status = 'merged'
+      `, [rid, audit.keeper_id]);
+    }
+
+    // 4. Mark audit as undone
+    await client.query(
+      'UPDATE dedup_merge_audit SET undone = true, undone_at = NOW() WHERE id = $1', [auditId]
+    );
+
+    await client.query('COMMIT');
+    res.json({ ok: true, restored: removedSnapshots.length });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[dedup] undo-merge error:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+// GET /api/dedup/merge-history — recent merge audit records
+app.get('/api/dedup/merge-history', requireAuth, async (req, res) => {
+  try {
+    const entityType = req.query.entityType || 'property';
+    const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+    const { rows } = await pool.query(`
+      SELECT id, entity_type, keeper_id, removed_ids, field_overrides,
+             merged_by, merged_at, undone, undone_at,
+             array_length(removed_ids, 1) AS records_merged
+      FROM dedup_merge_audit
+      WHERE entity_type = $1
+      ORDER BY merged_at DESC
+      LIMIT $2
+    `, [entityType, limit]);
+
+    // Fetch keeper display names
+    const cfg = DEDUP_CONFIG[entityType];
+    if (cfg && rows.length > 0) {
+      const keeperIds = rows.map(r => r.keeper_id);
+      const ph = keeperIds.map((_, i) => `$${i + 1}`).join(',');
+      const { rows: keepers } = await pool.query(
+        `SELECT ${cfg.idCol}, ${cfg.displayCol} FROM ${cfg.table} WHERE ${cfg.idCol} IN (${ph})`, keeperIds
+      );
+      const nameMap = new Map(keepers.map(k => [k[cfg.idCol], k[cfg.displayCol]]));
+      for (const r of rows) {
+        r.keeper_name = nameMap.get(r.keeper_id) || '(deleted)';
+      }
+    }
+
+    res.json({ rows });
+  } catch (err) {
+    console.error('[dedup] merge-history error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/dedup/auto-merge — auto-merge 100% exact match clusters
+app.post('/api/dedup/auto-merge', requireAuth, async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const entityType = req.body.entityType || 'property';
+    const cfg = DEDUP_CONFIG[entityType];
+    if (!cfg) return res.status(400).json({ error: 'Invalid entityType' });
+
+    // 1. Fetch pending candidates and build clusters
+    const { rows: candidates } = await client.query(
+      `SELECT * FROM ${cfg.candidateTable} WHERE status = 'pending'`
+    );
+    const clusters = buildClusters(candidates, cfg.idACol, cfg.idBCol);
+
+    let autoMerged = 0;
+    let skipped = 0;
+
+    for (const cluster of clusters) {
+      // 2. Fetch full records for the cluster
+      const ph = cluster.entityIds.map((_, i) => `$${i + 1}`).join(',');
+      const { rows: records } = await client.query(
+        `SELECT * FROM ${cfg.table} WHERE ${cfg.idCol} IN (${ph})`, cluster.entityIds
+      );
+      if (records.length < 2) { skipped++; continue; }
+
+      // 3. Check if 100% exact: all non-system fields either identical or only one non-null
+      let isExact = true;
+      const allCols = Object.keys(records[0]).filter(c => !cfg.skipCols.has(c) && c !== cfg.idCol);
+      for (const col of allCols) {
+        const nonNullVals = records.map(r => r[col]).filter(v => v != null && v !== '');
+        const uniqueVals = new Set(nonNullVals.map(v => JSON.stringify(v)));
+        if (uniqueVals.size > 1) {
+          isExact = false;
+          break;
+        }
+      }
+      if (!isExact) { skipped++; continue; }
+
+      // 4. Pick keeper: record with most linked records
+      let bestKeeper = records[0];
+      let bestCount = 0;
+      for (const rec of records) {
+        const counts = await countLinkedRecords(client, entityType, rec[cfg.idCol]);
+        if (counts.total > bestCount) {
+          bestCount = counts.total;
+          bestKeeper = rec;
+        }
+      }
+
+      // 5. Merge using same logic as cluster-merge (inline for transaction safety)
+      const keeperId = bestKeeper[cfg.idCol];
+      const removeIds = records.filter(r => r[cfg.idCol] !== keeperId).map(r => r[cfg.idCol]);
+
+      await client.query('BEGIN');
+
+      // Backfill NULLs
+      const fills = [];
+      const fillVals = [];
+      let fi = 1;
+      for (const col of allCols) {
+        if (bestKeeper[col] != null && bestKeeper[col] !== '') continue;
+        for (const rec of records) {
+          if (rec[cfg.idCol] === keeperId) continue;
+          if (rec[col] != null && rec[col] !== '') {
+            fills.push(`${col} = $${fi}`);
+            fillVals.push(rec[col]);
+            fi++;
+            break;
+          }
+        }
+      }
+      if (fills.length > 0) {
+        fillVals.push(keeperId);
+        await client.query(
+          `UPDATE ${cfg.table} SET ${fills.join(', ')}, updated_at = NOW() WHERE ${cfg.idCol} = $${fi}`, fillVals
+        );
+      }
+
+      // Reassign junctions + direct tables
+      for (const removeId of removeIds) {
+        for (const { table: jTable, col: jCol } of [...cfg.junctions, ...cfg.directTables]) {
+          try {
+            await client.query(`UPDATE ${jTable} SET ${jCol} = $1 WHERE ${jCol} = $2`, [keeperId, removeId]);
+          } catch (e) { /* skip */ }
+        }
+        await client.query(`DELETE FROM ${cfg.table} WHERE ${cfg.idCol} = $1`, [removeId]);
+      }
+
+      // Mark candidates
+      for (const removeId of removeIds) {
+        await client.query(`
+          UPDATE ${cfg.candidateTable}
+          SET status = 'merged', resolved_by = 'auto-merge', resolved_at = NOW(),
+              merge_notes = 'Auto-merged: 100% exact match', updated_at = NOW()
+          WHERE status = 'pending' AND (${cfg.idACol} = $1 OR ${cfg.idBCol} = $1 OR ${cfg.idACol} = $2 OR ${cfg.idBCol} = $2)
+        `, [removeId, keeperId]);
+      }
+
+      // Write audit
+      await client.query(`
+        INSERT INTO dedup_merge_audit (entity_type, keeper_id, removed_ids, keeper_snapshot, removed_snapshots, field_overrides, junction_changes, merged_by)
+        VALUES ($1, $2, $3, $4, $5, '{}', '[]', 'auto-merge')
+      `, [entityType, keeperId, removeIds, JSON.stringify(bestKeeper),
+          JSON.stringify(records.filter(r => r[cfg.idCol] !== keeperId))]);
+
+      await client.query('COMMIT');
+      autoMerged++;
+    }
+
+    res.json({ ok: true, autoMerged, skipped, totalClusters: clusters.length });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[dedup] auto-merge error:', err.message);
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
