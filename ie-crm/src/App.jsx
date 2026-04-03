@@ -124,27 +124,27 @@ function AppShell() {
       {/* Main Content */}
       <main className="flex-1 pt-8 overflow-hidden">
         <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="text-crm-muted text-sm">Loading...</div></div>}>
-        <Routes>
-          <Route path="/" element={<Properties onCountChange={setRowCount} />} />
-          <Route path="/properties" element={<Properties onCountChange={setRowCount} />} />
-          <Route path="/contacts" element={<Contacts onCountChange={setRowCount} />} />
-          <Route path="/companies" element={<Companies onCountChange={setRowCount} />} />
-          <Route path="/deals" element={<Deals onCountChange={setRowCount} />} />
-          <Route path="/tpe" element={<TPE onCountChange={setRowCount} />} />
-          <Route path="/tpe-enrichment" element={<TPEEnrichment />} />
-          <Route path="/verification" element={<VerificationQueue />} />
-          <Route path="/interactions" element={<Interactions onCountChange={setRowCount} />} />
-          <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
-          <Route path="/action-items" element={<ActionItems onCountChange={setRowCount} />} />
-          <Route path="/comps" element={<Comps onCountChange={setRowCount} />} />
-          <Route path="/ai-ops" element={<AIOps />} />
-          <Route path="/import" element={<Import />} />
-          <Route path="/dedup" element={<DedupReview onCountChange={setRowCount} />} />
-          <Route path="/data-trust" element={<DataTrust onCountChange={setRowCount} />} />
-          <Route path="/contracts" element={<Contracts onCountChange={setRowCount} />} />
-          <Route path="/contracts/:packageId" element={<ContractEditor />} />
-          <Route path="/settings" element={<Settings />} />
-        </Routes>
+          <Routes>
+            <Route path="/" element={<Properties onCountChange={setRowCount} />} />
+            <Route path="/properties" element={<Properties onCountChange={setRowCount} />} />
+            <Route path="/contacts" element={<Contacts onCountChange={setRowCount} />} />
+            <Route path="/companies" element={<Companies onCountChange={setRowCount} />} />
+            <Route path="/deals" element={<Deals onCountChange={setRowCount} />} />
+            <Route path="/tpe" element={<TPE onCountChange={setRowCount} />} />
+            <Route path="/tpe-enrichment" element={<TPEEnrichment />} />
+            <Route path="/verification" element={<VerificationQueue />} />
+            <Route path="/interactions" element={<Interactions onCountChange={setRowCount} />} />
+            <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
+            <Route path="/action-items" element={<ActionItems onCountChange={setRowCount} />} />
+            <Route path="/comps" element={<Comps onCountChange={setRowCount} />} />
+            <Route path="/ai-ops" element={<AIOps />} />
+            <Route path="/import" element={<Import />} />
+            <Route path="/dedup" element={<DedupReview onCountChange={setRowCount} />} />
+            <Route path="/data-trust" element={<DataTrust onCountChange={setRowCount} />} />
+            <Route path="/contracts" element={<Contracts onCountChange={setRowCount} />} />
+            <Route path="/contracts/:packageId" element={<ContractEditor />} />
+            <Route path="/settings" element={<Settings />} />
+          </Routes>
         </Suspense>
       </main>
 
