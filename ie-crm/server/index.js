@@ -3029,8 +3029,10 @@ app.post('/api/data-trust/suggestions/:id/resolve', requireAuth, async (req, res
       if (table && idCol) {
         // SECURITY: Validate field_name against whitelist (Houston audit C5 — 2026-03-30)
         validateColumn(suggestion.field_name, table);
+        const tsCol = { properties: 'last_modified' }[table]; // only properties has a timestamp col
+        const tsClause = tsCol ? `, ${tsCol} = NOW()` : '';
         await client.query(
-          `UPDATE "${table}" SET ${quoteIdentifier(suggestion.field_name)} = $1, updated_at = NOW() WHERE "${idCol}" = $2`,
+          `UPDATE "${table}" SET ${quoteIdentifier(suggestion.field_name)} = $1${tsClause} WHERE "${idCol}" = $2`,
           [suggestion.suggested_value, suggestion.entity_id]
         );
         await client.query(
@@ -3142,7 +3144,7 @@ app.post('/api/dedup/merge', requireAuth, async (req, res) => {
     }
     if (fills.length > 0) {
       vals.push(keepId);
-      await client.query(`UPDATE properties SET ${fills.join(', ')}, updated_at = NOW() WHERE property_id = $${paramIdx}`, vals);
+      await client.query(`UPDATE properties SET ${fills.join(', ')}, last_modified = NOW() WHERE property_id = $${paramIdx}`, vals);
     }
 
     // 2. Reassign all junction table references from removeId to keepId
@@ -3301,7 +3303,7 @@ app.post('/api/dedup/contact-merge', requireAuth, async (req, res) => {
     }
     if (fills.length > 0) {
       vals.push(keepId);
-      await client.query(`UPDATE contacts SET ${fills.join(', ')}, updated_at = NOW() WHERE contact_id = $${paramIdx}`, vals);
+      await client.query(`UPDATE contacts SET ${fills.join(', ')} WHERE contact_id = $${paramIdx}`, vals);
     }
 
     // 2. Reassign junction table links
@@ -3445,7 +3447,7 @@ app.post('/api/dedup/company-merge', requireAuth, async (req, res) => {
     }
     if (fills.length > 0) {
       vals.push(keepId);
-      await client.query(`UPDATE companies SET ${fills.join(', ')}, updated_at = NOW() WHERE company_id = $${paramIdx}`, vals);
+      await client.query(`UPDATE companies SET ${fills.join(', ')} WHERE company_id = $${paramIdx}`, vals);
     }
 
     // 2. Reassign junction table links
@@ -3520,6 +3522,7 @@ const DEDUP_CONFIG = {
     table: 'properties', idCol: 'property_id',
     candidateTable: 'dedup_candidates', idACol: 'property_a_id', idBCol: 'property_b_id',
     displayCol: 'property_address',
+    timestampCol: 'last_modified', // properties uses last_modified, not updated_at
     junctions: [
       { table: 'property_contacts', col: 'property_id' },
       { table: 'property_companies', col: 'property_id' },
@@ -3532,12 +3535,13 @@ const DEDUP_CONFIG = {
       { table: 'lease_comps', col: 'property_id' },
       { table: 'sale_comps', col: 'property_id' },
     ],
-    skipCols: new Set(['property_id', 'created_at', 'updated_at', 'normalized_address']),
+    skipCols: new Set(['property_id', 'created_at', 'last_modified', 'normalized_address']),
   },
   contact: {
     table: 'contacts', idCol: 'contact_id',
     candidateTable: 'contact_dedup_candidates', idACol: 'contact_a_id', idBCol: 'contact_b_id',
     displayCol: 'full_name',
+    timestampCol: null, // contacts has no updated_at column
     junctions: [
       { table: 'contact_companies', col: 'contact_id' },
       { table: 'property_contacts', col: 'contact_id' },
@@ -3547,12 +3551,13 @@ const DEDUP_CONFIG = {
       { table: 'campaign_contacts', col: 'contact_id' },
     ],
     directTables: [],
-    skipCols: new Set(['contact_id', 'created_at', 'updated_at']),
+    skipCols: new Set(['contact_id', 'created_at']),
   },
   company: {
     table: 'companies', idCol: 'company_id',
     candidateTable: 'company_dedup_candidates', idACol: 'company_a_id', idBCol: 'company_b_id',
     displayCol: 'company_name',
+    timestampCol: null, // companies has no updated_at column
     junctions: [
       { table: 'contact_companies', col: 'company_id' },
       { table: 'property_companies', col: 'company_id' },
@@ -3564,7 +3569,7 @@ const DEDUP_CONFIG = {
       { table: 'tenant_growth', col: 'company_id' },
       { table: 'lease_comps', col: 'company_id' },
     ],
-    skipCols: new Set(['company_id', 'created_at', 'updated_at']),
+    skipCols: new Set(['company_id', 'created_at']),
   },
 };
 
@@ -3723,9 +3728,10 @@ app.post('/api/dedup/cluster-merge', requireAuth, async (req, res) => {
       overrideCount++;
     }
     if (overrideSets.length > 0) {
+      const tsClause = cfg.timestampCol ? `, ${cfg.timestampCol} = NOW()` : '';
       overrideVals.push(keeperId);
       await client.query(
-        `UPDATE ${cfg.table} SET ${overrideSets.join(', ')}, updated_at = NOW() WHERE ${cfg.idCol} = $${pi}`,
+        `UPDATE ${cfg.table} SET ${overrideSets.join(', ')}${tsClause} WHERE ${cfg.idCol} = $${pi}`,
         overrideVals
       );
     }
@@ -3753,9 +3759,10 @@ app.post('/api/dedup/cluster-merge', requireAuth, async (req, res) => {
       }
     }
     if (fills.length > 0) {
+      const tsClause = cfg.timestampCol ? `, ${cfg.timestampCol} = NOW()` : '';
       fillVals.push(keeperId);
       await client.query(
-        `UPDATE ${cfg.table} SET ${fills.join(', ')}, updated_at = NOW() WHERE ${cfg.idCol} = $${fi}`,
+        `UPDATE ${cfg.table} SET ${fills.join(', ')}${tsClause} WHERE ${cfg.idCol} = $${fi}`,
         fillVals
       );
     }
@@ -4013,9 +4020,10 @@ app.post('/api/dedup/auto-merge', requireAuth, async (req, res) => {
         }
       }
       if (fills.length > 0) {
+        const tsClause = cfg.timestampCol ? `, ${cfg.timestampCol} = NOW()` : '';
         fillVals.push(keeperId);
         await client.query(
-          `UPDATE ${cfg.table} SET ${fills.join(', ')}, updated_at = NOW() WHERE ${cfg.idCol} = $${fi}`, fillVals
+          `UPDATE ${cfg.table} SET ${fills.join(', ')}${tsClause} WHERE ${cfg.idCol} = $${fi}`, fillVals
         );
       }
 
