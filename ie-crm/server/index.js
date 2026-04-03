@@ -566,6 +566,66 @@ app.post('/api/db/update', async (req, res) => {
   }
 });
 
+// ── Junction table link / unlink ──
+
+const VALID_JUNCTIONS = new Set([
+  'property_contacts', 'property_companies', 'contact_companies',
+  'deal_properties', 'deal_contacts', 'deal_companies',
+  'interaction_contacts', 'interaction_properties', 'interaction_deals', 'interaction_companies',
+  'campaign_contacts', 'deal_campaigns',
+  'action_item_contacts', 'action_item_properties', 'action_item_deals', 'action_item_companies',
+]);
+const VALID_JUNCTION_COLS = new Set([
+  'property_id', 'contact_id', 'company_id', 'deal_id', 'interaction_id', 'campaign_id',
+  'action_item_id', 'role',
+]);
+
+app.post('/api/db/link', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected' });
+  const { junction, col1, id1, col2, id2, extras } = req.body;
+  if (!junction || !col1 || !id1 || !col2 || !id2) {
+    return res.status(400).json({ error: 'junction, col1, id1, col2, id2 required' });
+  }
+  if (!VALID_JUNCTIONS.has(junction)) return res.status(400).json({ error: `Disallowed junction: ${junction}` });
+  const cols = [col1, col2];
+  const vals = [id1, id2];
+  if (extras && typeof extras === 'object') {
+    for (const [k, v] of Object.entries(extras)) { cols.push(k); vals.push(v); }
+  }
+  for (const c of cols) {
+    if (!VALID_JUNCTION_COLS.has(c)) return res.status(400).json({ error: `Disallowed column: ${c}` });
+  }
+  try {
+    const placeholders = vals.map((_, i) => `$${i + 1}`);
+    const sql = `INSERT INTO ${junction} (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) ON CONFLICT DO NOTHING RETURNING *`;
+    const result = await pool.query(sql, vals);
+    res.json({ rows: result.rows, rowCount: result.rowCount });
+  } catch (err) {
+    console.error(`[db/link] error:`, err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/db/unlink', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected' });
+  const { junction, col1, id1, col2, id2 } = req.body;
+  if (!junction || !col1 || !id1 || !col2 || !id2) {
+    return res.status(400).json({ error: 'junction, col1, id1, col2, id2 required' });
+  }
+  if (!VALID_JUNCTIONS.has(junction)) return res.status(400).json({ error: `Disallowed junction: ${junction}` });
+  if (!VALID_JUNCTION_COLS.has(col1) || !VALID_JUNCTION_COLS.has(col2)) {
+    return res.status(400).json({ error: 'Disallowed column' });
+  }
+  try {
+    const sql = `DELETE FROM ${junction} WHERE ${col1} = $1 AND ${col2} = $2 RETURNING *`;
+    const result = await pool.query(sql, [id1, id2]);
+    res.json({ rows: result.rows, rowCount: result.rowCount });
+  } catch (err) {
+    console.error(`[db/unlink] error:`, err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
 // ── Safe parameterized create endpoint with duplicate detection ──
 // compositeMatcher is required below with CSV import routes (matchProperty, matchCompany, matchContact)
 

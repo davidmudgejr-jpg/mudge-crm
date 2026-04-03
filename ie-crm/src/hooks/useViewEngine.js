@@ -73,19 +73,34 @@ export default function useViewEngine(entityType, columnDefs, { defaultSort = { 
   const [activeViewId, setActiveViewId] = useState(() => readActiveId(entityType));
   const [isDirty, setIsDirty] = useState(false);
 
-  // --- Filter state ---
-  const [filters, setFilters] = useState([]);
-  const [filterLogic, setFilterLogic] = useState('AND');
+  // Synchronously restore cached active view state so the first fetch uses correct filters.
+  // Without this, filters start as [] and the first render fetches unfiltered data.
+  const cachedActiveView = useMemo(() => {
+    if (suppressRestore) return null;
+    const cached = readCache(entityType) || [];
+    const savedId = readActiveId(entityType);
+    if (savedId) return cached.find(v => v.view_id === savedId) || null;
+    return cached.find(v => v.is_default) || null;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // --- Sort state (restore from localStorage, then page default) ---
-  const [sort, setSort] = useState(() => readSortState(entityType) || defaultSort);
+  // --- Filter state ---
+  const [filters, setFilters] = useState(cachedActiveView?.filters || []);
+  const [filterLogic, setFilterLogic] = useState(cachedActiveView?.filter_logic || 'AND');
+
+  // --- Sort state (restore from cached view, localStorage, then page default) ---
+  const [sort, setSort] = useState(() => {
+    if (cachedActiveView?.sort_column) {
+      return { column: cachedActiveView.sort_column, direction: cachedActiveView.sort_direction || 'DESC' };
+    }
+    return readSortState(entityType) || defaultSort;
+  });
 
   // --- Column state ---
-  const [visibleColumnKeys, setVisibleColumnKeys] = useState(null); // null = show defaults
-  const [columnOrder, setColumnOrder] = useState(null); // null = use CrmTable localStorage fallback
+  const [visibleColumnKeys, setVisibleColumnKeys] = useState(cachedActiveView?.visible_columns || null);
+  const [columnOrder, setColumnOrder] = useState(cachedActiveView?.column_order || null);
 
   // --- Group state ---
-  const [groupByColumn, setGroupByColumn] = useState(null); // null = no grouping
+  const [groupByColumn, setGroupByColumn] = useState(cachedActiveView?.group_by_column || null);
 
   // Ref to track if initial load has happened
   const loadedRef = useRef(false);

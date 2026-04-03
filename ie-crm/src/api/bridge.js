@@ -100,6 +100,23 @@ export const db = {
     if (isElectron()) return httpPost('/api/db/create', { entity, fields, skipDuplicateCheck });
     return httpPost('/api/db/create', { entity, fields, skipDuplicateCheck });
   },
+  link: (junction, col1, id1, col2, id2, extras) => {
+    if (isElectron()) return window.iecrm.db.query(
+      (() => {
+        const cols = [col1, col2]; const vals = [id1, id2];
+        if (extras) Object.entries(extras).forEach(([k, v]) => { cols.push(k); vals.push(v); });
+        return { sql: `INSERT INTO ${junction} (${cols.join(', ')}) VALUES (${cols.map((_, i) => `$${i+1}`).join(', ')}) ON CONFLICT DO NOTHING RETURNING *`, params: vals };
+      })().sql,
+      (() => { const vals = [id1, id2]; if (extras) Object.values(extras).forEach(v => vals.push(v)); return vals; })()
+    );
+    return httpPost('/api/db/link', { junction, col1, id1, col2, id2, extras });
+  },
+  unlink: (junction, col1, id1, col2, id2) => {
+    if (isElectron()) return window.iecrm.db.query(
+      `DELETE FROM ${junction} WHERE ${col1} = $1 AND ${col2} = $2 RETURNING *`, [id1, id2]
+    );
+    return httpPost('/api/db/unlink', { junction, col1, id1, col2, id2 });
+  },
   status: () => {
     if (isElectron()) return window.iecrm.db.status();
     return httpGet('/api/db/status');

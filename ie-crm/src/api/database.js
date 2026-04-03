@@ -697,23 +697,15 @@ export async function getDealCompanies(dealId) {
 // GENERIC LINK / UNLINK
 // ============================================================
 export async function linkRecords(junctionTable, col1, id1, col2, id2, extras = {}) {
-  const cols = [col1, col2];
-  const vals = [id1, id2];
-  const extraKeys = Object.keys(extras);
-  extraKeys.forEach((k) => { cols.push(k); vals.push(extras[k]); });
-  validateJunction(junctionTable, cols);
-  const placeholders = vals.map((_, i) => `$${i + 1}`);
-  const sql = `INSERT INTO ${junctionTable} (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) ON CONFLICT DO NOTHING RETURNING *`;
-  console.log('[linkRecords]', { junctionTable, cols, vals, sql });
-  const result = await query(sql, vals);
-  console.log('[linkRecords] result:', JSON.stringify(result));
-  return result;
+  const allCols = [col1, col2, ...Object.keys(extras)];
+  validateJunction(junctionTable, allCols);
+  const extrasObj = Object.keys(extras).length ? extras : undefined;
+  return db.link(junctionTable, col1, id1, col2, id2, extrasObj);
 }
 
 export async function unlinkRecords(junctionTable, col1, id1, col2, id2) {
   validateJunction(junctionTable, [col1, col2]);
-  const sql = `DELETE FROM ${junctionTable} WHERE ${col1} = $1 AND ${col2} = $2 RETURNING *`;
-  return query(sql, [id1, id2]);
+  return db.unlink(junctionTable, col1, id1, col2, id2);
 }
 
 // ============================================================
