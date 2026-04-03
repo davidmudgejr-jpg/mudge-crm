@@ -8,9 +8,20 @@ const rateLimit = require('express-rate-limit');
 const instantly = require('../services/instantly');
 const { normalizeRecord } = require('../utils/fieldNormalizer');
 const { validateColumn, quoteIdentifier, validateTable } = require('../utils/sqlSafety'); // SECURITY: Houston audit C4 — 2026-03-30
-const { matchContact, matchProperty, matchCompany } = require('../utils/compositeMatcher');
+const { matchContact, matchContactTargeted, matchProperty, matchCompany } = require('../utils/compositeMatcher');
 
 const router = express.Router();
+
+// Simple in-memory cache for expensive queries (stats, counts)
+const queryCache = new Map();
+function cached(key, ttlMs, fetcher) {
+  const entry = queryCache.get(key);
+  if (entry && Date.now() - entry.ts < ttlMs) return Promise.resolve(entry.data);
+  return fetcher().then(data => {
+    queryCache.set(key, { data, ts: Date.now() });
+    return data;
+  });
+}
 
 // These get injected via the mount function (getters for lazy access —
 // pool and io are created after route registration, so we use getters)
@@ -162,7 +173,7 @@ router.get('/contacts', async (req, res) => {
     params.push(lim);
 
     const result = await pool.query(
-      `SELECT contact_id AS id, full_name, first_name, email, phone_1, title, type, work_city AS city
+      `SELECT contact_id AS id, full_name, first_name, email_1, phone_1, title, type, work_city AS city
        FROM contacts ${where}
        ORDER BY modified DESC NULLS LAST
        LIMIT $${idx}`,
@@ -412,35 +423,35 @@ router.get('/stats', async (req, res) => {
   const pool = dbPool(res);
   if (!pool) return;
   try {
-    const counts = await pool.query(`
-      SELECT
-        (SELECT COUNT(*) FROM contacts)::int AS contacts,
-        (SELECT COUNT(*) FROM properties)::int AS properties,
-        (SELECT COUNT(*) FROM companies)::int AS companies,
-        (SELECT COUNT(*) FROM deals)::int AS deals,
-        (SELECT COUNT(*) FROM deals WHERE status = 'Active')::int AS active_deals,
-        (SELECT COUNT(*) FROM interactions)::int AS interactions,
-        (SELECT COUNT(*) FROM action_items WHERE status != 'Done')::int AS open_tasks,
-        (SELECT COUNT(*) FROM lease_comps)::int AS lease_comps,
-        (SELECT COUNT(*) FROM sale_comps)::int AS sale_comps,
-        (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'pending')::int AS pending_sandbox_contacts,
-        (SELECT COUNT(*) FROM sandbox_enrichments WHERE status = 'pending')::int AS pending_sandbox_enrichments,
-        (SELECT COUNT(*) FROM sandbox_signals WHERE status = 'pending')::int AS pending_sandbox_signals,
-        (SELECT COUNT(*) FROM sandbox_outreach WHERE status = 'pending')::int AS pending_sandbox_outreach
-    `);
-
-    const recent = await pool.query(`
-      SELECT
-        (SELECT COUNT(*) FROM interactions WHERE created_at > NOW() - INTERVAL '7 days')::int AS interactions_7d,
-        (SELECT COUNT(*) FROM contacts WHERE created_at > NOW() - INTERVAL '7 days')::int AS new_contacts_7d,
-        (SELECT COUNT(*) FROM deals WHERE modified > NOW() - INTERVAL '7 days')::int AS deals_updated_7d
-    `);
-
-    res.json({
-      counts: counts.rows[0],
-      recent_activity: recent.rows[0],
-      timestamp: new Date().toISOString(),
+    const data = await cached('ai_stats', 30_000, async () => {
+      const [counts, recent] = await Promise.all([
+        pool.query(`
+          SELECT
+            (SELECT COUNT(*) FROM contacts)::int AS contacts,
+            (SELECT COUNT(*) FROM properties)::int AS properties,
+            (SELECT COUNT(*) FROM companies)::int AS companies,
+            (SELECT COUNT(*) FROM deals)::int AS deals,
+            (SELECT COUNT(*) FROM deals WHERE status = 'Active')::int AS active_deals,
+            (SELECT COUNT(*) FROM interactions)::int AS interactions,
+            (SELECT COUNT(*) FROM action_items WHERE status != 'Done')::int AS open_tasks,
+            (SELECT COUNT(*) FROM lease_comps)::int AS lease_comps,
+            (SELECT COUNT(*) FROM sale_comps)::int AS sale_comps,
+            (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'pending')::int AS pending_sandbox_contacts,
+            (SELECT COUNT(*) FROM sandbox_enrichments WHERE status = 'pending')::int AS pending_sandbox_enrichments,
+            (SELECT COUNT(*) FROM sandbox_signals WHERE status = 'pending')::int AS pending_sandbox_signals,
+            (SELECT COUNT(*) FROM sandbox_outreach WHERE status = 'pending')::int AS pending_sandbox_outreach
+        `),
+        pool.query(`
+          SELECT
+            (SELECT COUNT(*) FROM interactions WHERE created_at > NOW() - INTERVAL '7 days')::int AS interactions_7d,
+            (SELECT COUNT(*) FROM contacts WHERE created_at > NOW() - INTERVAL '7 days')::int AS new_contacts_7d,
+            (SELECT COUNT(*) FROM deals WHERE modified > NOW() - INTERVAL '7 days')::int AS deals_updated_7d
+        `),
+      ]);
+      return { counts: counts.rows[0], recent_activity: recent.rows[0] };
     });
+    res.set('Cache-Control', 'private, max-age=15');
+    res.json({ ...data, timestamp: new Date().toISOString() });
   } catch (err) {
     console.error('[AI API] /stats error:', err.message);
     res.status(500).json({ error: 'Failed to query stats' });
@@ -466,13 +477,7 @@ router.post('/sandbox/contact', async (req, res) => {
 
     // Check for duplicates against live contacts AND existing sandbox contacts
     if (!skipDuplicateCheck) {
-      const existingContacts = await pool.query(
-        `SELECT contact_id, full_name, email AS email_1, email_2, email_3, company_name FROM contacts`
-      );
-      const dupResult = matchContact(
-        { full_name, email, email_1: email },
-        existingContacts.rows
-      );
+      const dupResult = await matchContactTargeted(pool, { full_name, email_1: email });
       if (dupResult.match || dupResult.candidates?.length > 0) {
         return res.status(200).json({
           duplicateWarning: true,
@@ -805,13 +810,7 @@ router.post('/queue/approve/:table/:id', async (req, res) => {
       // Check for duplicate contacts before promoting
       const { skipDuplicateCheck } = req.body;
       if (!skipDuplicateCheck) {
-        const existingContacts = await pool.query(
-          `SELECT contact_id, full_name, email AS email_1, email_2, email_3, company_name FROM contacts`
-        );
-        const dupResult = matchContact(
-          { full_name: item.full_name, email: item.email, email_1: item.email },
-          existingContacts.rows
-        );
+        const dupResult = await matchContactTargeted(pool, { full_name: item.full_name, email_1: item.email });
         if (dupResult.match || dupResult.candidates?.length > 0) {
           // Revert the status change — don't promote yet
           await pool.query(
@@ -2621,7 +2620,7 @@ router.get('/email/contacts', async (req, res) => {
   if (!pool) return;
   try {
     const result = await pool.query(
-      `SELECT contact_id, full_name, email, email_2, email_3, track_emails_since
+      `SELECT contact_id, full_name, email_1, email_2, email_3, track_emails_since
        FROM contacts
        WHERE track_emails = true
        ORDER BY full_name`

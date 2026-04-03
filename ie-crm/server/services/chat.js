@@ -1368,7 +1368,7 @@ async function buildCrmContext(messageBody) {
     // Direct contact search by name
     try {
       const contactSearch = await pool.query(
-        `SELECT contact_id, full_name, title, email, phone_1, type, client_level
+        `SELECT contact_id, full_name, title, email_1, phone_1, type, client_level
          FROM contacts WHERE full_name ILIKE $1
          ORDER BY created_at DESC LIMIT 5`,
         ['%' + searchPhrase + '%']
@@ -1380,7 +1380,7 @@ async function buildCrmContext(messageBody) {
         if (nameTerms.length > 0) {
           const fuzzyWhere = nameTerms.map((_, i) => 'full_name ILIKE $' + (i + 1)).join(' AND ');
           const fuzzySearch = await pool.query(
-            'SELECT contact_id, full_name, title, email, phone_1, type, client_level FROM contacts WHERE ' + fuzzyWhere + ' ORDER BY created_at DESC LIMIT 5',
+            'SELECT contact_id, full_name, title, email_1, phone_1, type, client_level FROM contacts WHERE ' + fuzzyWhere + ' ORDER BY created_at DESC LIMIT 5',
             nameTerms.map(t => '%' + t + '%')
           );
           contactResults = fuzzySearch.rows;
@@ -1496,7 +1496,7 @@ async function buildCrmContext(messageBody) {
       body.includes('broker') || body.includes('tenant') || body.includes('person')) {
     try {
       const contacts = await pool.query(`
-        SELECT full_name, title, email, phone_1, type
+        SELECT full_name, title, email_1, phone_1, type
         FROM contacts
         ORDER BY created_at DESC NULLS LAST
         LIMIT 5

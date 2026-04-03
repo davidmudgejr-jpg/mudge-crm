@@ -17,7 +17,7 @@ const { mountVerificationRoutes } = require('./routes/verification');
 const { mountContractRoutes } = require('./routes/contracts');
 const { uploadFile, deleteFile } = require('./services/fileUpload');
 const { normalizeAddress, parseAddress, normalizeCompanyName } = require('./utils/addressNormalizer');
-const { matchProperty, matchCompany, matchContact, detectTable } = require('./utils/compositeMatcher');
+const { matchProperty, matchCompany, matchContact, matchContactTargeted, detectTable } = require('./utils/compositeMatcher');
 const { buildClusters } = require('./utils/clusterBuilder');
 
 // Load env
@@ -139,7 +139,7 @@ function initDatabase() {
 
   pool = new Pool({
     connectionString,
-    ssl: (connectionString.includes('railway.app') || connectionString.includes('rlwy.net'))
+    ssl: (connectionString.includes('railway.app') || connectionString.includes('rlwy.net') || connectionString.includes('neon.tech'))
       ? { rejectUnauthorized: false }
       : false,
     max: 10,
@@ -594,13 +594,7 @@ app.post('/api/db/create', async (req, res) => {
       let matchResult = null;
 
       if (entity === 'contacts') {
-        const existing = await pool.query(
-          `SELECT contact_id, full_name, email AS email_1, email_2, email_3, company_name FROM contacts`
-        );
-        matchResult = matchContact(
-          { full_name: fields.full_name, email: fields.email, email_1: fields.email },
-          existing.rows
-        );
+        matchResult = await matchContactTargeted(pool, { full_name: fields.full_name, email_1: fields.email });
       } else if (entity === 'properties') {
         const existing = await pool.query(
           `SELECT property_id, property_address, city, zip FROM properties`
@@ -1176,7 +1170,7 @@ app.post('/api/import/preview', async (req, res) => {
       companies = cRes.rows;
     }
     if (matchContacts) {
-      const ctRes = await pool.query('SELECT contact_id, full_name, email, email_2, email_3 FROM contacts');
+      const ctRes = await pool.query('SELECT contact_id, full_name, email_1, email_2, email_3 FROM contacts');
       contacts = ctRes.rows;
     }
 
@@ -1327,7 +1321,7 @@ app.post('/api/import/batch', denyReadOnly, async (req, res) => {
       companies = cRes.rows;
     }
     if (doLinkRecords && linkTypes.has('contact')) {
-      const ctRes = await pool.query('SELECT contact_id, full_name, email, email_2, email_3 FROM contacts');
+      const ctRes = await pool.query('SELECT contact_id, full_name, email_1, email_2, email_3 FROM contacts');
       contacts = ctRes.rows;
     }
     let deals = [];

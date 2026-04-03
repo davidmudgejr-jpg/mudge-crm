@@ -374,10 +374,80 @@ function detectTable(headers) {
   return scores.sort((a, b) => b.score - a.score);
 }
 
+/**
+ * Targeted contact duplicate check — queries only matching rows instead of all 15K+.
+ * Handles exact email match + exact name match + fuzzy name candidates via pg_trgm or small pool.
+ *
+ * @param {object} pool - pg Pool
+ * @param {object} row - { full_name, email, email_1 }
+ * @returns {Promise<{ match, candidates, level }>}
+ */
+async function matchContactTargeted(pool, row) {
+  const email = (row.email_1 || row.email || '').toLowerCase().trim();
+  const name = (row.full_name || '').toLowerCase().trim();
+
+  if (!email && !name) return { match: null, candidates: [], level: 'no_data' };
+
+  // 1. Exact email match (fast — hits index or small scan)
+  if (email) {
+    const { rows: emailMatches } = await pool.query(
+      `SELECT contact_id, full_name, email_1, email_2, email_3, company_name
+       FROM contacts
+       WHERE LOWER(email_1) = $1 OR LOWER(email_2) = $1 OR LOWER(email_3) = $1`,
+      [email]
+    );
+    if (emailMatches.length === 1) {
+      return { match: { id: emailMatches[0].contact_id, confidence: 100, level: 'exact_email' }, candidates: [] };
+    }
+    if (emailMatches.length > 1) {
+      return { match: null, candidates: emailMatches.map(formatContactCandidate), level: 'ambiguous_email' };
+    }
+  }
+
+  // 2. Exact name match
+  if (name) {
+    const { rows: nameMatches } = await pool.query(
+      `SELECT contact_id, full_name, email_1, email_2, email_3, company_name
+       FROM contacts
+       WHERE LOWER(TRIM(full_name)) = $1`,
+      [name]
+    );
+    if (nameMatches.length === 1) {
+      return { match: { id: nameMatches[0].contact_id, confidence: 70, level: 'name_only' }, candidates: [] };
+    }
+    if (nameMatches.length > 1) {
+      return { match: null, candidates: nameMatches.map(formatContactCandidate), level: 'ambiguous_name' };
+    }
+
+    // 3. Fuzzy name match — pull a small pool of similar names
+    // Use first/last name parts to narrow candidates, then apply Levenshtein in JS
+    const parts = name.split(/\s+/).filter(p => p.length > 1);
+    if (parts.length > 0) {
+      const fuzzyWhere = parts.map((_, i) => `full_name ILIKE $${i + 1}`).join(' OR ');
+      const { rows: fuzzyCandidates } = await pool.query(
+        `SELECT contact_id, full_name, email_1, email_2, email_3, company_name
+         FROM contacts WHERE ${fuzzyWhere} LIMIT 50`,
+        parts.map(p => `%${p}%`)
+      );
+      const scored = fuzzyCandidates
+        .map(c => ({ ...c, sim: similarity((c.full_name || '').toLowerCase(), name) }))
+        .filter(c => c.sim >= 0.80)
+        .sort((a, b) => b.sim - a.sim)
+        .slice(0, 5);
+      if (scored.length > 0) {
+        return { match: null, candidates: scored.map(formatContactCandidate), level: 'fuzzy_name' };
+      }
+    }
+  }
+
+  return { match: null, candidates: [], level: 'no_match' };
+}
+
 module.exports = {
   matchProperty,
   matchCompany,
   matchContact,
+  matchContactTargeted,
   detectTable,
   TABLE_SIGNATURES,
 };
