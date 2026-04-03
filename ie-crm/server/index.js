@@ -4,6 +4,7 @@
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
+const compression = require('compression');
 const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -86,6 +87,7 @@ app.use(cors({
   },
   credentials: true,
 }));
+app.use(compression());
 
 const rateLimit = require('express-rate-limit');
 
@@ -144,6 +146,8 @@ function initDatabase() {
       : false,
     max: 10,
     idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 5000,
+    statement_timeout: 30000,
   });
 
   // Set session timezone to Pacific so NOW() returns Pacific time
@@ -3564,7 +3568,7 @@ const DEDUP_CONFIG = {
   },
 };
 
-// Count linked records for an entity
+// Count linked records for a single entity (used by auto-merge)
 async function countLinkedRecords(pool, entityType, entityId) {
   const cfg = DEDUP_CONFIG[entityType];
   const counts = {};
@@ -3578,6 +3582,44 @@ async function countLinkedRecords(pool, entityType, entityId) {
   }
   counts.total = Object.values(counts).reduce((s, n) => s + n, 0);
   return counts;
+}
+
+// Batch count linked records for ALL entity IDs in a single query per junction table
+// Replaces N*M individual COUNT queries with M batch queries (one per junction/direct table)
+async function batchCountLinkedRecords(pool, entityType, entityIds) {
+  const cfg = DEDUP_CONFIG[entityType];
+  const allTables = [...cfg.junctions, ...cfg.directTables];
+  const linkCountMap = new Map();
+
+  // Initialize counts for all IDs
+  for (const id of entityIds) {
+    linkCountMap.set(id, {});
+  }
+
+  // One query per junction table, counting ALL entity IDs at once
+  await Promise.all(allTables.map(async (j) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT ${j.col} AS eid, count(*)::int AS n FROM ${j.table}
+         WHERE ${j.col} = ANY($1) GROUP BY ${j.col}`,
+        [entityIds]
+      );
+      for (const r of rows) {
+        const counts = linkCountMap.get(r.eid);
+        if (counts) counts[j.table] = r.n;
+      }
+    } catch { /* table may not exist for some entity types */ }
+  }));
+
+  // Fill in zeros and compute totals
+  for (const [id, counts] of linkCountMap) {
+    for (const j of allTables) {
+      if (!counts[j.table]) counts[j.table] = 0;
+    }
+    counts.total = Object.values(counts).reduce((s, n) => s + n, 0);
+  }
+
+  return linkCountMap;
 }
 
 // GET /api/dedup/clusters — clustered dedup candidates with full entity records
@@ -3613,11 +3655,8 @@ app.get('/api/dedup/clusters', requireAuth, async (req, res) => {
     );
     const entityMap = new Map(entities.map(e => [e[cfg.idCol], e]));
 
-    // 5. Batch-fetch linked record counts
-    const linkCountMap = new Map();
-    await Promise.all(idArr.map(async (id) => {
-      linkCountMap.set(id, await countLinkedRecords(pool, entityType, id));
-    }));
+    // 5. Batch-fetch linked record counts (single query per junction table instead of per-entity)
+    const linkCountMap = await batchCountLinkedRecords(pool, entityType, idArr);
 
     // 6. Assemble response
     const result = clusters.map(cl => ({

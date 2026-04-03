@@ -18,6 +18,29 @@ function getAuthHeaders() {
 // bridge.js should NOT independently handle 401s — that caused race conditions
 // where both bridge and AuthContext tried to refresh/clear the token simultaneously.
 
+// ── Lightweight GET cache ────────────────────────────────────────
+// Deduplicates in-flight requests and caches GET responses for 30s.
+// Write operations (POST) automatically invalidate matching cache entries.
+const GET_CACHE = new Map();   // path -> { data, expiry, promise? }
+const CACHE_TTL = 30_000;      // 30 seconds
+
+function getCached(path) {
+  const entry = GET_CACHE.get(path);
+  if (!entry) return null;
+  if (Date.now() > entry.expiry) { GET_CACHE.delete(path); return null; }
+  return entry;
+}
+
+function invalidateCache(pathPrefix) {
+  // Clear any cached GETs that match the prefix (e.g., /api/db/ after a write)
+  for (const key of GET_CACHE.keys()) {
+    if (key.startsWith(pathPrefix)) GET_CACHE.delete(key);
+  }
+}
+
+// Public: force-clear the entire cache (called after mutations like save/delete)
+export function clearApiCache() { GET_CACHE.clear(); }
+
 async function httpPost(path, body = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
@@ -28,18 +51,36 @@ async function httpPost(path, body = {}) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
+  // Invalidate related GET caches after any write
+  const prefix = path.split('/').slice(0, 3).join('/'); // e.g., /api/db
+  invalidateCache(prefix);
   return res.json();
 }
 
 async function httpGet(path) {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: getAuthHeaders(),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `HTTP ${res.status}`);
-  }
-  return res.json();
+  // Check cache first
+  const cached = getCached(path);
+  if (cached?.data) return cached.data;
+  // Deduplicate in-flight requests for the same path
+  if (cached?.promise) return cached.promise;
+
+  const promise = (async () => {
+    const res = await fetch(`${API_BASE}${path}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!res.ok) {
+      GET_CACHE.delete(path);
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    GET_CACHE.set(path, { data, expiry: Date.now() + CACHE_TTL });
+    return data;
+  })();
+
+  // Store the in-flight promise so duplicate calls share it
+  GET_CACHE.set(path, { promise, expiry: Date.now() + CACHE_TTL });
+  return promise;
 }
 
 // ── Database bridge ──────────────────────────────────────────────

@@ -12,6 +12,14 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
         houston: resolve(__dirname, 'houston.html'),
       },
+      output: {
+        manualChunks: {
+          'vendor-three': ['three', '@react-three/fiber', '@react-three/drei', '@react-three/postprocessing'],
+          'vendor-motion': ['framer-motion', 'gsap'],
+          'vendor-xlsx': ['xlsx'],
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+        },
+      },
     },
   },
   server: {

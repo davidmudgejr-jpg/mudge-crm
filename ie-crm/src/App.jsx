@@ -8,24 +8,40 @@ const routerFutureFlags = {
 };
 import Sidebar from './components/Sidebar';
 // ClaudePanel removed — Houston Direct in TeamChat replaces it
-import Properties from './pages/Properties';
-import Contacts from './pages/Contacts';
-import Companies from './pages/Companies';
-import Deals from './pages/Deals';
-import Interactions from './pages/Interactions';
-import Campaigns from './pages/Campaigns';
-import ActionItems from './pages/ActionItems';
-import Comps from './pages/Comps';
-import Import from './pages/Import';
-import Settings from './pages/Settings';
-import TPE from './pages/TPE';
-import TPEEnrichment from './pages/TPEEnrichment';
-import AIOps from './pages/AIOps';
-import VerificationQueue from './pages/VerificationQueue';
-import DedupReview from './pages/DedupReview';
-import DataTrust from './pages/DataTrust';
-import Contracts from './pages/Contracts';
-import ContractEditor from './pages/ContractEditor';
+
+// Lazy-loaded page routes — each becomes its own chunk, loaded on demand
+const Properties = lazy(() => import('./pages/Properties'));
+const Contacts = lazy(() => import('./pages/Contacts'));
+const Companies = lazy(() => import('./pages/Companies'));
+const Deals = lazy(() => import('./pages/Deals'));
+const Interactions = lazy(() => import('./pages/Interactions'));
+const Campaigns = lazy(() => import('./pages/Campaigns'));
+const ActionItems = lazy(() => import('./pages/ActionItems'));
+const Comps = lazy(() => import('./pages/Comps'));
+const Import = lazy(() => import('./pages/Import'));
+const Settings = lazy(() => import('./pages/Settings'));
+const TPE = lazy(() => import('./pages/TPE'));
+const TPEEnrichment = lazy(() => import('./pages/TPEEnrichment'));
+const AIOps = lazy(() => import('./pages/AIOps'));
+const VerificationQueue = lazy(() => import('./pages/VerificationQueue'));
+const DedupReview = lazy(() => import('./pages/DedupReview'));
+const DataTrust = lazy(() => import('./pages/DataTrust'));
+const Contracts = lazy(() => import('./pages/Contracts'));
+const ContractEditor = lazy(() => import('./pages/ContractEditor'));
+const MobileChat = lazy(() => import('./pages/MobileChat'));
+const DesktopChat = lazy(() => import('./pages/DesktopChat'));
+
+// Lazy-loaded detail panels (only rendered inside slide-overs)
+const PropertyDetail = lazy(() => import('./pages/PropertyDetail'));
+const ContactDetail = lazy(() => import('./pages/ContactDetail'));
+const CompanyDetail = lazy(() => import('./pages/CompanyDetail'));
+const DealDetail = lazy(() => import('./pages/DealDetail'));
+const InteractionDetail = lazy(() => import('./pages/InteractionDetail'));
+const ActionItemDetail = lazy(() => import('./pages/ActionItemDetail'));
+const CompDetail = lazy(() => import('./pages/CompDetail'));
+const CampaignDetail = lazy(() => import('./pages/CampaignDetail'));
+
+// Eagerly loaded (always needed)
 import useKeyboardShortcuts from './hooks/useKeyboardShortcuts';
 import { SlideOverProvider, useSlideOver } from './components/shared/SlideOverContext';
 import { ToastProvider } from './components/shared/Toast';
@@ -36,16 +52,6 @@ import SlideOver, { SlideOverHeader } from './components/shared/SlideOver';
 import CommandPalette from './components/shared/CommandPalette';
 import TeamChat, { ChatToggleButton } from './components/TeamChat';
 import { fetchUnreadCount } from './hooks/useChat';
-import PropertyDetail from './pages/PropertyDetail';
-import ContactDetail from './pages/ContactDetail';
-import CompanyDetail from './pages/CompanyDetail';
-import DealDetail from './pages/DealDetail';
-import InteractionDetail from './pages/InteractionDetail';
-import ActionItemDetail from './pages/ActionItemDetail';
-import CompDetail from './pages/CompDetail';
-import CampaignDetail from './pages/CampaignDetail';
-import MobileChat from './pages/MobileChat';
-import DesktopChat from './pages/DesktopChat';
 
 const DETAIL_COMPONENTS = {
   property: PropertyDetail,
@@ -117,6 +123,7 @@ function AppShell() {
 
       {/* Main Content */}
       <main className="flex-1 pt-8 overflow-hidden">
+        <Suspense fallback={<div className="flex items-center justify-center h-full"><div className="text-crm-muted text-sm">Loading...</div></div>}>
         <Routes>
           <Route path="/" element={<Properties onCountChange={setRowCount} />} />
           <Route path="/properties" element={<Properties onCountChange={setRowCount} />} />
@@ -138,6 +145,7 @@ function AppShell() {
           <Route path="/contracts/:packageId" element={<ContractEditor />} />
           <Route path="/settings" element={<Settings />} />
         </Routes>
+        </Suspense>
       </main>
 
       {/* Claude Panel removed — Houston Direct in TeamChat replaces it */}
