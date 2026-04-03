@@ -13,6 +13,35 @@ const dotenv = require('dotenv');
 const HOUSTON_MODEL = 'claude-sonnet-4-20250514';
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 
+// ============================================================
+// CACHED ENTITY COUNTS — avoid 4 COUNT(*) queries per message
+// ============================================================
+let _entityCountCache = null;
+let _entityCountCacheTime = 0;
+const ENTITY_COUNT_TTL = 60000; // 60 seconds
+
+async function getCachedEntityCounts(pool) {
+  const now = Date.now();
+  if (_entityCountCache && now - _entityCountCacheTime < ENTITY_COUNT_TTL) {
+    return _entityCountCache;
+  }
+  try {
+    const result = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM properties) AS properties,
+        (SELECT COUNT(*) FROM contacts) AS contacts,
+        (SELECT COUNT(*) FROM deals) AS deals,
+        (SELECT COUNT(*) FROM lease_comps) AS lease_comps,
+        (SELECT COUNT(*) FROM deals WHERE status IN ('Active', 'Pending', 'Under Contract', 'In Progress')) AS active_deals
+    `);
+    _entityCountCache = result.rows[0];
+    _entityCountCacheTime = now;
+    return _entityCountCache;
+  } catch {
+    return _entityCountCache || { properties: 0, contacts: 0, deals: 0, lease_comps: 0, active_deals: 0 };
+  }
+}
+
 // Read API key directly from .env file to avoid process.env empty string issue
 const _envParsed = dotenv.config({ path: path.join(__dirname, '..', '..', '.env') }).parsed || {};
 const ANTHROPIC_API_KEY = _envParsed.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
@@ -942,15 +971,9 @@ async function buildCouncilCrmContext() {
   try {
     const sections = [];
 
-    // Database stats
-    const [propCount, contactCount, dealCount, compCount] = await Promise.all([
-      pool.query('SELECT COUNT(*) FROM properties').catch(() => ({ rows: [{ count: 0 }] })),
-      pool.query('SELECT COUNT(*) FROM contacts').catch(() => ({ rows: [{ count: 0 }] })),
-      pool.query('SELECT COUNT(*) FROM deals').catch(() => ({ rows: [{ count: 0 }] })),
-      pool.query("SELECT COUNT(*) FROM lease_comps").catch(() => ({ rows: [{ count: 0 }] })),
-    ]);
-
-    sections.push(`CRM DATABASE: ${propCount.rows[0].count} properties, ${contactCount.rows[0].count} contacts, ${dealCount.rows[0].count} deals, ${compCount.rows[0].count} lease comps`);
+    // Database stats (cached — avoids 4 COUNT(*) queries per message)
+    const counts = await getCachedEntityCounts(pool);
+    sections.push(`CRM DATABASE: ${counts.properties} properties, ${counts.contacts} contacts, ${counts.deals} deals, ${counts.lease_comps} lease comps`);
 
     // Active deals
     try {
@@ -1838,19 +1861,11 @@ async function buildCrmContext(messageBody) {
     }
   }
 
-  // General stats if nothing specific matched
+  // General stats if nothing specific matched (cached)
   if (sections.length === 0) {
     try {
-      const stats = await pool.query(`
-        SELECT
-          (SELECT COUNT(*) FROM properties) AS prop_count,
-          (SELECT COUNT(*) FROM contacts) AS contact_count,
-          (SELECT COUNT(*) FROM companies) AS company_count,
-          (SELECT COUNT(*) FROM deals) AS deal_count,
-          (SELECT COUNT(*) FROM deals WHERE status IN ('Active', 'Pending', 'Under Contract', 'In Progress')) AS active_deals
-      `);
-      const s = stats.rows[0];
-      sections.push(`CRM OVERVIEW: ${s.prop_count} properties, ${s.contact_count} contacts, ${s.company_count} companies, ${s.deal_count} deals (${s.active_deals} active)`);
+      const s = await getCachedEntityCounts(pool);
+      sections.push(`CRM OVERVIEW: ${s.properties} properties, ${s.contacts} contacts, ${s.deals} deals (${s.active_deals} active)`);
       results.entitiesFound = 1;
     } catch (err) {
       console.error('[chat/houston] Stats query error:', err.message);
@@ -1902,88 +1917,64 @@ async function getRelevantMemories(userId, messageBody, channelType = 'personal'
       .map(w => w.replace(/[^a-z0-9]/g, ''))
       .filter(w => w.length > 2 && !stopWords.has(w));
 
+    // Build a single UNION ALL query for all memory retrieval strategies (1 round trip instead of 4)
+    const unions = [];
+    const allParams = [...poolParams];
+    const baseFilter = `${poolFilter} AND (expires_at IS NULL OR expires_at > NOW())`;
+
     // Strategy 1: Keyword-matched memories (content contains relevant terms)
-    let keywordMemories = [];
     if (keywords.length > 0) {
       const keywordPattern = keywords.slice(0, 8).join('|');
-      const paramOffset = poolParams.length;
-      const kmResult = await pool.query(`
-        SELECT category, content, created_at, importance,
-               entity_type, entity_id, channel_type,
-               1 AS match_type
-        FROM houston_memories
-        WHERE ${poolFilter}
-          AND (expires_at IS NULL OR expires_at > NOW())
-          AND content ~* $${paramOffset + 1}
-        ORDER BY importance DESC, created_at DESC
-        LIMIT 5
-      `, [...poolParams, keywordPattern]);
-      keywordMemories = kmResult.rows;
+      allParams.push(keywordPattern);
+      unions.push(`(SELECT category, content, created_at, importance,
+               entity_type, entity_id, channel_type, 1 AS match_type
+        FROM houston_memories WHERE ${baseFilter} AND content ~* $${allParams.length}
+        ORDER BY importance DESC, created_at DESC LIMIT 5)`);
     }
 
     // Strategy 2: Entity-linked memories (if message references known entities)
-    let entityMemories = [];
     const cities = ['ontario', 'fontana', 'rancho cucamonga', 'riverside', 'san bernardino',
                     'redlands', 'colton', 'rialto', 'upland', 'pomona', 'chino', 'eastvale',
                     'highland', 'corona', 'moreno valley', 'perris', 'jurupa valley', 'montclair'];
     const mentionedCity = cities.find(c => body.includes(c));
     const entityKeywords = body.match(/deal|property|contact|company|comp/gi) || [];
-
     if (mentionedCity || entityKeywords.length > 0) {
       const entityTypes = [];
       if (body.includes('deal')) entityTypes.push('deal');
       if (body.includes('propert') || body.includes('building') || mentionedCity) entityTypes.push('property');
       if (body.includes('contact') || body.includes('who') || body.includes('person')) entityTypes.push('contact');
       if (body.includes('company') || body.includes('tenant') || body.includes('owner')) entityTypes.push('company');
-
       if (entityTypes.length > 0) {
-        const paramOffset = poolParams.length;
-        const emResult = await pool.query(`
-          SELECT category, content, created_at, importance,
-                 entity_type, entity_id, channel_type,
-                 2 AS match_type
-          FROM houston_memories
-          WHERE ${poolFilter}
-            AND (expires_at IS NULL OR expires_at > NOW())
-            AND entity_type = ANY($${paramOffset + 1})
-          ORDER BY importance DESC, created_at DESC
-          LIMIT 5
-        `, [...poolParams, entityTypes]);
-        entityMemories = emResult.rows;
+        allParams.push(entityTypes);
+        unions.push(`(SELECT category, content, created_at, importance,
+               entity_type, entity_id, channel_type, 2 AS match_type
+          FROM houston_memories WHERE ${baseFilter} AND entity_type = ANY($${allParams.length})
+          ORDER BY importance DESC, created_at DESC LIMIT 5)`);
       }
     }
 
     // Strategy 3: High-importance memories (preferences, key facts — always relevant)
-    const hiResult = await pool.query(`
-      SELECT category, content, created_at, importance,
-             entity_type, entity_id, channel_type,
-             3 AS match_type
-      FROM houston_memories
-      WHERE ${poolFilter}
-        AND (expires_at IS NULL OR expires_at > NOW())
-        AND importance >= 0.8
-        AND category IN ('preference', 'relationship', 'key_fact')
-      ORDER BY importance DESC, created_at DESC
-      LIMIT 5
-    `, [...poolParams]);
+    unions.push(`(SELECT category, content, created_at, importance,
+               entity_type, entity_id, channel_type, 3 AS match_type
+      FROM houston_memories WHERE ${baseFilter}
+        AND importance >= 0.8 AND category IN ('preference', 'relationship', 'key_fact')
+      ORDER BY importance DESC, created_at DESC LIMIT 5)`);
 
     // Strategy 4: Recent memories (last 7 days, for conversational continuity)
-    const recentResult = await pool.query(`
-      SELECT category, content, created_at, importance,
-             entity_type, entity_id, channel_type,
-             4 AS match_type
-      FROM houston_memories
-      WHERE ${poolFilter}
-        AND (expires_at IS NULL OR expires_at > NOW())
+    unions.push(`(SELECT category, content, created_at, importance,
+               entity_type, entity_id, channel_type, 4 AS match_type
+      FROM houston_memories WHERE ${baseFilter}
         AND created_at > NOW() - INTERVAL '7 days'
-      ORDER BY created_at DESC
-      LIMIT 3
-    `, [...poolParams]);
+      ORDER BY created_at DESC LIMIT 3)`);
 
-    // Merge and deduplicate (keyword > entity > importance > recent)
+    const unionQuery = unions.join('\nUNION ALL\n');
+    const unionResult = await pool.query(unionQuery, allParams);
+
+    // Merge and deduplicate (keyword > entity > importance > recent — ordered by match_type)
+    const sorted = unionResult.rows.sort((a, b) => a.match_type - b.match_type);
     const seen = new Set();
     const merged = [];
-    for (const mem of [...keywordMemories, ...entityMemories, ...hiResult.rows, ...recentResult.rows]) {
+    for (const mem of sorted) {
       const key = mem.content.slice(0, 100);
       if (!seen.has(key)) {
         seen.add(key);

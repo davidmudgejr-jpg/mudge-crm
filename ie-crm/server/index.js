@@ -1434,6 +1434,7 @@ app.post('/api/import/batch', denyReadOnly, async (req, res) => {
           // We split on commas and create a junction link for EACH value
           if (doLinkRecords && insertResult.rows.length > 0) {
             const sourceId = insertResult.rows[0][idCol];
+            let pendingJunctions = null; // Collect junction links for batch insert
 
             for (const [linkField, config] of Object.entries(LINK_FIELD_CONFIG)) {
               const rawCell = (row[linkField] || '').trim();
@@ -1517,19 +1518,12 @@ app.post('/api/import/batch', denyReadOnly, async (req, res) => {
                   }
                 }
 
-                // Create the junction table link
+                // Collect junction link for batch insert
                 if (linkedId) {
-                  if (config.role) {
-                    await client.query(
-                      `INSERT INTO ${config.junction} (${config.col1}, ${config.col2}, role) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
-                      [sourceId, linkedId, config.role]
-                    );
-                  } else {
-                    await client.query(
-                      `INSERT INTO ${config.junction} (${config.col1}, ${config.col2}) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-                      [sourceId, linkedId]
-                    );
-                  }
+                  if (!pendingJunctions) pendingJunctions = {};
+                  const jKey = config.role ? `${config.junction}|${config.col1}|${config.col2}|role` : `${config.junction}|${config.col1}|${config.col2}`;
+                  if (!pendingJunctions[jKey]) pendingJunctions[jKey] = [];
+                  pendingJunctions[jKey].push(config.role ? [sourceId, linkedId, config.role] : [sourceId, linkedId]);
                   linked++;
                 }
               } catch (linkErr) {
@@ -1537,6 +1531,28 @@ app.post('/api/import/batch', denyReadOnly, async (req, res) => {
               }
               } // end for singleName
             } // end for linkField
+
+            // Batch-flush all collected junction links (1 query per junction table instead of 1 per link)
+            if (pendingJunctions) {
+              for (const [jKey, rows] of Object.entries(pendingJunctions)) {
+                const parts = jKey.split('|');
+                const hasRole = parts.length === 4;
+                const [junction, col1, col2] = parts;
+                const colsStr = hasRole ? `${col1}, ${col2}, role` : `${col1}, ${col2}`;
+                const valsPerRow = hasRole ? 3 : 2;
+                const placeholders = rows.map((_, idx) => {
+                  const base = idx * valsPerRow;
+                  return hasRole
+                    ? `($${base + 1}, $${base + 2}, $${base + 3})`
+                    : `($${base + 1}, $${base + 2})`;
+                }).join(', ');
+                const flatParams = rows.flat();
+                await client.query(
+                  `INSERT INTO ${junction} (${colsStr}) VALUES ${placeholders} ON CONFLICT DO NOTHING`,
+                  flatParams
+                );
+              }
+            }
           }
 
           // ── Notes → Activity: split notes text into interaction records ──
@@ -2061,29 +2077,31 @@ app.get('/api/ai/tpe-gaps/stats', async (req, res) => {
 // AI OPS DASHBOARD ROUTES
 // ============================================================
 
+// 30-second cache for dashboard summary (avoids 5 parallel queries per page load)
+let _dashboardCache = null;
+let _dashboardCacheTime = 0;
+const DASHBOARD_CACHE_TTL = 30000;
+
 // Dashboard summary: agent statuses + pending counts + pipeline + costs
 app.get('/api/ai/dashboard/summary', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not configured' });
   try {
-    const [heartbeats, pending, logRecent, pipeline, costs] = await Promise.all([
+    const now = Date.now();
+    if (_dashboardCache && now - _dashboardCacheTime < DASHBOARD_CACHE_TTL) {
+      return res.json(_dashboardCache);
+    }
+    // Consolidated: pending UNION already covers pipeline counts — no need for duplicate subqueries
+    const [heartbeats, pending, logRecent, costs] = await Promise.all([
       pool.query('SELECT agent_name, tier, status, current_task, items_processed_today, items_in_queue, last_error, metadata, updated_at FROM agent_heartbeats ORDER BY tier, agent_name'),
       pool.query(`
-        SELECT 'contacts' as table_name, COUNT(*) as count FROM sandbox_contacts WHERE status = 'pending'
-        UNION ALL SELECT 'enrichments', COUNT(*) FROM sandbox_enrichments WHERE status = 'pending'
-        UNION ALL SELECT 'signals', COUNT(*) FROM sandbox_signals WHERE status = 'pending'
-        UNION ALL SELECT 'outreach', COUNT(*) FROM sandbox_outreach WHERE status = 'pending'
+        SELECT 'contacts' as table_name, COUNT(*) as count, 'pending' as status FROM sandbox_contacts WHERE status = 'pending'
+        UNION ALL SELECT 'enrichments', COUNT(*), 'pending' FROM sandbox_enrichments WHERE status = 'pending'
+        UNION ALL SELECT 'signals', COUNT(*), 'pending' FROM sandbox_signals WHERE status = 'pending'
+        UNION ALL SELECT 'outreach', COUNT(*), 'pending' FROM sandbox_outreach WHERE status = 'pending'
+        UNION ALL SELECT 'contacts', COUNT(*), 'approved' FROM sandbox_contacts WHERE status = 'approved'
+        UNION ALL SELECT 'contacts', COUNT(*), 'rejected' FROM sandbox_contacts WHERE status = 'rejected'
       `),
       pool.query("SELECT agent_name, log_type, content, created_at FROM agent_logs ORDER BY created_at DESC LIMIT 20"),
-      // Pipeline stage counts
-      pool.query(`
-        SELECT
-          (SELECT COUNT(*) FROM sandbox_signals WHERE status = 'pending') as scout_queue,
-          (SELECT COUNT(*) FROM sandbox_enrichments WHERE status = 'pending') as enricher_queue,
-          (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'pending') as matcher_queue,
-          (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'approved') as approved,
-          (SELECT COUNT(*) FROM sandbox_contacts WHERE status = 'rejected') as rejected
-      `).catch(() => ({ rows: [{}] })),
-      // Cost totals (today + this month)
       pool.query(`
         SELECT
           COALESCE(SUM(cost_usd) FILTER (WHERE created_at >= CURRENT_DATE), 0) as cost_today,
@@ -2093,23 +2111,40 @@ app.get('/api/ai/dashboard/summary', async (req, res) => {
         FROM ai_usage_tracking
       `).catch(() => ({ rows: [{}] })),
     ]);
-    res.json({
+    // Derive pipeline from the consolidated pending query
+    const pendingRows = pending.rows;
+    const findCount = (table, status) => Number(pendingRows.find(r => r.table_name === table && r.status === status)?.count || 0);
+    const pipeline = {
+      scout_queue: findCount('signals', 'pending'),
+      enricher_queue: findCount('enrichments', 'pending'),
+      matcher_queue: findCount('contacts', 'pending'),
+      approved: findCount('contacts', 'approved'),
+      rejected: findCount('contacts', 'rejected'),
+    };
+    const result = {
       agents: heartbeats.rows,
-      pending: pending.rows,
+      pending: pendingRows.filter(r => r.status === 'pending'),
       recentLogs: logRecent.rows,
-      pipeline: pipeline.rows[0] || {},
+      pipeline,
       costs: costs.rows[0] || {},
-    });
+    };
+    _dashboardCache = result;
+    _dashboardCacheTime = now;
+    res.json(result);
   } catch (err) {
     console.error('[ai/dashboard/summary] Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Pipeline: counts per stage
+// Pipeline: counts per stage (reuses dashboard cache when fresh)
 app.get('/api/ai/dashboard/pipeline', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not configured' });
   try {
+    // Reuse cached pipeline if fresh
+    if (_dashboardCache && Date.now() - _dashboardCacheTime < DASHBOARD_CACHE_TTL) {
+      return res.json(_dashboardCache.pipeline);
+    }
     const result = await pool.query(`
       SELECT
         (SELECT COUNT(*) FROM sandbox_signals WHERE status = 'pending') as scout_queue,
