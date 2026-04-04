@@ -8,6 +8,7 @@ import useLinkedRecords from '../hooks/useLinkedRecords';
 import useDetailPanel from '../hooks/useDetailPanel';
 import useViewEngine from '../hooks/useViewEngine';
 import useFetchGuard from '../hooks/useFetchGuard';
+import { computeDealFormulas, FORMULA_TRIGGER_FIELDS } from '../utils/dealFormulas';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import GroupByButton from '../components/shared/GroupByButton';
@@ -122,15 +123,15 @@ const ALL_COLUMNS = [
   { key: 'notes', label: 'Notes', defaultWidth: 200, type: 'text', editable: true, wrapText: true, defaultVisible: false },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags', defaultVisible: false },
   // Computed formula columns (from deal_formulas VIEW)
-  { key: 'team_gross_computed', label: 'Team Gross', defaultWidth: 110, type: 'number', filterable: true, defaultVisible: true,
+  { key: 'team_gross_computed', label: 'Team Gross', defaultWidth: 110, type: 'number', filterable: true, editable: false, defaultVisible: true,
     renderCell: (val) => {
       if (!val && val !== 0) return <span className="text-crm-muted">--</span>;
       const n = Number(val);
       return <span className="text-emerald-400 font-medium">${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}</span>;
     },
   },
-  { key: 'jr_gross_computed', label: 'Jr Gross', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', defaultVisible: true },
-  { key: 'jr_net_computed', label: 'Jr Net', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', defaultVisible: true },
+  { key: 'jr_gross_computed', label: 'Jr Gross', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', editable: false, defaultVisible: true },
+  { key: 'jr_net_computed', label: 'Jr Net', defaultWidth: 100, type: 'number', filterable: true, format: 'currency', editable: false, defaultVisible: true },
   // Linked record columns (filterable: is_empty / is_not_empty applied client-side)
   { key: 'linked_properties', label: 'Properties', defaultWidth: 150, defaultVisible: false, filterable: true, type: 'text',
     renderCell: (val) => <LinkedChips items={val} type="property" labelKey="property_address" /> },
@@ -313,22 +314,35 @@ export default function Deals({ onCountChange }) {
     }
   }, [selected, fetchData, addToast]);
 
-  const CALC_FIELDS = new Set(['rate', 'sf', 'term', 'increases', 'deal_type', 'commission_rate']);
+  // Live formula recomputation — fires on every keystroke for trigger fields (no DB call)
+  const handleCellChange = useCallback((rowId, field, rawValue) => {
+    setRows((prev) => prev.map((r) => {
+      if (r.deal_id !== rowId) return r;
+      const snapshot = { ...r, [field]: rawValue };
+      const computed = computeDealFormulas(snapshot);
+      return { ...r, [field]: rawValue, ...computed };
+    }));
+  }, []);
 
   const handleCellSave = useCallback(async (rowId, field, value) => {
-    let oldValue;
+    let oldRow;
     setRows((prev) => prev.map((r) => {
-      if (r.deal_id === rowId) { oldValue = r[field]; return { ...r, [field]: value }; }
-      return r;
+      if (r.deal_id !== rowId) return r;
+      oldRow = { ...r };
+      const updated = { ...r, [field]: value };
+      // Recompute formulas if this is a trigger field
+      if (FORMULA_TRIGGER_FIELDS.has(field)) {
+        Object.assign(updated, computeDealFormulas(updated));
+      }
+      return updated;
     }));
     try {
       await updateDeal(rowId, { [field]: value });
       addToast('Saved', 'success', 1500);
-      // Refetch to update computed columns (price, gross, net) from the VIEW
-      if (CALC_FIELDS.has(field)) fetchData();
     } catch (err) {
+      // Roll back entire row (including computed fields)
       setRows((prev) => prev.map((r) =>
-        r.deal_id === rowId ? { ...r, [field]: oldValue } : r
+        r.deal_id === rowId && oldRow ? oldRow : r
       ));
       addToast(`Save failed: ${err.message}`, 'error', 4000);
     }
@@ -504,6 +518,8 @@ export default function Deals({ onCountChange }) {
             onDeleteField={removeField}
             onHideCustomField={hideField}
             onCellSave={handleCellSave}
+            onCellChange={handleCellChange}
+            formulaTriggerFields={FORMULA_TRIGGER_FIELDS}
             onSelectOnly={selectOnly}
             onShiftSelect={shiftSelect}
             onDeleteRow={deleteRow}

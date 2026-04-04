@@ -328,6 +328,9 @@ export default function CrmTable({
   // Per-view column order (from useViewEngine)
   viewColumnOrder,   // string[] | null — column key order from saved view
   onColumnOrderChange, // (keys: string[]) => void — notify parent when user drags columns
+  // Live formula recomputation (Deals page)
+  onCellChange,      // (rowId, field, rawValue) => void — fires on every keystroke for formula fields
+  formulaTriggerFields, // Set<string> — fields that trigger live recomputation
   // Grouping
   groupByColumn,     // string | null — column key to group by
   groupOrders,       // { [columnKey]: string[] } — custom sort orders for groups
@@ -683,6 +686,9 @@ export default function CrmTable({
                               setEditingCell(null);
                             }}
                             onCancel={() => setEditingCell(null)}
+                            onChange={formulaTriggerFields?.has(col.key)
+                              ? (raw) => onCellChange?.(id, col.key, raw)
+                              : undefined}
                           />
                         ) : (
                           col.renderCell

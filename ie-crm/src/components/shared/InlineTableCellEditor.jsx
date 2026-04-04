@@ -33,7 +33,7 @@ function parseValue(raw, editType) {
  * Inline cell editor for native (DB-backed) table columns.
  * Supports: text, number, date, select, multi-select, boolean, tags, email, tel, url.
  */
-export default function InlineTableCellEditor({ value, column, onSave, onCancel }) {
+export default function InlineTableCellEditor({ value, column, onSave, onCancel, onChange }) {
   const editType = column.editType || inferEditType(column.format);
   const options = column.editOptions || [];
 
@@ -57,16 +57,16 @@ export default function InlineTableCellEditor({ value, column, onSave, onCancel 
 
   // ── Select (single value from options) ──
   if (editType === 'select') {
-    return <SelectEditor value={value} options={options} onSave={onSave} onCancel={onCancel} />;
+    return <SelectEditor value={value} options={options} onSave={onSave} onCancel={onCancel} onChange={onChange} />;
   }
 
   // ── Standard input (text, number, date, email, tel, url) ──
-  return <TextEditor value={value} editType={editType} onSave={onSave} onCancel={onCancel} />;
+  return <TextEditor value={value} editType={editType} onSave={onSave} onCancel={onCancel} onChange={onChange} />;
 }
 
 /* ── Text / Number / Date / Email / URL / Tel ─────────────────────── */
 
-function TextEditor({ value, editType, onSave, onCancel }) {
+function TextEditor({ value, editType, onSave, onCancel, onChange }) {
   const inputType = editType === 'number' ? 'number'
     : editType === 'date' ? 'date'
     : editType === 'email' ? 'email'
@@ -101,7 +101,7 @@ function TextEditor({ value, editType, onSave, onCancel }) {
       type={inputType}
       value={draft}
       step={inputType === 'number' ? 'any' : undefined}
-      onChange={(e) => setDraft(e.target.value)}
+      onChange={(e) => { setDraft(e.target.value); onChange?.(e.target.value); }}
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === 'Enter') { e.preventDefault(); commit(); }
@@ -114,7 +114,7 @@ function TextEditor({ value, editType, onSave, onCancel }) {
 
 /* ── Select (single) ──────────────────────────────────────────────── */
 
-function SelectEditor({ value, options, onSave, onCancel }) {
+function SelectEditor({ value, options, onSave, onCancel, onChange }) {
   const [draft, setDraft] = useState(value ?? '');
   const ref = useRef(null);
 
@@ -126,6 +126,7 @@ function SelectEditor({ value, options, onSave, onCancel }) {
       value={draft}
       onChange={(e) => {
         setDraft(e.target.value);
+        onChange?.(e.target.value);
         onSave(e.target.value || null);
       }}
       onBlur={() => onSave(draft || null)}
