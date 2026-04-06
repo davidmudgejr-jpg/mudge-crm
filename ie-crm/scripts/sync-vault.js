@@ -24,6 +24,11 @@ const API_KEY = process.env.CRM_AGENT_KEY
 
 const SKIP_FOLDERS = new Set(['personal', 'templates']);
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isValidUuid(val) {
+  return val && typeof val === 'string' && UUID_RE.test(val);
+}
+
 // ============================================================
 // YAML FRONTMATTER PARSER (lightweight — no gray-matter dependency)
 // ============================================================
@@ -165,7 +170,7 @@ function parseFile(fullPath, relativePath) {
       type,
       title,
       aliases: fm.aliases || [],
-      crm_id: fm.crm_id || null,
+      crm_id: isValidUuid(fm.crm_id) ? fm.crm_id : null,
       last_verified: fm.last_verified || null,
       stale_after: fm.stale_after || null,
       status,
