@@ -128,6 +128,7 @@ export const INTERACTION_TYPES = [
   'Text', 'Meeting', 'Tour',
   'Door Knock', 'Drive By',
   'Snail Mail', 'Offer Sent', 'Survey Sent', 'BOV Sent',
+  'Note', 'LinkedIn',
 ];
 
 // Email-related types — used to show email heading/body fields in detail views
