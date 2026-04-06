@@ -34,7 +34,7 @@ const ENTITY_MAP = {
   deal: 'deals',
 };
 
-const TABS = ['Context', 'History', 'Open Questions', 'CRM Data', 'Connections'];
+const TABS = ['Context', 'History', 'Open Questions', 'Decisions', 'CRM Data', 'Connections'];
 
 // Simple markdown section parser: splits by ## headers
 function parseSections(content) {
@@ -283,6 +283,18 @@ export default function NodePanel({ slug, onClose, onFocusNode }) {
               </div>
             ) : (
               <p className="text-sm text-crm-muted">No open questions.</p>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'Decisions' && (
+          <div>
+            {sections['Decisions'] || sections['Decision History'] ? (
+              <div className="text-sm text-crm-text whitespace-pre-wrap leading-relaxed">
+                {sections['Decisions'] || sections['Decision History']}
+              </div>
+            ) : (
+              <p className="text-sm text-crm-muted">No decisions recorded.</p>
             )}
           </div>
         )}

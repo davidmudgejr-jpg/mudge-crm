@@ -5,6 +5,7 @@ import LinkedRecordSection from '../components/shared/LinkedRecordSection';
 import InlineField from '../components/shared/InlineField';
 import useAutoSave from '../hooks/useAutoSave';
 import { SlideOverHeader } from '../components/shared/SlideOver';
+import KnowledgeButton from '../components/knowledge/KnowledgeButton';
 import DetailSkeleton from '../components/shared/DetailSkeleton';
 import NotesSection from '../components/shared/NotesSection';
 import TYPE_ICONS from '../config/typeIcons';
@@ -157,6 +158,7 @@ export default function DealDetail({ dealId, id, onClose, onSave, onRefresh, isS
         subtitle={<span className="flex items-center gap-2"><span>{deal.deal_type}</span>{deal.status && <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${STATUS_COLORS[deal.status] || 'bg-crm-border text-crm-muted'}`}>{deal.status}</span>}</span>}
         onClose={onClose}
       >
+        <KnowledgeButton table="deals" id={resolvedId} />
         <button onClick={handleDelete} className="text-crm-muted hover:text-red-400 w-8 h-8 flex items-center justify-center rounded-md hover:bg-crm-hover transition-colors" title="Delete deal">
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
         </button>

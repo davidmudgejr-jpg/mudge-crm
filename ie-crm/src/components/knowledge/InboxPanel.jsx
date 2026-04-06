@@ -111,6 +111,29 @@ export default function InboxPanel({ isOpen, onClose }) {
     }
   }, []);
 
+  const handleFlag = useCallback(async (slug) => {
+    setActionLoading(slug);
+    try {
+      const res = await fetch(`${API_BASE}/api/knowledge/node/${slug}`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify({ status: 'pending-review', tags: ['flagged-for-david'] }),
+      });
+      if (!res.ok) throw new Error('Flag failed');
+      // Keep in list but show flagged state
+      setItems((prev) =>
+        prev.map((it) =>
+          it.slug === slug ? { ...it, tags: ['flagged-for-david'] } : it
+        )
+      );
+      setExpandedSlug(null);
+    } catch {
+      // Could add error toast here
+    } finally {
+      setActionLoading(null);
+    }
+  }, []);
+
   if (!isOpen) return null;
 
   return (
@@ -258,6 +281,14 @@ export default function InboxPanel({ isOpen, onClose }) {
                                      hover:bg-crm-hover hover:text-crm-text disabled:opacity-40 transition-colors"
                         >
                           {isActioning ? 'Rejecting...' : 'Reject'}
+                        </button>
+                        <button
+                          onClick={() => handleFlag(item.slug)}
+                          disabled={isActioning}
+                          className="flex-1 px-3 py-1.5 text-xs font-medium rounded border border-yellow-600/50 text-yellow-500
+                                     hover:bg-yellow-900/20 hover:text-yellow-400 disabled:opacity-40 transition-colors"
+                        >
+                          {isActioning ? 'Flagging...' : 'Flag for David'}
                         </button>
                       </div>
                     </div>

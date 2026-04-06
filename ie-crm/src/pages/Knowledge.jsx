@@ -6,6 +6,7 @@ import NodePanel from '../components/knowledge/NodePanel';
 import KnowledgeToolbar from '../components/knowledge/KnowledgeToolbar';
 import KnowledgeSearch from '../components/knowledge/KnowledgeSearch';
 import InboxPanel from '../components/knowledge/InboxPanel';
+import KnowledgeListView from '../components/knowledge/KnowledgeListView';
 
 export default function Knowledge() {
   const { nodes, edges, stats, loading, error, refetch, filters, updateFilters } =
@@ -15,6 +16,7 @@ export default function Knowledge() {
   const [showInbox, setShowInbox] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [clusterByType, setClusterByType] = useState(false);
   const graphRef = useRef(null);
   const [searchParams] = useSearchParams();
 
@@ -90,6 +92,8 @@ export default function Knowledge() {
         onToggleInbox={() => setShowInbox((v) => !v)}
         refreshing={refreshing || loading}
         onSearchFocus={() => setShowSearch(true)}
+        clusterByType={clusterByType}
+        onClusterToggle={() => setClusterByType((v) => !v)}
       />
 
       {/* Main area: graph + optional panel */}
@@ -123,13 +127,26 @@ export default function Knowledge() {
           )}
 
           {nodes.length > 0 && (
-            <KnowledgeGraph
-              ref={graphRef}
-              nodes={nodes}
-              edges={edges}
-              onNodeSelect={handleNodeSelect}
-              selectedSlug={selectedSlug}
-            />
+            <>
+              {/* Desktop: graph view */}
+              <div className="hidden md:block w-full h-full">
+                <KnowledgeGraph
+                  ref={graphRef}
+                  nodes={nodes}
+                  edges={edges}
+                  onNodeSelect={handleNodeSelect}
+                  selectedSlug={selectedSlug}
+                  clusterByType={clusterByType}
+                />
+              </div>
+              {/* Mobile: list view fallback */}
+              <div className="block md:hidden w-full h-full">
+                <KnowledgeListView
+                  nodes={nodes}
+                  onNodeSelect={handleNodeSelect}
+                />
+              </div>
+            </>
           )}
 
           {!loading && nodes.length === 0 && !error && (
@@ -147,8 +164,8 @@ export default function Knowledge() {
           <div className="absolute bottom-3 left-3 flex items-center gap-3 text-[10px] text-crm-muted">
             <span>{nodes.length} nodes</span>
             <span>{edges.length} edges</span>
-            {stats.stale > 0 && (
-              <span className="text-yellow-500">{stats.stale} stale</span>
+            {(stats.stale_count || 0) > 0 && (
+              <span className="text-yellow-500">{stats.stale_count} stale</span>
             )}
           </div>
         </div>

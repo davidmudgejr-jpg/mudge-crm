@@ -29,7 +29,7 @@ function isStale(node) {
 
 // ── Component ───────────────────────────────────────────────────────────
 const KnowledgeGraph = forwardRef(function KnowledgeGraph(
-  { nodes = [], edges = [], onNodeSelect, selectedSlug, className = '' },
+  { nodes = [], edges = [], onNodeSelect, selectedSlug, className = '', clusterByType = false },
   ref
 ) {
   const containerRef = useRef(null);
@@ -168,6 +168,12 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
             opacity: 0.5,
             'line-color': '#7AA2F7',
             width: 1,
+            label: 'data(label)',
+            color: '#565A6E',
+            'font-size': '8px',
+            'text-rotation': 'autorotate',
+            'text-outline-color': '#1a1b26',
+            'text-outline-width': 1,
           },
         },
 
@@ -252,6 +258,45 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [elements]);
+
+  // ── Re-layout when cluster mode changes ────────────────────────────
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy || cy.elements().length === 0) return;
+
+    if (clusterByType) {
+      // Group nodes by type using cola with alignment constraints
+      const types = [...new Set(cy.nodes().map(n => n.data('type')))];
+      const groups = {};
+      types.forEach((t, i) => { groups[t] = i; });
+
+      cy.layout({
+        name: 'cola',
+        animate: true,
+        maxSimulationTime: 2000,
+        nodeSpacing: 20,
+        edgeLength: 100,
+        padding: 60,
+        randomize: false,
+        avoidOverlap: true,
+        handleDisconnected: true,
+        // Group by type — nodes of same type cluster together
+        alignment: (node) => ({ x: 0, y: (groups[node.data('type')] || 0) * 200 }),
+      }).run();
+    } else {
+      cy.layout({
+        name: 'cola',
+        animate: true,
+        maxSimulationTime: 2000,
+        nodeSpacing: 25,
+        edgeLength: 120,
+        padding: 60,
+        randomize: false,
+        avoidOverlap: true,
+        handleDisconnected: true,
+      }).run();
+    }
+  }, [clusterByType]);
 
   // ── Sync selection state ───────────────────────────────────────────
   useEffect(() => {
