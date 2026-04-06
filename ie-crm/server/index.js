@@ -16,6 +16,7 @@ const { initChat, registerChatRoutes, triggerCouncilHoustonResponse } = require(
 const { mountAiRoutes } = require('./routes/ai');
 const { mountVerificationRoutes } = require('./routes/verification');
 const { mountContractRoutes } = require('./routes/contracts');
+const { mountKnowledgeRoutes } = require('./routes/knowledge');
 const { uploadFile, deleteFile } = require('./services/fileUpload');
 const { normalizeAddress, parseAddress, normalizeCompanyName } = require('./utils/addressNormalizer');
 const { matchProperty, matchCompany, matchContact, matchContactTargeted, detectTable } = require('./utils/compositeMatcher');
@@ -307,6 +308,9 @@ mountAiRoutes(app, {
 
 // Mount Verification Queue routes BEFORE requireAuth — has its own dual-auth (JWT or X-Agent-Key)
 mountVerificationRoutes(app, { getPool: () => pool, requireAuth, optionalAuth });
+
+// Mount Knowledge Graph routes BEFORE requireAuth — has its own dual-auth (JWT or X-Agent-Key)
+mountKnowledgeRoutes(app, { getPool: () => pool });
 
 // Protect all API routes below this line (except Houston completions which use optionalAuth)
 app.use('/api', requireAuth);

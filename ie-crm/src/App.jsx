@@ -30,6 +30,7 @@ const Contracts = lazy(() => import('./pages/Contracts'));
 const ContractEditor = lazy(() => import('./pages/ContractEditor'));
 const MobileChat = lazy(() => import('./pages/MobileChat'));
 const DesktopChat = lazy(() => import('./pages/DesktopChat'));
+const Knowledge = lazy(() => import('./pages/Knowledge'));
 
 // Lazy-loaded detail panels (only rendered inside slide-overs)
 const PropertyDetail = lazy(() => import('./pages/PropertyDetail'));
@@ -137,6 +138,7 @@ function AppShell() {
             <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
             <Route path="/action-items" element={<ActionItems onCountChange={setRowCount} />} />
             <Route path="/comps" element={<Comps onCountChange={setRowCount} />} />
+            <Route path="/knowledge" element={<Knowledge />} />
             <Route path="/ai-ops" element={<AIOps />} />
             <Route path="/import" element={<Import />} />
             <Route path="/dedup" element={<DedupReview onCountChange={setRowCount} />} />

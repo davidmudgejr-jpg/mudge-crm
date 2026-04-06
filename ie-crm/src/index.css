@@ -26,6 +26,14 @@
   --crm-panel: #2d2d30;
   --crm-tooltip: #252526;
 
+  /* Knowledge Graph node type colors */
+  --knowledge-contact: #3B82F6;
+  --knowledge-company: #10B981;
+  --knowledge-property: #F59E0B;
+  --knowledge-deal: #8B5CF6;
+  --knowledge-market: #6B7280;
+  --knowledge-decision: #EF4444;
+
   /* Scrollbar */
   --crm-scroll-track: #1e1e1e;
   --crm-scroll-thumb: #424242;
@@ -385,3 +393,23 @@ input[type="checkbox"].rounded:checked::after {
   50% { transform: scale(1.15); }
   100% { transform: scale(1); }
 }
+
+/* Knowledge Graph — pulse animation for inbox pending nodes */
+@keyframes knowledge-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.4); }
+  50% { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
+}
+
+.knowledge-graph-container {
+  background: var(--crm-bg);
+  width: 100%;
+  height: 100%;
+}
+
+/* Knowledge type badge colors */
+.knowledge-badge-contact { background: var(--knowledge-contact); color: white; }
+.knowledge-badge-company { background: var(--knowledge-company); color: white; }
+.knowledge-badge-property { background: var(--knowledge-property); color: #1a1a1a; }
+.knowledge-badge-deal { background: var(--knowledge-deal); color: white; }
+.knowledge-badge-market { background: var(--knowledge-market); color: white; }
+.knowledge-badge-decision { background: var(--knowledge-decision); color: white; }

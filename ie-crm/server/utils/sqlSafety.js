@@ -107,6 +107,16 @@ const ALLOWED_COLS = {
     'notes', 'source', 'created_at', 'updated_at',
     'city', 'property_address',
   ]),
+  knowledge_nodes: new Set([
+    'id', 'file_path', 'slug', 'type', 'title', 'aliases', 'crm_id',
+    'last_verified', 'stale_after', 'status', 'visibility', 'source_context',
+    'tags', 'frontmatter', 'content', 'summary', 'links_to',
+    'merge_requested_at', 'merge_target_slug', 'merged_at',
+    'created_at', 'updated_at',
+  ]),
+  knowledge_edges: new Set([
+    'id', 'from_slug', 'to_slug', 'context', 'created_at',
+  ]),
 };
 
 // ── Table → primary key mapping ────────────────────────────────────────────
@@ -121,6 +131,8 @@ const TABLE_ID_MAP = {
   action_items: 'action_item_id',
   lease_comps: 'id',
   sale_comps: 'id',
+  knowledge_nodes: 'id',
+  knowledge_edges: 'id',
 };
 
 // Entity type aliases (agents use "contact" not "contacts")
