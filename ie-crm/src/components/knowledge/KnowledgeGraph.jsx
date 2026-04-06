@@ -60,14 +60,19 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
       };
     });
 
-    const cyEdges = edges.map((e, i) => ({
-      data: {
-        id: `e-${e.from_slug}-${e.to_slug}-${i}`,
-        source: e.from_slug,
-        target: e.to_slug,
-        label: e.context ? e.context.slice(0, 40) : '',
-      },
-    }));
+    // Filter edges to only include those where BOTH endpoints exist as nodes
+    // Cytoscape crashes if an edge references a nonexistent node ID
+    const nodeIds = new Set(cyNodes.map((n) => n.data.id));
+    const cyEdges = edges
+      .filter((e) => nodeIds.has(e.from_slug) && nodeIds.has(e.to_slug))
+      .map((e, i) => ({
+        data: {
+          id: `e-${e.from_slug}-${e.to_slug}-${i}`,
+          source: e.from_slug,
+          target: e.to_slug,
+          label: e.context ? e.context.slice(0, 40) : '',
+        },
+      }));
 
     return [...cyNodes, ...cyEdges];
   }, [nodes, edges]);
