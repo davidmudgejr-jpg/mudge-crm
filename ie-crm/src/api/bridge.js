@@ -111,6 +111,9 @@ export const db = {
     );
     return httpPost('/api/db/link', { junction, col1, id1, col2, id2, extras });
   },
+  remove: (entity, id) => {
+    return httpPost('/api/db/delete', { entity, id });
+  },
   unlink: (junction, col1, id1, col2, id2) => {
     if (isElectron()) return window.iecrm.db.query(
       `DELETE FROM ${junction} WHERE ${col1} = $1 AND ${col2} = $2 RETURNING *`, [id1, id2]

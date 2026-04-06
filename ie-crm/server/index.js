@@ -711,6 +711,28 @@ app.get('/api/db/status', async (_req, res) => {
   }
 });
 
+// ── Safe parameterized delete endpoint ──────────────────────────────────
+app.post('/api/db/delete', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected' });
+  const { entity, id } = req.body;
+  if (!entity || !id) return res.status(400).json({ error: 'entity and id required' });
+
+  const meta = ENTITY_TABLES[entity];
+  if (!meta) return res.status(400).json({ error: `Unknown entity: ${entity}` });
+
+  try {
+    const result = await pool.query(
+      `DELETE FROM ${meta.table} WHERE ${meta.pk} = $1 RETURNING *`,
+      [id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Record not found' });
+    res.json({ ok: true, deleted: result.rows[0] });
+  } catch (err) {
+    console.error(`[db/delete] Error deleting ${entity} ${id}:`, err.message);
+    res.status(500).json({ error: 'Delete failed' });
+  }
+});
+
 app.get('/api/db/schema', async (_req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected' });
   try {
