@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  getInteraction, updateInteraction,
+  getInteraction, updateInteraction, deleteInteraction,
   getInteractionContacts, getInteractionProperties, getInteractionDeals,
 } from '../api/database';
 import TYPE_ICONS, { INTERACTION_TYPES, EMAIL_TYPES, getTypeInfo } from '../config/typeIcons';
@@ -20,7 +20,7 @@ export function formatTime(val) {
   return formatTimePacific(val);
 }
 
-export default function InteractionDetail({ interactionId, id, onClose, onRefresh, isSlideOver }) {
+export default function InteractionDetail({ interactionId, id, onClose, onSave, onRefresh, isSlideOver }) {
   const resolvedId = id || interactionId;
   const [interaction, setInteraction] = useState(null);
   const [contacts, setContacts] = useState([]);
@@ -29,6 +29,12 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const saveField = useAutoSave(updateInteraction, resolvedId, setInteraction, onRefresh);
+
+  const handleDelete = async () => {
+    if (!window.confirm('Delete this interaction? This cannot be undone.')) return;
+    await deleteInteraction(resolvedId);
+    onSave?.();
+  };
 
   const loadData = async () => {
     if (!resolvedId) return;
@@ -126,7 +132,11 @@ export default function InteractionDetail({ interactionId, id, onClose, onRefres
         }
         subtitle={`${formatDate(interaction.date) || ''}${formatTime(interaction.date) ? ` at ${formatTime(interaction.date)}` : ''}`}
         onClose={onClose}
-      />
+      >
+        <button onClick={handleDelete} className="text-crm-muted hover:text-red-400 w-8 h-8 flex items-center justify-center rounded-md hover:bg-crm-hover transition-colors" title="Delete interaction">
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+        </button>
+      </SlideOverHeader>
 
       {EMAIL_TYPES.some(t => t.toLowerCase() === (interaction.type || '').toLowerCase()) && (
         <Section title="Email">
