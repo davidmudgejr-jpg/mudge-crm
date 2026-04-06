@@ -6,14 +6,14 @@ import cola from 'cytoscape-cola';
 cytoscape.use(cola);
 
 const TYPE_STYLES = {
-  contact:  { color: '#3B82F6', shape: 'ellipse',          w: 40, h: 40 },
-  company:  { color: '#10B981', shape: 'round-rectangle',  w: 50, h: 35 },
-  property: { color: '#F59E0B', shape: 'diamond',          w: 40, h: 40 },
-  deal:     { color: '#8B5CF6', shape: 'pentagon',          w: 45, h: 45 },
-  market:   { color: '#6B7280', shape: 'hexagon',           w: 35, h: 35 },
-  decision: { color: '#EF4444', shape: 'triangle',          w: 35, h: 35 },
+  contact:  { color: '#3B82F6', shape: 'ellipse',          w: 28, h: 28 },
+  company:  { color: '#10B981', shape: 'round-rectangle',  w: 32, h: 24 },
+  property: { color: '#F59E0B', shape: 'diamond',          w: 28, h: 28 },
+  deal:     { color: '#8B5CF6', shape: 'ellipse',           w: 30, h: 30 },
+  market:   { color: '#6B7280', shape: 'ellipse',           w: 24, h: 24 },
+  decision: { color: '#EF4444', shape: 'ellipse',           w: 22, h: 22 },
 };
-const DEFAULT_STYLE = { color: '#9CA3AF', shape: 'ellipse', w: 36, h: 36 };
+const DEFAULT_STYLE = { color: '#9CA3AF', shape: 'ellipse', w: 24, h: 24 };
 
 function truncate(str, max = 15) {
   if (!str) return '';
@@ -62,10 +62,10 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
 
     const cyEdges = edges.map((e, i) => ({
       data: {
-        id: `e-${e.source}-${e.target}-${i}`,
-        source: e.source,
-        target: e.target,
-        label: e.relation || '',
+        id: `e-${e.from_slug}-${e.to_slug}-${i}`,
+        source: e.from_slug,
+        target: e.to_slug,
+        label: e.context ? e.context.slice(0, 40) : '',
       },
     }));
 
@@ -92,32 +92,33 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
             width: 'data(_w)',
             height: 'data(_h)',
             label: 'data(label)',
-            color: '#d4d4d4',
-            'font-size': '10px',
+            color: '#a0a0a0',
+            'font-size': '9px',
+            'font-family': '-apple-system, BlinkMacSystemFont, sans-serif',
             'text-valign': 'bottom',
-            'text-margin-y': 6,
+            'text-margin-y': 4,
             'text-outline-color': '#1e1e1e',
-            'text-outline-width': 2,
+            'text-outline-width': 1.5,
             'border-width': 0,
             'border-color': '#ffffff',
           },
         },
-        // Stale nodes
+        // Stale nodes — use Cytoscape data selector (truthy check)
         {
-          selector: 'node[_stale]',
+          selector: 'node[?_stale]',
           style: {
-            opacity: (el) => (el.data('_stale') ? 0.4 : 1),
-            'border-style': (el) => (el.data('_stale') ? 'dashed' : 'solid'),
-            'border-width': (el) => (el.data('_stale') ? 2 : 0),
+            opacity: 0.4,
+            'border-style': 'dashed',
+            'border-width': 2,
             'border-color': '#808080',
           },
         },
         // Opportunity tag
         {
-          selector: 'node[_opportunity]',
+          selector: 'node[?_opportunity]',
           style: {
-            'border-color': (el) => (el.data('_opportunity') ? '#FFD60A' : '#ffffff'),
-            'border-width': (el) => (el.data('_opportunity') ? 2 : 0),
+            'border-color': '#FFD60A',
+            'border-width': 2,
           },
         },
         // Selected node
@@ -128,32 +129,48 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
             'border-color': '#ffffff',
           },
         },
-        // Edges
+        // Edges — Obsidian-style thin lines, no arrows
         {
           selector: 'edge',
           style: {
-            'line-color': '#555555',
-            width: 1,
-            'curve-style': 'bezier',
-            opacity: 0.4,
-            'target-arrow-shape': 'triangle',
-            'target-arrow-color': '#555555',
-            'arrow-scale': 0.6,
+            'line-color': '#444444',
+            width: 0.75,
+            'curve-style': 'haystack',
+            opacity: 0.3,
           },
+        },
+        // Dimmed state (non-neighbors on hover)
+        {
+          selector: 'node.dimmed',
+          style: { opacity: 0.15 },
+        },
+        {
+          selector: 'edge.dimmed',
+          style: { opacity: 0.05 },
+        },
+        // Highlighted state (neighbors on hover)
+        {
+          selector: 'node.highlighted',
+          style: { opacity: 1 },
+        },
+        {
+          selector: 'edge.highlighted',
+          style: { opacity: 0.6, 'line-color': '#569cd6', width: 1.5 },
         },
       ],
       layout: {
-        name: 'cose',
+        name: 'cola',
         animate: true,
-        animationDuration: 600,
-        nodeRepulsion: 8000,
-        idealEdgeLength: 120,
-        edgeElasticity: 80,
-        nestingFactor: 1.2,
-        gravity: 0.25,
-        numIter: 1000,
-        padding: 40,
+        maxSimulationTime: 3000,
+        ungrabifyWhileSimulating: false,
+        nodeSpacing: 30,
+        edgeLength: 150,
+        convergenceThreshold: 0.01,
+        padding: 50,
         randomize: true,
+        avoidOverlap: true,
+        handleDisconnected: true,
+        infinite: false,
       },
       minZoom: 0.2,
       maxZoom: 4,
@@ -170,6 +187,18 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
       if (evt.target === cy) {
         if (onNodeSelect) onNodeSelect(null);
       }
+    });
+
+    // Obsidian-style hover: highlight connected nodes + edges
+    cy.on('mouseover', 'node', (evt) => {
+      const node = evt.target;
+      const neighborhood = node.closedNeighborhood();
+      cy.elements().not(neighborhood).addClass('dimmed');
+      neighborhood.addClass('highlighted');
+    });
+
+    cy.on('mouseout', 'node', () => {
+      cy.elements().removeClass('dimmed highlighted');
     });
 
     cyRef.current = cy;
