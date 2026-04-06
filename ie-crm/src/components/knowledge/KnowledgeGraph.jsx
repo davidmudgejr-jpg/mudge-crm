@@ -27,6 +27,17 @@ function isStale(node) {
   return new Date(node.stale_after) < new Date();
 }
 
+function hasTag(node, tag) {
+  const tags = node.tags;
+  if (!tags) return false;
+  if (Array.isArray(tags)) return tags.some((t) => String(t).toLowerCase().includes(tag));
+  return String(tags).toLowerCase().includes(tag);
+}
+
+function isPendingReview(node) {
+  return node.status === 'pending-review';
+}
+
 // ── Component ───────────────────────────────────────────────────────────
 const KnowledgeGraph = forwardRef(function KnowledgeGraph(
   { nodes = [], edges = [], onNodeSelect, selectedSlug, className = '', clusterByType = false },
@@ -44,6 +55,8 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
         type: n.type,
         _color: NODE_COLORS[n.type] || DEFAULT_COLOR,
         _stale: isStale(n),
+        _opportunity: hasTag(n, 'opportunity'),
+        _pending: isPendingReview(n),
         // Pass through for detail panel
         ...n,
       },
@@ -110,6 +123,31 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
             'border-style': 'dashed',
             'border-width': 1,
             'border-color': '#565A6E',
+          },
+        },
+
+        // Opportunity tag — golden glow
+        {
+          selector: 'node[?_opportunity]',
+          style: {
+            'border-width': 2,
+            'border-color': '#E0AF68',
+            'border-opacity': 0.9,
+            width: NODE_RADIUS * 2.4,
+            height: NODE_RADIUS * 2.4,
+          },
+        },
+
+        // Pending review — pulsing outline
+        {
+          selector: 'node[?_pending]',
+          style: {
+            'border-width': 2,
+            'border-color': '#FF9E64',
+            'border-style': 'solid',
+            'overlay-color': '#FF9E64',
+            'overlay-padding': 4,
+            'overlay-opacity': 0.15,
           },
         },
 
@@ -250,9 +288,20 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
     // Run once after layout settles
     cy.one('layoutstop', updateLabelVisibility);
 
+    // ── Pending review pulse animation ────────────────────────────
+    // Toggle overlay on pending nodes to create a breathing effect
+    let pulseOn = false;
+    const pulseInterval = setInterval(() => {
+      const pendingNodes = cy.nodes('[?_pending]');
+      if (pendingNodes.length === 0) return;
+      pulseOn = !pulseOn;
+      pendingNodes.style('overlay-opacity', pulseOn ? 0.25 : 0.08);
+    }, 1200);
+
     cyRef.current = cy;
 
     return () => {
+      clearInterval(pulseInterval);
       cy.destroy();
       cyRef.current = null;
     };

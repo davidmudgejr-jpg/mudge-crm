@@ -156,6 +156,29 @@ export default function NodePanel({ slug, onClose, onFocusNode }) {
     if (onFocusNode) onFocusNode(connSlug);
   };
 
+  const [enrichRequested, setEnrichRequested] = useState(false);
+  const handleRequestEnrichment = async () => {
+    if (!node) return;
+    setEnrichRequested(true);
+    try {
+      await fetch(`${API_BASE}/api/ai/directive`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          title: `Re-enrich: ${node.title}`,
+          body: `Knowledge node "${node.title}" (slug: ${node.slug}, type: ${node.type}) is stale (stale_after: ${node.stale_after}). Please re-verify and update the vault page.`,
+          priority: 'normal',
+          scope: 'houston_command',
+          source: 'knowledge-graph',
+        }),
+      });
+    } catch {
+      // Non-critical — Houston will still see it next poll
+    }
+  };
+
+  const isStale = node?.stale_after && new Date(node.stale_after) < new Date();
+
   // Loading state
   if (loading) {
     return (
@@ -224,14 +247,29 @@ export default function NodePanel({ slug, onClose, onFocusNode }) {
           ))}
         </div>
 
-        {node.crm_id && ENTITY_MAP[node.type] && (
-          <button
-            onClick={handleOpenInCRM}
-            className="mt-3 text-xs text-crm-accent hover:text-crm-accent-hover underline"
-          >
-            Open in CRM
-          </button>
-        )}
+        <div className="flex items-center gap-2 mt-3">
+          {node.crm_id && ENTITY_MAP[node.type] && (
+            <button
+              onClick={handleOpenInCRM}
+              className="text-xs text-crm-accent hover:text-crm-accent-hover underline"
+            >
+              Open in CRM
+            </button>
+          )}
+          {isStale && (
+            <button
+              onClick={handleRequestEnrichment}
+              disabled={enrichRequested}
+              className={`text-xs px-2 py-0.5 rounded border transition-colors ${
+                enrichRequested
+                  ? 'border-green-600/50 text-green-400 cursor-default'
+                  : 'border-yellow-600/50 text-yellow-500 hover:bg-yellow-900/20 hover:text-yellow-400'
+              }`}
+            >
+              {enrichRequested ? '✓ Enrichment requested' : '↻ Re-enrich'}
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Tabs */}
