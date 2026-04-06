@@ -45,6 +45,9 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
 ) {
   const containerRef = useRef(null);
   const cyRef = useRef(null);
+  // Keep latest callback in a ref so Cytoscape event handlers never go stale
+  const onNodeSelectRef = useRef(onNodeSelect);
+  onNodeSelectRef.current = onNodeSelect;
 
   // Build Cytoscape elements from API data
   const elements = useMemo(() => {
@@ -253,12 +256,18 @@ const KnowledgeGraph = forwardRef(function KnowledgeGraph(
     });
 
     // ── Event: tap node → select ──────────────────────────────────
+    // Use ref to avoid stale closure — Cytoscape handlers are registered
+    // once but React re-creates onNodeSelect on every render
     cy.on('tap', 'node', (evt) => {
-      if (onNodeSelect) onNodeSelect(evt.target.data());
+      const cb = onNodeSelectRef.current;
+      if (cb) cb(evt.target.data());
     });
 
     cy.on('tap', (evt) => {
-      if (evt.target === cy && onNodeSelect) onNodeSelect(null);
+      if (evt.target === cy) {
+        const cb = onNodeSelectRef.current;
+        if (cb) cb(null);
+      }
     });
 
     // ── Event: hover → neighborhood highlight ─────────────────────
