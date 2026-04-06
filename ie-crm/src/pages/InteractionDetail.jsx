@@ -32,8 +32,15 @@ export default function InteractionDetail({ interactionId, id, onClose, onSave, 
 
   const handleDelete = async () => {
     if (!window.confirm('Delete this interaction? This cannot be undone.')) return;
-    await deleteInteraction(resolvedId);
-    onSave?.();
+    try {
+      await deleteInteraction(resolvedId);
+      onClose?.();
+      onRefresh?.();
+      onSave?.();
+    } catch (err) {
+      console.error('Delete failed:', err);
+      alert('Failed to delete interaction: ' + (err.message || 'Unknown error'));
+    }
   };
 
   const loadData = async () => {
