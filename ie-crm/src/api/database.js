@@ -197,7 +197,7 @@ const SEARCH_COLUMNS = {
     'deal_name', 'deal_type', 'status', 'notes',
     'other_broker', 'industry', 'fell_through_reason',
   ],
-  deals_arrays: ['run_by', 'repping', 'deal_source', 'tags'],
+  deals_arrays: ['run_by', 'repping', 'deal_source'],
 
   campaigns: ['name', 'type', 'status', 'notes', 'assignee'],
   campaigns_arrays: [],
