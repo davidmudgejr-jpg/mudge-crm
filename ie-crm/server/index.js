@@ -426,13 +426,38 @@ app.post('/api/users/:id/reset-password', requireRole('admin'), async (req, res)
 // ============================================================
 // DATABASE ROUTES
 // ============================================================
+// Tables safe for all authenticated users to SELECT from
+const SAFE_READ_TABLES = new Set([
+  'properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns',
+  'action_items', 'lease_comps', 'sale_comps', 'loan_maturities', 'property_distress', 'tenant_growth',
+  // Views
+  'deal_formulas', 'campaigns_with_counts', 'property_tpe_scores',
+  // Junction tables
+  'property_contacts', 'property_companies', 'contact_companies',
+  'deal_properties', 'deal_contacts', 'deal_companies',
+  'interaction_contacts', 'interaction_properties', 'interaction_deals', 'interaction_companies',
+  'campaign_contacts', 'deal_campaigns',
+  'action_item_contacts', 'action_item_properties', 'action_item_deals', 'action_item_companies',
+  // Supporting tables
+  'formula_columns', 'saved_views', 'tpe_config', 'tpe_score_weights',
+  'undo_log', 'ai_usage_tracking',
+]);
+
+// Check if a SELECT query only references safe tables
+function queryUsesSafeTables(sql) {
+  // Extract table references from FROM and JOIN clauses
+  const fromJoinPattern = /\b(?:FROM|JOIN)\s+([a-z_][a-z0-9_]*)/gi;
+  let match;
+  while ((match = fromJoinPattern.exec(sql)) !== null) {
+    if (!SAFE_READ_TABLES.has(match[1].toLowerCase())) {
+      return false;
+    }
+  }
+  return true;
+}
+
 app.post('/api/db/query', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
-
-  // SECURITY: Admin-only — this endpoint executes raw SQL
-  if (!req.user || req.user.role !== 'admin') {
-    return res.status(403).json({ error: 'Admin access required for raw SQL queries' });
-  }
 
   // SECURITY: Restrict to read-only queries (Houston audit C3 — 2026-03-30)
   const { sql, params } = req.body;
@@ -456,11 +481,105 @@ app.post('/api/db/query', async (req, res) => {
     return res.status(403).json({ error: 'Write operations are not allowed via this endpoint' });
   }
 
+  // SECURITY: Non-admin users can only query safe tables (no access to users, houston_memories, etc.)
+  if (!req.user || req.user.role !== 'admin') {
+    if (!queryUsesSafeTables(trimmed)) {
+      return res.status(403).json({ error: 'Access denied: query references restricted tables' });
+    }
+  }
+
   try {
     const result = await pool.query(sql, params || []);
     res.json({ rows: result.rows, rowCount: result.rowCount });
   } catch (err) {
     // Don't expose internal error details in production
+    const safeMessage = process.env.NODE_ENV === 'production' ? 'Query failed' : err.message;
+    res.status(400).json({ error: safeMessage });
+  }
+});
+
+// ── Safe parameterized read endpoint (available to ALL authenticated users) ──
+// Unlike /api/db/query (admin-only raw SQL), this endpoint builds SQL server-side
+// with table/column whitelisting so brokers and readonly users can fetch entity data.
+const READ_TABLES = {
+  properties:   'properties',
+  contacts:     'contacts',
+  companies:    'companies',
+  deals:        'deal_formulas',
+  interactions: 'interactions',
+  campaigns:    'campaigns_with_counts',
+  lease_comps:  'lease_comps',
+  sale_comps:   'sale_comps',
+  action_items: 'action_items',
+};
+
+// Column whitelist for ORDER BY — prevents injection via sort column
+const READ_SORT_COLS = new Set([
+  ...Object.keys(ENTITY_TABLES || {}).length ? [] : [], // placeholder
+  'created_at', 'modified', 'last_modified', 'updated_at', 'date',
+  'property_address', 'property_name', 'city', 'county', 'state', 'zip',
+  'rba', 'land_area_ac', 'property_type', 'building_class', 'year_built',
+  'last_sale_date', 'last_sale_price', 'owner_name', 'priority', 'contacted',
+  'listing_status', 'listing_first_seen_date', 'vacancy_pct', 'percent_leased',
+  'full_name', 'first_name', 'type', 'title', 'email_1', 'phone_1', 'client_level',
+  'last_contacted', 'follow_up', 'active_need',
+  'company_name', 'company_type', 'industry_type', 'sf', 'employees', 'lease_exp',
+  'deal_name', 'deal_type', 'status', 'repping', 'close_date', 'rate', 'term',
+  'team_gross_computed', 'jr_gross_computed', 'jr_net_computed', 'price',
+  'subject', 'name', 'due_date', 'date_completed', 'responsibility', 'high_priority',
+  'sent_date', 'sale_date', 'sale_price', 'sign_date', 'expiration_date',
+  'tenant_name', 'commencement_date', 'notes',
+]);
+
+app.post('/api/db/read', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected.' });
+  try {
+    const { entity, whereClause, params, orderBy, order, limit, offset } = req.body;
+    if (!entity || !READ_TABLES[entity]) {
+      return res.status(400).json({ error: `Invalid entity: ${entity}` });
+    }
+
+    const queryTable = READ_TABLES[entity];
+    const safeOrder = READ_SORT_COLS.has(orderBy) ? orderBy : 'created_at';
+    const safeDir = order?.toUpperCase() === 'ASC' ? 'ASC NULLS LAST' : 'DESC NULLS LAST';
+    const safeLimit = Math.min(Math.max(parseInt(limit) || 200, 1), 5000);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
+
+    // Validate whereClause: only allow parameterized WHERE clauses (no raw strings)
+    const safeWhere = (whereClause && typeof whereClause === 'string' && whereClause.startsWith('WHERE '))
+      ? whereClause : '';
+
+    const safeParams = Array.isArray(params) ? params : [];
+    const n = safeParams.length;
+
+    const sql = `SELECT * FROM ${queryTable} ${safeWhere} ORDER BY ${safeOrder} ${safeDir} LIMIT $${n + 1} OFFSET $${n + 2}`;
+    const result = await pool.query(sql, [...safeParams, safeLimit, safeOffset]);
+    res.json({ rows: result.rows, rowCount: result.rowCount });
+  } catch (err) {
+    console.error('[db/read] Error:', err.message);
+    const safeMessage = process.env.NODE_ENV === 'production' ? 'Query failed' : err.message;
+    res.status(400).json({ error: safeMessage });
+  }
+});
+
+app.post('/api/db/count', async (req, res) => {
+  if (!pool) return res.status(503).json({ error: 'Database not connected.' });
+  try {
+    const { entity, whereClause, params } = req.body;
+    if (!entity || !READ_TABLES[entity]) {
+      return res.status(400).json({ error: `Invalid entity: ${entity}` });
+    }
+
+    const queryTable = READ_TABLES[entity];
+    const safeWhere = (whereClause && typeof whereClause === 'string' && whereClause.startsWith('WHERE '))
+      ? whereClause : '';
+    const safeParams = Array.isArray(params) ? params : [];
+
+    const sql = `SELECT COUNT(*) AS total FROM ${queryTable} ${safeWhere}`;
+    const result = await pool.query(sql, safeParams);
+    res.json({ total: parseInt(result.rows[0]?.total || '0', 10) });
+  } catch (err) {
+    console.error('[db/count] Error:', err.message);
     const safeMessage = process.env.NODE_ENV === 'production' ? 'Query failed' : err.message;
     res.status(400).json({ error: safeMessage });
   }

@@ -269,20 +269,17 @@ const TABLE_VIEW_MAP = { deals: 'deal_formulas', campaigns: 'campaigns_with_coun
 
 export async function queryWithFilters(table, { whereClause = '', params = [], orderBy, order, limit = 200, offset = 0 } = {}) {
   if (!VALID_VIEW_TABLES.has(table)) throw new Error(`Invalid table: ${table}`);
-  const queryTable = TABLE_VIEW_MAP[table] || table;
   const safeOrder = sanitizeCol(orderBy, table, 'created_at');
-  const safeDir = sanitizeDir(order);
-  const n = params.length;
-  const sql = `SELECT * FROM ${queryTable} ${whereClause} ORDER BY ${safeOrder} ${safeDir} LIMIT $${n + 1} OFFSET $${n + 2}`;
-  return query(sql, [...params, limit, offset]);
+  const safeDir = order?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
+  // Use safe /api/db/read endpoint (available to all authenticated users, not just admin)
+  return db.read(table, { whereClause, params, orderBy: safeOrder, order: safeDir, limit, offset });
 }
 
 export async function countWithFilters(table, { whereClause = '', params = [] } = {}) {
   if (!VALID_VIEW_TABLES.has(table)) throw new Error(`Invalid table: ${table}`);
-  const queryTable = TABLE_VIEW_MAP[table] || table;
-  const sql = `SELECT COUNT(*) AS total FROM ${queryTable} ${whereClause}`;
-  const result = await query(sql, params);
-  return parseInt(result.rows?.[0]?.total || '0', 10);
+  // Use safe /api/db/count endpoint (available to all authenticated users)
+  const result = await db.count(table, { whereClause, params });
+  return result.total || 0;
 }
 
 // ============================================================

@@ -120,6 +120,12 @@ export const db = {
     );
     return httpPost('/api/db/unlink', { junction, col1, id1, col2, id2 });
   },
+  read: (entity, { whereClause, params, orderBy, order, limit, offset } = {}) => {
+    return httpPost('/api/db/read', { entity, whereClause, params, orderBy, order, limit, offset });
+  },
+  count: (entity, { whereClause, params } = {}) => {
+    return httpPost('/api/db/count', { entity, whereClause, params });
+  },
   status: () => {
     if (isElectron()) return window.iecrm.db.status();
     return httpGet('/api/db/status');
