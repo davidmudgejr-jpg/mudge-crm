@@ -515,7 +515,6 @@ const READ_TABLES = {
 
 // Column whitelist for ORDER BY — prevents injection via sort column
 const READ_SORT_COLS = new Set([
-  ...Object.keys(ENTITY_TABLES || {}).length ? [] : [], // placeholder
   'created_at', 'modified', 'last_modified', 'updated_at', 'date',
   'property_address', 'property_name', 'city', 'county', 'state', 'zip',
   'rba', 'land_area_ac', 'property_type', 'building_class', 'year_built',
