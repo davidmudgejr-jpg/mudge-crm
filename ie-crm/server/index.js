@@ -633,7 +633,7 @@ const SERVER_ALLOWED_COLS = {
     'team_member', 'email_url', 'email_id',
   ]),
   campaigns: new Set([
-    'name', 'status', 'sent_date', 'subject', 'body', 'notes', 'tags',
+    'name', 'type', 'status', 'sent_date', 'subject', 'body', 'notes', 'tags',
   ]),
   action_items: new Set([
     'name', 'notes', 'notes_on_date', 'responsibility', 'high_priority',
