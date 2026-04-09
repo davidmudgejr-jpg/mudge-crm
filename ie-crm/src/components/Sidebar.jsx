@@ -77,10 +77,10 @@ export default function Sidebar({ onTableChange }) {
         const token = localStorage.getItem('crm-auth-token');
         const headers = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        const res = await fetch(`${API}/api/verification/queue?status=pending&limit=1`, { headers });
+        const res = await fetch(`${API}/api/ai/suggested-updates?status=pending&limit=1`, { headers });
         if (res.ok) {
           const data = await res.json();
-          setVerificationCount(data.total || 0);
+          setVerificationCount(data.status_counts?.pending || data.count || 0);
         }
       } catch { /* silently fail */ }
     };

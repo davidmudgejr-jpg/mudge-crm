@@ -133,7 +133,7 @@ function AppShell() {
             <Route path="/deals" element={<Deals onCountChange={setRowCount} />} />
             <Route path="/tpe" element={<TPE onCountChange={setRowCount} />} />
             <Route path="/tpe-enrichment" element={<TPEEnrichment />} />
-            <Route path="/verification" element={<VerificationQueue />} />
+            <Route path="/verification" element={<VerificationQueue onCountChange={setRowCount} />} />
             <Route path="/interactions" element={<Interactions onCountChange={setRowCount} />} />
             <Route path="/campaigns" element={<Campaigns onCountChange={setRowCount} />} />
             <Route path="/action-items" element={<ActionItems onCountChange={setRowCount} />} />
