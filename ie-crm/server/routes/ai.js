@@ -1865,7 +1865,7 @@ router.post('/suggested-updates', async (req, res) => {
   try {
     const {
       entity_type, entity_id, entity_name, field_name, field_label,
-      current_value, suggested_value, source_detail, confidence,
+      current_value, suggested_value, source, source_detail, confidence,
       data_tier, is_ownership_change, workflow_id, batch_id,
     } = req.body;
 
@@ -1873,15 +1873,26 @@ router.post('/suggested-updates', async (req, res) => {
       return res.status(400).json({ error: 'entity_type, entity_id, field_name, and suggested_value are required' });
     }
 
+    // Coerce confidence: string labels → int, numbers pass through, default 50
+    const CONFIDENCE_MAP = { high: 90, medium: 65, low: 40 };
+    let safeConfidence = 50;
+    if (typeof confidence === 'number') {
+      safeConfidence = Math.round(confidence);
+    } else if (typeof confidence === 'string') {
+      safeConfidence = CONFIDENCE_MAP[confidence.toLowerCase()] ?? (parseInt(confidence, 10) || 50);
+    }
+
+    const safeSource = source || req.agentName || 'enricher';
+
     // Dedup: don't create duplicate suggestions for same entity+field+value
     const existing = await pool.query(
       `SELECT id FROM suggested_updates
-       WHERE entity_type = $1 AND entity_id = $2 AND field_name = $3
+       WHERE entity_type = $1 AND entity_id = $2::uuid AND field_name = $3
          AND suggested_value = $4 AND status = 'pending'`,
       [entity_type, entity_id, field_name, suggested_value]
     );
     if (existing.rows.length > 0) {
-      return res.json({ ok: true, skipped: true, reason: 'Duplicate suggestion already pending', id: existing.rows[0].id });
+      return res.json({ success: true, skipped: true, reason: 'Duplicate suggestion already pending', id: existing.rows[0].id });
     }
 
     const result = await pool.query(
@@ -1889,20 +1900,21 @@ router.post('/suggested-updates', async (req, res) => {
          (entity_type, entity_id, entity_name, field_name, field_label,
           current_value, suggested_value, source, source_detail, confidence,
           data_tier, is_ownership_change, agent_name, workflow_id, batch_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+       VALUES ($1, $2::uuid, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
        RETURNING *`,
       [
         entity_type, entity_id, entity_name || null, field_name, field_label || field_name,
-        current_value || null, suggested_value, req.agentName || 'enricher', source_detail || null,
-        confidence || 50, data_tier || 'bronze', is_ownership_change || false,
-        req.agentName || 'enricher', workflow_id || null, batch_id || null,
+        current_value || null, suggested_value, safeSource, source_detail || null,
+        safeConfidence, data_tier || 'bronze', is_ownership_change || false,
+        req.agentName || safeSource, workflow_id || null, batch_id || null,
       ]
     );
 
-    res.json({ ok: true, suggestion: result.rows[0] });
+    res.json({ success: true, id: result.rows[0].id, suggestion: result.rows[0] });
   } catch (err) {
     console.error('[AI API] POST /suggested-updates error:', err.message);
-    res.status(500).json({ error: 'Failed to submit suggested update' });
+    const detail = process.env.NODE_ENV === 'production' ? undefined : err.message;
+    res.status(500).json({ error: 'Failed to submit suggested update', detail });
   }
 });
 
