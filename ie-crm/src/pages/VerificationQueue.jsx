@@ -59,17 +59,40 @@ function formatTimeAgo(dateStr) {
 // ── Suggestion Card ─────────────────────────────────────────
 function SuggestionCard({ item, onReview }) {
   const [reviewing, setReviewing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editValue, setEditValue] = useState(item.suggested_value);
   const isPending = item.status === 'pending';
   const badge = ENTITY_BADGES[item.entity_type] || { label: item.entity_type, cls: 'bg-crm-hover text-crm-muted' };
 
-  const handleReview = async (status) => {
+  const handleApproveClick = () => {
+    setEditValue(item.suggested_value);
+    setEditing(true);
+  };
+
+  const handleConfirm = async () => {
     setReviewing(true);
-    await onReview(item.id, status);
+    await onReview(item.id, 'accepted', editValue);
+    setReviewing(false);
+    setEditing(false);
+  };
+
+  const handleReject = async () => {
+    setReviewing(true);
+    await onReview(item.id, 'rejected');
     setReviewing(false);
   };
 
+  const handleCancel = () => {
+    setEditing(false);
+    setEditValue(item.suggested_value);
+  };
+
+  const wasEdited = item.updated_data?.applied_value && item.updated_data.applied_value !== item.updated_data.original_suggestion;
+
   return (
-    <div className="rounded-xl border border-crm-border/50 bg-crm-card/60 hover:bg-crm-card hover:border-crm-border transition-all duration-200 px-4 py-3">
+    <div className={`rounded-xl border transition-all duration-200 px-4 py-3 ${
+      editing ? 'border-crm-accent/40 bg-crm-card shadow-lg' : 'border-crm-border/50 bg-crm-card/60 hover:bg-crm-card hover:border-crm-border'
+    }`}>
       <div className="flex items-center gap-3">
         {/* Entity type badge */}
         <span className={`text-[10px] px-2 py-0.5 rounded-full border flex-shrink-0 ${badge.cls}`}>
@@ -95,6 +118,16 @@ function SuggestionCard({ item, onReview }) {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
             </svg>
             <span className="text-green-400 text-xs font-mono font-medium truncate">{item.suggested_value}</span>
+            {/* Show applied value if it was edited */}
+            {wasEdited && (
+              <>
+                <svg className="w-3 h-3 text-purple-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                </svg>
+                <span className="text-purple-400 text-xs font-mono font-medium truncate">{item.updated_data.applied_value}</span>
+                <span className="text-[10px] text-purple-400/60 italic">(edited)</span>
+              </>
+            )}
           </div>
         </div>
 
@@ -115,12 +148,11 @@ function SuggestionCard({ item, onReview }) {
         </div>
 
         {/* Status / Actions */}
-        {isPending ? (
+        {isPending && !editing ? (
           <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
             <button
-              onClick={() => handleReview('accepted')}
-              disabled={reviewing}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+              onClick={handleApproveClick}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -128,7 +160,7 @@ function SuggestionCard({ item, onReview }) {
               Approve
             </button>
             <button
-              onClick={() => handleReview('rejected')}
+              onClick={handleReject}
               disabled={reviewing}
               className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors text-xs font-medium disabled:opacity-50"
             >
@@ -138,20 +170,60 @@ function SuggestionCard({ item, onReview }) {
               Reject
             </button>
           </div>
-        ) : (
+        ) : !isPending ? (
           <div className="flex items-center gap-2 flex-shrink-0 ml-2">
             <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLORS[item.status] || 'bg-crm-hover text-crm-muted'}`}>
               {item.status}
             </span>
             <span className="text-[10px] text-crm-muted">{formatTimeAgo(item.reviewed_at || item.created_at)}</span>
           </div>
-        )}
+        ) : null}
 
         {/* Time */}
-        {isPending && (
+        {isPending && !editing && (
           <span className="text-crm-muted text-[10px] flex-shrink-0 w-14 text-right">{formatTimeAgo(item.created_at)}</span>
         )}
       </div>
+
+      {/* Inline edit row — appears when Approve is clicked */}
+      {editing && (
+        <div className="mt-3 pt-3 border-t border-crm-border/30 flex items-center gap-3">
+          <span className="text-crm-muted text-xs flex-shrink-0 w-24 text-right">{item.field_label || item.field_name}:</span>
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleConfirm();
+              if (e.key === 'Escape') handleCancel();
+            }}
+            className="flex-1 bg-crm-bg border border-crm-accent/40 rounded-lg px-3 py-1.5 text-sm text-crm-text font-mono focus:outline-none focus:border-crm-accent focus:ring-1 focus:ring-crm-accent/30"
+          />
+          {editValue !== item.suggested_value && (
+            <span className="text-[10px] text-purple-400 flex-shrink-0 italic">edited</span>
+          )}
+          <button
+            onClick={handleConfirm}
+            disabled={reviewing || !editValue.trim()}
+            className="flex items-center gap-1 px-4 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+          >
+            {reviewing ? (
+              <div className="w-3.5 h-3.5 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            )}
+            Confirm
+          </button>
+          <button
+            onClick={handleCancel}
+            className="px-3 py-1.5 rounded-lg bg-crm-hover text-crm-muted hover:text-crm-text transition-colors text-xs"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -188,16 +260,21 @@ export default function VerificationQueue({ onCountChange }) {
     fetchSuggestions();
   }, [fetchSuggestions]);
 
-  const handleReview = async (id, status) => {
+  const handleReview = async (id, status, appliedValue) => {
     try {
+      const body = { status };
+      // If accepting with a (possibly edited) value, send it
+      if (status === 'accepted' && appliedValue !== undefined) {
+        body.applied_value = appliedValue;
+      }
       const res = await fetch(`${API}/api/ai/suggested-updates/${id}`, {
         method: 'PATCH',
         headers: authHeaders(),
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (res.ok) {
-        addToast(status === 'accepted' ? 'Approved — value written to record' : 'Rejected', 'success');
+        addToast(status === 'accepted' ? 'Confirmed — value written to record' : 'Rejected', 'success');
         fetchSuggestions();
       } else {
         addToast(data.error || 'Failed to review', 'error');

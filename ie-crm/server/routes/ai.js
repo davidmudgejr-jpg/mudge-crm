@@ -1989,13 +1989,26 @@ router.patch('/suggested-updates/:id', async (req, res) => {
     }
     const s = suggestion.rows[0];
 
+    // If the reviewer provided an edited value, use that instead of the original suggestion
+    const { applied_value } = req.body;
+    const valueToWrite = (status === 'accepted' && applied_value !== undefined && applied_value !== null)
+      ? applied_value
+      : s.suggested_value;
+    const wasEdited = status === 'accepted' && applied_value !== undefined && applied_value !== null && applied_value !== s.suggested_value;
+
+    // Build updated_data if the reviewer edited the value
+    const updatedData = wasEdited
+      ? JSON.stringify({ applied_value: valueToWrite, original_suggestion: s.suggested_value })
+      : null;
+
     // Update the suggestion status
     const reviewerName = req.agentName || req.user?.display_name || 'admin';
     await pool.query(
       `UPDATE suggested_updates
-       SET status = $1, reviewed_by = $2, reviewed_at = NOW(), review_notes = $3, updated_at = NOW()
+       SET status = $1, reviewed_by = $2, reviewed_at = NOW(), review_notes = $3,
+           updated_data = COALESCE($5::jsonb, updated_data), updated_at = NOW()
        WHERE id = $4`,
-      [status, reviewerName, review_notes || null, id]
+      [status, reviewerName, review_notes || null, id, updatedData]
     );
 
     // If accepted, apply the change to the actual record
@@ -2011,7 +2024,7 @@ router.patch('/suggested-updates/:id', async (req, res) => {
         validateColumn(s.field_name, table);
         await pool.query(
           `UPDATE ${table} SET ${quoteIdentifier(s.field_name)} = $1 WHERE ${quoteIdentifier(idCol)} = $2`,
-          [s.suggested_value, s.entity_id]
+          [valueToWrite, s.entity_id]
         );
 
         // Mark as applied
