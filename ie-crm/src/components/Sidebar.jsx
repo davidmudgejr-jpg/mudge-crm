@@ -52,7 +52,7 @@ function NavButton({ item, isActive, onClick, verificationCount }) {
       <span className="text-[9px] mt-0.5 leading-none">{item.label}</span>
       {item.badge === 'verification' && verificationCount > 0 && (
         <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 flex items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold px-1">
-          {verificationCount > 9 ? '9+' : verificationCount}
+          {verificationCount}
         </span>
       )}
     </button>
