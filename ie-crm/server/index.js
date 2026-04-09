@@ -2006,33 +2006,80 @@ app.post('/api/ai/sandbox/contacts/promote', async (req, res) => {
       const sandbox = await client.query('SELECT * FROM sandbox_contacts WHERE id = $1 AND status = $2', [sandbox_id, 'approved']);
       if (sandbox.rows.length === 0) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'No approved sandbox contact with that ID' }); }
       const sc = sandbox.rows[0];
+
+      // Check for existing contact by email (sandbox has 'email', contacts has 'email_1')
       let existingId = null;
-      if (sc.email_1 || sc.email) {
-        const existing = await client.query('SELECT contact_id FROM contacts WHERE email_1 = $1', [sc.email_1 || sc.email]);
+      if (sc.email) {
+        const existing = await client.query('SELECT contact_id FROM contacts WHERE email_1 = $1', [sc.email]);
         if (existing.rows.length > 0) existingId = existing.rows[0].contact_id;
       }
+
+      const dataSource = sc.data_source || ('AI Agent: ' + (sc.agent_name || 'unknown'));
       let contactId;
+
       if (existingId) {
+        // Merge into existing contact — fill gaps, don't overwrite
         await client.query(
-          `UPDATE contacts SET phone_1 = COALESCE($1, phone_1), phone_2 = COALESCE($2, phone_2),
-            home_address = COALESCE($3, home_address), work_address = COALESCE($4, work_address),
-            title = COALESCE($5, title), linkedin = COALESCE($6, linkedin), last_modified = NOW()
-          WHERE contact_id = $7`,
-          [sc.phone_1, sc.phone_2, sc.home_address, sc.work_address, sc.title, sc.linkedin, existingId]
+          `UPDATE contacts SET
+            full_name = COALESCE(full_name, $1),
+            first_name = COALESCE(first_name, $2),
+            phone_1 = COALESCE($3, phone_1),
+            phone_2 = COALESCE($4, phone_2),
+            phone_3 = COALESCE($5, phone_3),
+            home_address = COALESCE($6, home_address),
+            work_address = COALESCE($7, work_address),
+            work_city = COALESCE($8, work_city),
+            work_state = COALESCE($9, work_state),
+            work_zip = COALESCE($10, work_zip),
+            title = COALESCE($11, title),
+            type = COALESCE($12, type),
+            linkedin = COALESCE($13, linkedin),
+            enrichment_status = 'enriched',
+            modified = NOW()
+          WHERE contact_id = $14`,
+          [sc.full_name, sc.first_name, sc.phone_1, sc.phone_2, sc.phone_3,
+           sc.home_address, sc.work_address, sc.work_city, sc.work_state, sc.work_zip,
+           sc.title, sc.type, sc.linkedin, existingId]
         );
         contactId = existingId;
       } else {
+        // Insert new contact
         const insert = await client.query(
-          `INSERT INTO contacts (full_name, first_name, email_1, email_2, email_3, phone_1, phone_2, phone_3,
-            home_address, work_address, work_city, work_state, work_zip, title, type, linkedin, data_source)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING contact_id`,
-          [sc.full_name, sc.first_name, sc.email_1 || sc.email, sc.email_2, sc.email_3, sc.phone_1, sc.phone_2, sc.phone_3,
-           sc.home_address, sc.work_address, sc.work_city, sc.work_state, sc.work_zip, sc.title, sc.type, sc.linkedin,
-           sc.data_source || 'AI Agent: ' + sc.agent_name]
+          `INSERT INTO contacts (
+            full_name, first_name, email_1, email_2, email_3,
+            phone_1, phone_2, phone_3,
+            home_address, work_address, work_city, work_state, work_zip,
+            title, type, linkedin, data_source, enrichment_status
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+          RETURNING contact_id`,
+          [sc.full_name, sc.first_name, sc.email, sc.email_2, sc.email_3,
+           sc.phone_1, sc.phone_2, sc.phone_3,
+           sc.home_address, sc.work_address, sc.work_city, sc.work_state, sc.work_zip,
+           sc.title, sc.type, sc.linkedin, dataSource, 'enriched']
         );
         contactId = insert.rows[0].contact_id;
       }
-      await client.query(`UPDATE sandbox_contacts SET status = 'promoted', promoted_at = NOW(), promoted_to_id = $1, updated_at = NOW() WHERE id = $2`, [contactId, sandbox_id]);
+
+      // Wire company relationship if company_name is present on the sandbox row
+      if (sc.company_name) {
+        const company = await client.query(
+          'SELECT company_id FROM companies WHERE company_name ILIKE $1 LIMIT 1',
+          [sc.company_name.trim()]
+        );
+        if (company.rows.length > 0) {
+          await client.query(
+            'INSERT INTO contact_companies (contact_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [contactId, company.rows[0].company_id]
+          );
+        }
+      }
+
+      // Mark sandbox row as promoted
+      await client.query(
+        `UPDATE sandbox_contacts SET status = 'promoted', promoted_at = NOW(), promoted_to_id = $1, updated_at = NOW() WHERE id = $2`,
+        [contactId, sandbox_id]
+      );
+
       await client.query('COMMIT');
       res.json({ success: true, contact_id: contactId, was_merge: !!existingId });
     } catch (err) { await client.query('ROLLBACK'); throw err; }
