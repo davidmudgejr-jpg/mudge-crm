@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { searchContacts, searchCompanies, searchProperties, searchDeals, searchCampaigns } from '../../api/database';
 import ENTITY_TYPES from '../../config/entityTypes';
+import QuickAddModal from './QuickAddModal';
 
 const SEARCH_FNS = {
   contact: searchContacts,
@@ -15,14 +16,15 @@ export default function LinkPickerModal({ entityType, onLink, onClose }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
+  const [showCreate, setShowCreate] = useState(false);
   const inputRef = useRef(null);
   const debounceRef = useRef(null);
   const meta = ENTITY_TYPES[entityType];
   const searchFn = SEARCH_FNS[entityType];
 
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (!showCreate) inputRef.current?.focus();
+  }, [showCreate]);
 
   const doSearch = useCallback(async (q) => {
     if (!q || q.length < 2 || !searchFn) { setResults([]); return; }
@@ -58,8 +60,20 @@ export default function LinkPickerModal({ entityType, onLink, onClose }) {
     if (e.key === 'ArrowDown') { e.preventDefault(); setHighlighted((h) => Math.min(h + 1, results.length - 1)); }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setHighlighted((h) => Math.max(h - 1, 0)); }
     else if (e.key === 'Enter' && results[highlighted]) { e.preventDefault(); handleSelect(results[highlighted]); }
-    else if (e.key === 'Escape') { onClose(); }
+    else if (e.key === 'Escape') { showCreate ? setShowCreate(false) : onClose(); }
   };
+
+  // When QuickAddModal creates a record, link it and close
+  const handleCreated = (newId) => {
+    if (newId) onLink(newId);
+  };
+
+  const noResults = !loading && term.length >= 2 && results.length === 0;
+
+  // If user switched to create mode, show QuickAddModal
+  if (showCreate) {
+    return <QuickAddModal entityType={entityType} onCreated={handleCreated} onClose={() => setShowCreate(false)} />;
+  }
 
   return (
     <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[15vh]" onClick={onClose}>
@@ -93,8 +107,19 @@ export default function LinkPickerModal({ entityType, onLink, onClose }) {
           {loading && (
             <p className="text-xs text-crm-muted px-2 py-3 text-center">Searching...</p>
           )}
-          {!loading && term.length >= 2 && results.length === 0 && (
-            <p className="text-xs text-crm-muted px-2 py-3 text-center">No results found</p>
+          {noResults && (
+            <div className="px-2 py-3 text-center">
+              <p className="text-xs text-crm-muted mb-2">No results found</p>
+              <button
+                onClick={() => setShowCreate(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-crm-accent hover:text-crm-accent-hover border border-crm-accent/30 hover:border-crm-accent/50 rounded-lg transition-colors"
+              >
+                <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                Create New {meta?.label || entityType}
+              </button>
+            </div>
           )}
           {!loading && results.map((row, i) => {
             const display = row[meta.displayCol] || 'Unnamed';
@@ -114,9 +139,17 @@ export default function LinkPickerModal({ entityType, onLink, onClose }) {
           })}
         </div>
 
-        {/* Footer hint */}
+        {/* Footer */}
         <div className="px-4 py-2 border-t border-crm-border flex justify-between items-center">
-          <span className="text-[10px] text-crm-muted">Type at least 2 characters to search</span>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="text-xs text-crm-accent hover:text-crm-accent-hover transition-colors flex items-center gap-1"
+          >
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Create New
+          </button>
           <button onClick={onClose} className="text-xs text-crm-muted hover:text-crm-text transition-colors">Cancel</button>
         </div>
       </div>
