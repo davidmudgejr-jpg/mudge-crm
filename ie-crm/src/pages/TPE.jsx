@@ -367,7 +367,7 @@ export default function TPE({ onCountChange }) {
         deleteView={view.deleteView}
         duplicateView={view.duplicateView}
         setDefault={view.setDefault}
-        onNewView={() => { view.resetToAll(); setNewViewModalOpen(true); }}
+        onNewView={() => setNewViewModalOpen(true)}
       />
       <FilterBar
         filters={view.filters}
