@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 
 /**
  * Infer the edit input type from a column's format string.
@@ -148,12 +149,32 @@ function SelectEditor({ value, options, onSave, onCancel, onChange }) {
 function MultiSelectEditor({ value, options, onSave, onCancel }) {
   const arr = Array.isArray(value) ? [...value] : (value ? [value] : []);
   const [selected, setSelected] = useState(arr);
-  const ref = useRef(null);
+  const anchorRef = useRef(null);
+  const dropdownRef = useRef(null);
+  const [pos, setPos] = useState(null);
+
+  // Position the dropdown relative to the anchor, using fixed positioning
+  // so it escapes any overflow:auto scroll containers.
+  useLayoutEffect(() => {
+    if (!anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const dropdownH = Math.min(options.length * 28 + 8, 192); // estimate
+    const openAbove = spaceBelow < dropdownH && rect.top > dropdownH;
+    setPos({
+      top: openAbove ? rect.top - dropdownH - 4 : rect.bottom + 4,
+      left: rect.left,
+      minWidth: Math.max(rect.width, 180),
+    });
+  }, [options.length]);
 
   // Close on outside click → save
   useEffect(() => {
     const handler = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) {
+      if (
+        anchorRef.current && !anchorRef.current.contains(e.target) &&
+        dropdownRef.current && !dropdownRef.current.contains(e.target)
+      ) {
         onSave(selected.length ? selected : null);
       }
     };
@@ -177,30 +198,39 @@ function MultiSelectEditor({ value, options, onSave, onCancel }) {
     });
   };
 
+  const dropdown = pos && createPortal(
+    <div
+      ref={dropdownRef}
+      className="fixed bg-crm-card border border-crm-border rounded-lg shadow-xl py-1 max-h-48 overflow-y-auto"
+      style={{ top: pos.top, left: pos.left, minWidth: pos.minWidth, zIndex: 9999 }}
+    >
+      {options.map((opt) => {
+        const checked = selected.includes(opt);
+        return (
+          <button
+            key={opt}
+            onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggle(opt); }}
+            className="w-full text-left px-3 py-1 text-xs text-crm-text hover:bg-crm-hover transition-colors flex items-center gap-2"
+          >
+            <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-crm-accent border-crm-accent' : 'border-crm-border'}`}>
+              {checked && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
+            </span>
+            {opt}
+          </button>
+        );
+      })}
+    </div>,
+    document.body
+  );
+
   return (
-    <div ref={ref} className="relative">
+    <div ref={anchorRef}>
       <div className="flex flex-wrap gap-0.5 min-h-[24px]">
         {selected.length ? selected.map((v, i) => (
           <span key={i} className="text-[10px] bg-crm-card border border-crm-border rounded px-1 py-0">{v}</span>
         )) : <span className="text-crm-muted text-xs">Select...</span>}
       </div>
-      <div className="absolute left-0 top-full mt-1 bg-crm-card border border-crm-border rounded-lg shadow-xl z-50 py-1 max-h-48 overflow-y-auto min-w-[180px]">
-        {options.map((opt) => {
-          const checked = selected.includes(opt);
-          return (
-            <button
-              key={opt}
-              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); toggle(opt); }}
-              className="w-full text-left px-3 py-1 text-xs text-crm-text hover:bg-crm-hover transition-colors flex items-center gap-2"
-            >
-              <span className={`w-3.5 h-3.5 rounded border flex items-center justify-center flex-shrink-0 ${checked ? 'bg-crm-accent border-crm-accent' : 'border-crm-border'}`}>
-                {checked && <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" /></svg>}
-              </span>
-              {opt}
-            </button>
-          );
-        })}
-      </div>
+      {dropdown}
     </div>
   );
 }

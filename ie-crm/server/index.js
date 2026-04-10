@@ -2679,7 +2679,7 @@ app.get('/api/council/channel-id', async (req, res) => {
 // ============================================================
 
 const VALID_VIEW_ENTITY_TYPES = new Set([
-  'properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns',
+  'properties', 'contacts', 'companies', 'deals', 'interactions', 'campaigns', 'tpe',
 ]);
 
 // GET /api/views — list views for an entity type

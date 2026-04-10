@@ -137,7 +137,18 @@ export default function TPE({ onCountChange }) {
   const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
   const [newViewModalOpen, setNewViewModalOpen] = useState(false);
 
-  const view = useViewEngine('tpe', ALL_COLUMNS, { defaultSort: { column: 'blended_priority', direction: 'DESC' } });
+  // Derive unique cities from data for select filter
+  const dynamicColumns = useMemo(() => {
+    const cities = [...new Set(rows.map(r => r.city).filter(Boolean))].sort();
+    return ALL_COLUMNS.map(col => {
+      if (col.key === 'city' && cities.length > 0) {
+        return { ...col, type: 'select', filterOptions: cities };
+      }
+      return col;
+    });
+  }, [rows]);
+
+  const view = useViewEngine('tpe', dynamicColumns, { defaultSort: { column: 'blended_priority', direction: 'DESC' } });
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('tpe', ALL_COLUMNS);
 
   const fetchData = useCallback(async () => {
@@ -371,7 +382,7 @@ export default function TPE({ onCountChange }) {
       <FilterBuilder
         isOpen={filterBuilderOpen}
         onClose={() => setFilterBuilderOpen(false)}
-        columnDefs={ALL_COLUMNS}
+        columnDefs={dynamicColumns}
         initialFilters={view.filters}
         initialLogic={view.filterLogic}
         onApply={(filters, logic) => view.updateFilters(filters, logic)}
@@ -383,7 +394,7 @@ export default function TPE({ onCountChange }) {
         filters={view.filters}
         filterLogic={view.filterLogic}
         sort={view.sort}
-        columnDefs={ALL_COLUMNS}
+        columnDefs={dynamicColumns}
         visibleColumnKeys={view.visibleColumnKeys}
         onOpenFilterBuilder={() => { setFilterBuilderOpen(true); }}
       />
