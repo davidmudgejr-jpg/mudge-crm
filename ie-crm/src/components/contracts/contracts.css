@@ -1,10 +1,5 @@
 /* AIR CRE Contracts — Document Preview Styles */
 
-/* Zoom container — scales the entire document while maintaining layout */
-.air-zoom-container {
-  /* transform + width set inline by React based on zoom level */
-}
-
 /* Document container — single column of pages */
 .air-document {
   display: flex;
@@ -129,15 +124,6 @@
   text-decoration-color: #0000FF;
 }
 
-/* User-added text — AIR CRE convention: red, bold, larger (Georgia 16pt).
-   Text added by users during negotiations appears in red to distinguish from boilerplate. */
-.air-added-text {
-  color: #FF0000;
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 16px;
-  font-weight: bold;
-}
-
 /* Editable field (user-entered data) */
 .air-field-editable {
   font-family: 'Courier New', Courier, monospace;
@@ -239,16 +225,6 @@
 .air-logo {
   max-height: 48px;
   max-width: 200px;
-}
-
-/* Read-only range (non-editable boilerplate) */
-.air-readonly-range {
-  user-select: text;
-}
-
-/* Page break for PDF export */
-.air-page-break {
-  page-break-after: always;
 }
 
 /* Print styles */

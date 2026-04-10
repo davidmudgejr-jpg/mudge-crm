@@ -157,22 +157,6 @@
 .light-mode .text-crm-muted\/40 { color: rgba(110,110,115,0.55) !important; }
 .light-mode .text-crm-muted\/30 { color: rgba(110,110,115,0.45) !important; }
 
-/* Light mode color overrides for hardcoded Tailwind utilities (class-based only) */
-.light-mode .text-emerald-400 { color: #059669 !important; }
-.light-mode .text-red-400 { color: #dc2626 !important; }
-.light-mode .text-yellow-400 { color: #ca8a04 !important; }
-.light-mode .text-blue-400 { color: #2563eb !important; }
-.light-mode .text-purple-400 { color: #9333ea !important; }
-.light-mode .text-indigo-400 { color: #4f46e5 !important; }
-.light-mode .text-orange-400 { color: #ea580c !important; }
-.light-mode .text-cyan-400 { color: #0891b2 !important; }
-.light-mode .text-pink-400 { color: #db2777 !important; }
-.light-mode .text-green-400 { color: #16a34a !important; }
-.light-mode .text-emerald-300 { color: #10b981 !important; }
-.light-mode .text-red-300 { color: #ef4444 !important; }
-.light-mode .text-blue-300 { color: #3b82f6 !important; }
-.light-mode .bg-crm-sidebar { box-shadow: 1px 0 0 var(--crm-border); }
-
 /* ============================================================
    DEVELOPER MODE: VS Code Dark+ inspired theme
    Activated via the { } toggle in the sidebar (dark mode only).
@@ -247,12 +231,6 @@ body {
   box-shadow: inset 0 0 0 1px rgba(255,255,255,0.3);
 }
 
-.glass-panel {
-  backdrop-filter: blur(60px) saturate(180%) brightness(1.02);
-  -webkit-backdrop-filter: blur(60px) saturate(180%) brightness(1.02);
-  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.2);
-}
-
 .glass-modal {
   backdrop-filter: blur(60px) saturate(220%) brightness(1.15);
   -webkit-backdrop-filter: blur(60px) saturate(220%) brightness(1.15);
@@ -271,20 +249,6 @@ body {
 .glass-toast {
   backdrop-filter: blur(30px) saturate(150%);
   -webkit-backdrop-filter: blur(30px) saturate(150%);
-}
-
-/* macOS-style input utilities */
-.macos-input {
-  border-radius: 6px;
-  border: 1px solid var(--crm-border);
-  background: rgba(0,0,0,0.05);
-  box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
-}
-
-.macos-input:focus {
-  outline: none;
-  box-shadow: 0 0 0 3px rgba(0,122,255,0.3), inset 0 1px 2px rgba(0,0,0,0.06);
-  border-color: rgba(0,122,255,0.5);
 }
 
 /* Drag region for titlebar */
@@ -400,16 +364,3 @@ input[type="checkbox"].rounded:checked::after {
   50% { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
 }
 
-.knowledge-graph-container {
-  background: var(--crm-bg);
-  width: 100%;
-  height: 100%;
-}
-
-/* Knowledge type badge colors */
-.knowledge-badge-contact { background: var(--knowledge-contact); color: white; }
-.knowledge-badge-company { background: var(--knowledge-company); color: white; }
-.knowledge-badge-property { background: var(--knowledge-property); color: #1a1a1a; }
-.knowledge-badge-deal { background: var(--knowledge-deal); color: white; }
-.knowledge-badge-market { background: var(--knowledge-market); color: white; }
-.knowledge-badge-decision { background: var(--knowledge-decision); color: white; }

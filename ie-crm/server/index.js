@@ -1121,34 +1121,6 @@ app.get('/api/ai/status', async (_req, res) => {
   if (!auth) return res.json({ status: 'not_configured', configured: false, message: 'ANTHROPIC_API_KEY not set' });
 
   return res.json({ status: 'connected', configured: true, model: AI_MODEL, auth: auth.type });
-
-  /* Legacy validation code — kept for reference but disabled to avoid unnecessary API calls
-  try {
-    const response = await fetch(ANTHROPIC_API_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: AI_MODEL,
-        max_tokens: 10,
-        messages: [{ role: 'user', content: 'ping' }],
-      }),
-    });
-
-    if (response.ok) {
-      res.json({ status: 'connected', configured: true, model: AI_MODEL });
-    } else {
-      const data = await response.json().catch(() => ({}));
-      const err = handleAnthropicError(response.status, data);
-      res.json({ status: 'error', message: err.message });
-    }
-  } catch (err) {
-    res.json({ status: 'error', message: err.message });
-  }
-  */
 });
 
 // ============================================================
