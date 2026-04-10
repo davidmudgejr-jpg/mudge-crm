@@ -1,9 +1,14 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { updateProperty } from '../api/database';
 import useColumnVisibility from '../hooks/useColumnVisibility';
+import useViewEngine from '../hooks/useViewEngine';
 import CrmTable from '../components/shared/CrmTable';
 import ColumnToggleMenu from '../components/shared/ColumnToggleMenu';
 import GroupByButton from '../components/shared/GroupByButton';
+import ViewBar from '../components/shared/ViewBar';
+import FilterBar from '../components/shared/FilterBar';
+import FilterBuilder from '../components/shared/FilterBuilder';
+import NewViewModal from '../components/shared/NewViewModal';
 import EmptyState from '../components/shared/EmptyState';
 import { useToast } from '../components/shared/Toast';
 import ExportPdfModal from '../components/shared/ExportPdfModal';
@@ -27,17 +32,52 @@ function formatCompactCurrency(val) {
   return '—';
 }
 
+// Client-side filter evaluator — applies useViewEngine filter conditions to in-memory rows
+function evaluateCondition(row, cond) {
+  const raw = row[cond.column];
+  const op = cond.operator;
+  if (op === 'is_empty') return raw == null || raw === '';
+  if (op === 'is_not_empty') return raw != null && raw !== '';
+  const isNum = typeof cond.value === 'number' || (typeof cond.value === 'string' && !isNaN(Number(cond.value)));
+  const val = isNum ? Number(raw) : (raw || '').toString().toLowerCase();
+  const target = isNum ? Number(cond.value) : (cond.value || '').toString().toLowerCase();
+  switch (op) {
+    case 'equals': return val === target;
+    case 'not_equals': return val !== target;
+    case 'contains': return (raw || '').toString().toLowerCase().includes(target);
+    case 'gt': return Number(raw) > Number(cond.value);
+    case 'gte': return Number(raw) >= Number(cond.value);
+    case 'lt': return Number(raw) < Number(cond.value);
+    case 'lte': return Number(raw) <= Number(cond.value);
+    case 'between': {
+      const n = Number(raw);
+      const [lo, hi] = Array.isArray(cond.value) ? cond.value.map(Number) : [0, 0];
+      return n >= lo && n <= hi;
+    }
+    case 'in': return Array.isArray(cond.value) && cond.value.some(v => (raw || '').toString().toLowerCase() === v.toString().toLowerCase());
+    default: return true;
+  }
+}
+function applyClientFilters(rows, filters, logic = 'AND') {
+  if (!filters || filters.length === 0) return rows;
+  return rows.filter(row =>
+    logic === 'AND'
+      ? filters.every(c => evaluateCondition(row, c))
+      : filters.some(c => evaluateCondition(row, c))
+  );
+}
+
 const ALL_COLUMNS = [
   { key: 'rank', label: '#', defaultWidth: 45, editable: false,
     renderCell: (_, row, idx) => <span className="text-crm-muted text-xs tabular-nums">{idx + 1}</span>,
   },
-  { key: 'address', label: 'Address', defaultWidth: 200, editable: false },
-  { key: 'city', label: 'City', defaultWidth: 100, editable: false },
-  { key: 'property_type', label: 'Type', defaultWidth: 100, editable: false },
-  { key: 'tpe_tier', label: 'Tier', defaultWidth: 60, editable: false,
+  { key: 'address', label: 'Address', defaultWidth: 200, editable: false, type: 'text', filterable: true },
+  { key: 'city', label: 'City', defaultWidth: 100, editable: false, type: 'text', filterable: true },
+  { key: 'property_type', label: 'Type', defaultWidth: 100, editable: false, type: 'select', filterable: true, filterOptions: ['Office', 'Retail', 'Industrial', 'Multifamily', 'Land', 'Mixed-Use', 'Special Purpose'] },
+  { key: 'tpe_tier', label: 'Tier', defaultWidth: 60, editable: false, type: 'select', filterable: true, filterOptions: ['A', 'B', 'C', 'D'],
     renderCell: (val) => <TierBadge tier={val || 'C'} />,
   },
-  { key: 'blended_priority', label: 'Score', defaultWidth: 80, editable: false,
+  { key: 'blended_priority', label: 'Score', defaultWidth: 80, editable: false, type: 'number', filterable: true,
     renderCell: (val) => {
       const n = parseFloat(val) || 0;
       const color = n >= 70 ? 'bg-emerald-500' : n >= 40 ? 'bg-yellow-500' : 'bg-zinc-500';
@@ -51,7 +91,7 @@ const ALL_COLUMNS = [
       );
     },
   },
-  { key: 'call_reason', label: 'Call Reason', defaultWidth: 280, editable: false },
+  { key: 'call_reason', label: 'Call Reason', defaultWidth: 280, editable: false, type: 'text', filterable: true },
   { key: 'est_commission', label: 'Est. Commission', defaultWidth: 110, editable: false,
     renderCell: (_, row) => {
       const sale = parseFloat(row.sale_commission_est) || 0;
@@ -60,28 +100,28 @@ const ALL_COLUMNS = [
       return <span className="text-xs font-medium text-crm-success">{formatCompactCurrency(Math.max(sale, lease) * mult)}</span>;
     },
   },
-  { key: 'lease_expiration', label: 'Lease Exp.', defaultWidth: 100, format: 'date', editable: false },
-  { key: 'owner_name', label: 'Owner', defaultWidth: 140, editable: false },
-  { key: 'owner_call_status', label: 'Call Status', defaultWidth: 110,
-    editType: 'select', editOptions: CALL_STATUS_OPTIONS,
+  { key: 'lease_expiration', label: 'Lease Exp.', defaultWidth: 100, type: 'date', filterable: true, format: 'date', editable: false },
+  { key: 'owner_name', label: 'Owner', defaultWidth: 140, editable: false, type: 'text', filterable: true },
+  { key: 'owner_call_status', label: 'Call Status', defaultWidth: 110, type: 'select', filterable: true,
+    editType: 'select', editOptions: CALL_STATUS_OPTIONS, filterOptions: CALL_STATUS_OPTIONS,
   },
   // Hidden by default
-  { key: 'lease_score', label: 'Lease Score', defaultWidth: 80, format: 'number', editable: false, defaultVisible: false },
-  { key: 'ownership_score', label: 'Ownership Score', defaultWidth: 90, format: 'number', editable: false, defaultVisible: false },
-  { key: 'age_score', label: 'Age Score', defaultWidth: 75, format: 'number', editable: false, defaultVisible: false },
-  { key: 'growth_score', label: 'Growth Score', defaultWidth: 85, format: 'number', editable: false, defaultVisible: false },
-  { key: 'stress_score', label: 'Stress Score', defaultWidth: 85, format: 'number', editable: false, defaultVisible: false },
-  { key: 'maturity_boost', label: 'Maturity Boost', defaultWidth: 90, format: 'number', editable: false, defaultVisible: false },
-  { key: 'distress_score', label: 'Distress Score', defaultWidth: 90, format: 'number', editable: false, defaultVisible: false },
-  { key: 'distress_type', label: 'Distress Type', defaultWidth: 100, editable: false, defaultVisible: false },
-  { key: 'rba', label: 'Bldg SF', defaultWidth: 80, format: 'number', editable: false, defaultVisible: false },
-  { key: 'year_built', label: 'Year Built', defaultWidth: 70, format: 'number', editable: false, defaultVisible: false },
-  { key: 'costar_star_rating', label: 'CoStar Rating', defaultWidth: 80, editable: false, defaultVisible: false },
-  { key: 'maturity_date', label: 'Maturity Date', defaultWidth: 100, format: 'date', editable: false, defaultVisible: false },
-  { key: 'tpe_score', label: 'TPE Score', defaultWidth: 75, format: 'number', editable: false, defaultVisible: false },
-  { key: 'ecv_score', label: 'ECV Score', defaultWidth: 75, format: 'number', editable: false, defaultVisible: false },
-  { key: 'owner_entity_type', label: 'Entity Type', defaultWidth: 100, editable: false, defaultVisible: false },
-  { key: 'tenant_call_status', label: 'Tenant Status', defaultWidth: 100, editable: false, defaultVisible: false },
+  { key: 'lease_score', label: 'Lease Score', defaultWidth: 80, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'ownership_score', label: 'Ownership Score', defaultWidth: 90, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'age_score', label: 'Age Score', defaultWidth: 75, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'growth_score', label: 'Growth Score', defaultWidth: 85, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'stress_score', label: 'Stress Score', defaultWidth: 85, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'maturity_boost', label: 'Maturity Boost', defaultWidth: 90, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'distress_score', label: 'Distress Score', defaultWidth: 90, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'distress_type', label: 'Distress Type', defaultWidth: 100, type: 'text', filterable: true, editable: false, defaultVisible: false },
+  { key: 'rba', label: 'Bldg SF', defaultWidth: 80, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'year_built', label: 'Year Built', defaultWidth: 70, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'costar_star_rating', label: 'CoStar Rating', defaultWidth: 80, type: 'number', filterable: true, editable: false, defaultVisible: false },
+  { key: 'maturity_date', label: 'Maturity Date', defaultWidth: 100, type: 'date', filterable: true, format: 'date', editable: false, defaultVisible: false },
+  { key: 'tpe_score', label: 'TPE Score', defaultWidth: 75, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'ecv_score', label: 'ECV Score', defaultWidth: 75, type: 'number', filterable: true, format: 'number', editable: false, defaultVisible: false },
+  { key: 'owner_entity_type', label: 'Entity Type', defaultWidth: 100, type: 'text', filterable: true, editable: false, defaultVisible: false },
+  { key: 'tenant_call_status', label: 'Tenant Status', defaultWidth: 100, type: 'select', filterable: true, filterOptions: CALL_STATUS_OPTIONS, editable: false, defaultVisible: false },
 ];
 
 export default function TPE({ onCountChange }) {
@@ -90,14 +130,14 @@ export default function TPE({ onCountChange }) {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState(null);
-  const [orderBy, setOrderBy] = useState('blended_priority');
-  const [order, setOrder] = useState('DESC');
   const [detailId, setDetailId] = useState(null);
   const [showTune, setShowTune] = useState(false);
   const [selected, setSelected] = useState(new Set());
-  const [groupByColumn, setGroupByColumn] = useState(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [filterBuilderOpen, setFilterBuilderOpen] = useState(false);
+  const [newViewModalOpen, setNewViewModalOpen] = useState(false);
 
+  const view = useViewEngine('tpe', ALL_COLUMNS, { defaultSort: { column: 'blended_priority', direction: 'DESC' } });
   const { visibleColumns, visibleKeys, toggleColumn, showAll, hideAll, resetDefaults, renameColumn } = useColumnVisibility('tpe', ALL_COLUMNS);
 
   const fetchData = useCallback(async () => {
@@ -122,9 +162,13 @@ export default function TPE({ onCountChange }) {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  // Client-side filtering
+  // Client-side filtering: view engine filters + tier + search
   const filteredRows = useMemo(() => {
     let filtered = rows;
+    // Apply view engine filters client-side
+    if (view.filters?.length > 0) {
+      filtered = applyClientFilters(filtered, view.filters, view.filterLogic);
+    }
     if (tierFilter) {
       filtered = filtered.filter((r) => r.tpe_tier === tierFilter);
     }
@@ -144,10 +188,12 @@ export default function TPE({ onCountChange }) {
       );
     }
     return filtered;
-  }, [rows, tierFilter, search]);
+  }, [rows, view.filters, view.filterLogic, tierFilter, search]);
 
-  // Client-side sorting
+  // Client-side sorting using view engine sort
   const sortedRows = useMemo(() => {
+    const orderBy = view.sort.column;
+    const order = view.sort.direction;
     if (!orderBy) return filteredRows;
     return [...filteredRows].sort((a, b) => {
       let aVal = a[orderBy], bVal = b[orderBy];
@@ -163,16 +209,11 @@ export default function TPE({ onCountChange }) {
       if (aVal > bVal) return order === 'ASC' ? 1 : -1;
       return 0;
     });
-  }, [filteredRows, orderBy, order]);
+  }, [filteredRows, view.sort.column, view.sort.direction]);
 
   const handleSort = (key) => {
     if (key === 'rank' || key === 'est_commission') return; // Not sortable
-    if (orderBy === key) {
-      setOrder(order === 'ASC' ? 'DESC' : 'ASC');
-    } else {
-      setOrderBy(key);
-      setOrder(key === 'blended_priority' ? 'DESC' : 'ASC');
-    }
+    view.handleSort(key);
   };
 
   const handleCellSave = useCallback(async (rowId, field, value) => {
@@ -276,7 +317,7 @@ export default function TPE({ onCountChange }) {
             hideAll={hideAll}
             resetDefaults={resetDefaults}
           />
-          <GroupByButton columns={ALL_COLUMNS} groupByColumn={groupByColumn} onGroupByChange={setGroupByColumn} />
+          <GroupByButton columns={ALL_COLUMNS} groupByColumn={view.groupByColumn} onGroupByChange={view.updateGroupBy} />
 
           {selected.size > 0 && (
             <div className="flex items-center gap-1.5">
@@ -300,6 +341,53 @@ export default function TPE({ onCountChange }) {
         </div>
       </div>
 
+      <ViewBar
+        entityLabel="TPE"
+        views={view.views}
+        activeViewId={view.activeViewId}
+        isDirty={view.isDirty}
+        activeView={view.activeView}
+        filters={view.filters}
+        applyView={(id) => { setSearch(''); setTierFilter(null); view.applyView(id); }}
+        resetToAll={() => { setSearch(''); setTierFilter(null); view.resetToAll(); }}
+        saveView={view.saveView}
+        createNewView={view.createNewView}
+        renameView={view.renameView}
+        deleteView={view.deleteView}
+        duplicateView={view.duplicateView}
+        setDefault={view.setDefault}
+        onNewView={() => { view.resetToAll(); setNewViewModalOpen(true); }}
+      />
+      <FilterBar
+        filters={view.filters}
+        filterLogic={view.filterLogic}
+        updateFilters={view.updateFilters}
+        onAddFilter={() => setFilterBuilderOpen(true)}
+        totalCount={rows.length}
+        filteredCount={filteredRows.length}
+        activeViewId={view.activeViewId}
+        onSaveAsView={(name) => view.createNewView(name)}
+      />
+      <FilterBuilder
+        isOpen={filterBuilderOpen}
+        onClose={() => setFilterBuilderOpen(false)}
+        columnDefs={ALL_COLUMNS}
+        initialFilters={view.filters}
+        initialLogic={view.filterLogic}
+        onApply={(filters, logic) => view.updateFilters(filters, logic)}
+      />
+      <NewViewModal
+        isOpen={newViewModalOpen}
+        onClose={() => setNewViewModalOpen(false)}
+        onSave={(name) => view.createNewView(name)}
+        filters={view.filters}
+        filterLogic={view.filterLogic}
+        sort={view.sort}
+        columnDefs={ALL_COLUMNS}
+        visibleColumnKeys={view.visibleColumnKeys}
+        onOpenFilterBuilder={() => { setFilterBuilderOpen(true); }}
+      />
+
       {/* Dashboard Strip */}
       <DashboardStrip rows={filteredRows} onTierFilter={setTierFilter} activeTier={tierFilter} />
 
@@ -316,8 +404,8 @@ export default function TPE({ onCountChange }) {
             loading={loading}
             onRowClick={(row) => setDetailId(row.property_id)}
             onSort={handleSort}
-            orderBy={orderBy}
-            order={order}
+            orderBy={view.sort.column}
+            order={view.sort.direction}
             selected={selected}
             onToggleSelect={toggleSelect}
             onToggleAll={toggleAll}
@@ -328,10 +416,10 @@ export default function TPE({ onCountChange }) {
             onHideColumn={toggleColumn}
             emptyMessage={tierFilter ? `No ${tierFilter}-tier properties found` : 'No properties match your search'}
             emptySubMessage="Try adjusting your filters"
-            groupByColumn={groupByColumn}
+            groupByColumn={view.groupByColumn}
             groupOrders={{}}
             columnDefs={ALL_COLUMNS}
-            onGroupByColumn={setGroupByColumn}
+            onGroupByColumn={view.updateGroupBy}
           />
         )}
       </div>
