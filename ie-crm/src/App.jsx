@@ -24,7 +24,6 @@ const TPEEnrichment = lazy(() => import('./pages/TPEEnrichment'));
 const AIOps = lazy(() => import('./pages/AIOps'));
 const VerificationQueue = lazy(() => import('./pages/VerificationQueue'));
 const DedupReview = lazy(() => import('./pages/DedupReview'));
-const DataTrust = lazy(() => import('./pages/DataTrust'));
 const Contracts = lazy(() => import('./pages/Contracts'));
 const ContractEditor = lazy(() => import('./pages/ContractEditor'));
 const Knowledge = lazy(() => import('./pages/Knowledge'));
@@ -119,7 +118,6 @@ function AppShell() {
             <Route path="/ai-ops" element={<AIOps />} />
             <Route path="/import" element={<Import />} />
             <Route path="/dedup" element={<DedupReview onCountChange={setRowCount} />} />
-            <Route path="/data-trust" element={<DataTrust onCountChange={setRowCount} />} />
             <Route path="/contracts" element={<Contracts onCountChange={setRowCount} />} />
             <Route path="/contracts/:packageId" element={<ContractEditor />} />
             <Route path="/settings" element={<Settings />} />
