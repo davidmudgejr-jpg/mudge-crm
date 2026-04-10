@@ -22,7 +22,7 @@ export default function formatCell(value, format) {
 
     case 'currency': {
       const c = Number(value);
-      return isNaN(c) ? <span className="text-crm-muted">--</span> : `$${c.toLocaleString()}`;
+      return isNaN(c) ? <span className="text-crm-muted">--</span> : `$${c.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
     }
 
     case 'percent':
