@@ -1,4 +1,4 @@
-import React, { useState, useEffect, lazy, Suspense } from 'react';
+import React, { useState, lazy, Suspense } from 'react';
 import { HashRouter as Router, Routes, Route } from 'react-router-dom';
 
 // Opt into React Router v7 future flags to silence warnings
@@ -7,7 +7,6 @@ const routerFutureFlags = {
   v7_relativeSplatPath: true,
 };
 import Sidebar from './components/Sidebar';
-// ClaudePanel removed — Houston Direct in TeamChat replaces it
 
 // Lazy-loaded page routes — each becomes its own chunk, loaded on demand
 const Properties = lazy(() => import('./pages/Properties'));
@@ -28,8 +27,6 @@ const DedupReview = lazy(() => import('./pages/DedupReview'));
 const DataTrust = lazy(() => import('./pages/DataTrust'));
 const Contracts = lazy(() => import('./pages/Contracts'));
 const ContractEditor = lazy(() => import('./pages/ContractEditor'));
-const MobileChat = lazy(() => import('./pages/MobileChat'));
-const DesktopChat = lazy(() => import('./pages/DesktopChat'));
 const Knowledge = lazy(() => import('./pages/Knowledge'));
 
 // Lazy-loaded detail panels (only rendered inside slide-overs)
@@ -51,8 +48,6 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import Login from './pages/Login';
 import SlideOver, { SlideOverHeader } from './components/shared/SlideOver';
 import CommandPalette from './components/shared/CommandPalette';
-import TeamChat, { ChatToggleButton } from './components/TeamChat';
-import { fetchUnreadCount } from './hooks/useChat';
 
 const DETAIL_COMPONENTS = {
   property: PropertyDetail,
@@ -82,30 +77,12 @@ function SlideOverRenderer() {
 }
 
 function AppShell() {
-  // Claude panel removed — Houston Direct in TeamChat replaces it
   const [currentTable, setCurrentTable] = useState('properties');
   const [rowCount, setRowCount] = useState(0);
   const { devMode } = useDevMode();
   const { hasAnyPanel } = useSlideOver();
-  const { user } = useAuth();
 
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [chatUnread, setChatUnread] = useState(0);
-
-  // Poll unread chat count when chat is closed
-  useEffect(() => {
-    if (!user?.user_id || chatOpen) { setChatUnread(0); return; }
-    const poll = async () => {
-      try {
-        const { unread } = await fetchUnreadCount(user.user_id);
-        setChatUnread(unread);
-      } catch {}
-    };
-    poll();
-    const interval = setInterval(poll, 15000);
-    return () => clearInterval(interval);
-  }, [user?.user_id, chatOpen]);
 
   useKeyboardShortcuts({
     onNewRecord: () => { /* wired in Task 7 */ },
@@ -150,19 +127,11 @@ function AppShell() {
         </Suspense>
       </main>
 
-      {/* Claude Panel removed — Houston Direct in TeamChat replaces it */}
-
       {/* Nested SlideOver panels */}
       <SlideOverRenderer />
 
       {/* Command Palette */}
       <CommandPalette isOpen={commandPaletteOpen} onClose={() => setCommandPaletteOpen(false)} />
-
-      {/* Team Chat */}
-      <TeamChat isOpen={chatOpen} onClose={() => setChatOpen(false)} />
-      {!chatOpen && <ChatToggleButton onClick={() => setChatOpen(true)} unreadCount={chatUnread} />}
-
-      {/* Claude toggle button removed — Houston is in the Team Chat widget */}
     </div>
   );
 }
@@ -185,8 +154,6 @@ function AuthGate() {
       <ToastProvider>
         <SlideOverProvider>
           <Routes>
-            <Route path="/chat" element={<MobileChat />} />
-            <Route path="/houston" element={<DesktopChat />} />
             <Route path="*" element={<AppShell />} />
           </Routes>
         </SlideOverProvider>

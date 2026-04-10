@@ -12,7 +12,6 @@ const { Pool } = require('pg');
 const Anthropic = require('@anthropic-ai/sdk');
 const { Server: SocketServer } = require('socket.io');
 const multer = require('multer');
-const { initChat, registerChatRoutes, triggerCouncilHoustonResponse } = require('./services/chat');
 const { mountAiRoutes } = require('./routes/ai');
 const { mountVerificationRoutes } = require('./routes/verification');
 const { mountContractRoutes } = require('./routes/contracts');
@@ -303,7 +302,6 @@ app.post('/api/auth/change-password', authLimiter, requireAuth, async (req, res)
 mountAiRoutes(app, {
   getPool: () => pool,
   getIo: () => io,
-  getCouncilResponder: () => triggerCouncilHoustonResponse,
 });
 
 // Mount Verification Queue routes BEFORE requireAuth — has its own dual-auth (JWT or X-Agent-Key)
@@ -2537,11 +2535,6 @@ app.post('/api/council/message', async (req, res) => {
       io.to('council').emit('council:message:new', newMessage);
     }
 
-    // Trigger Houston Sonnet auto-response (async, don't block the response)
-    triggerCouncilHoustonResponse(newMessage).catch(err =>
-      console.error('[council/message] Houston auto-response error:', err.message)
-    );
-
     res.json({ ok: true, message: newMessage });
   } catch (err) {
     console.error('[council/message] Error:', err.message);
@@ -2867,210 +2860,6 @@ app.delete('/api/pdf-templates/:id', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
-
-// ============================================================
-// HOUSTON VOICE — ElevenLabs Conversational AI (Custom LLM)
-// ============================================================
-const { buildPrompt: buildHoustonPrompt } = require('./services/houstonRAG');
-
-// GET /api/houston/context — Pre-flight context for Houston dynamic variables
-app.get('/api/houston/context', async (req, res) => {
-  try {
-    const userId = req.user?.user_id;
-
-    // Parallel queries for speed
-    const [dealsRes, tasksRes, userRes] = await Promise.all([
-      pool.query(
-        `SELECT COUNT(*) AS count FROM deals WHERE status NOT IN ('Closed Won', 'Closed Lost', 'Dead')`
-      ),
-      pool.query(
-        `SELECT COUNT(*) AS count FROM action_items WHERE completed = false AND (due_date IS NULL OR due_date <= CURRENT_DATE + INTERVAL '1 day')`
-      ),
-      userId
-        ? pool.query('SELECT last_login FROM users WHERE user_id = $1', [userId])
-        : Promise.resolve({ rows: [] }),
-    ]);
-
-    // Time of day (Pacific)
-    const pt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
-    const hour = pt.getHours();
-    const timeOfDay = hour >= 5 && hour < 12 ? 'morning'
-      : hour >= 12 && hour < 17 ? 'afternoon'
-      : hour >= 17 && hour < 21 ? 'evening' : 'night';
-
-    res.json({
-      active_deal_count: parseInt(dealsRes.rows[0]?.count || '0'),
-      pending_tasks: parseInt(tasksRes.rows[0]?.count || '0'),
-      time_of_day: timeOfDay,
-      last_login: userRes.rows[0]?.last_login || null,
-    });
-  } catch (err) {
-    console.error('[houston] Context error:', err.message);
-    res.json({ active_deal_count: 0, pending_tasks: 0, time_of_day: 'unknown', last_login: null });
-  }
-});
-
-// GET /api/houston/signed-url — Get a temporary WebSocket URL from ElevenLabs
-app.get('/api/houston/signed-url', async (req, res) => {
-  try {
-    const agentId = process.env.ELEVENLABS_AGENT_ID;
-    if (!agentId) {
-      return res.status(500).json({ error: 'ElevenLabs agent not configured' });
-    }
-
-    const response = await fetch(
-      `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
-      { headers: { 'xi-api-key': process.env.ELEVENLABS_API_KEY } }
-    );
-
-    if (!response.ok) {
-      const body = await response.text();
-      console.error('[houston] Signed URL failed:', response.status, body);
-      return res.status(502).json({ error: 'Failed to get signed URL from ElevenLabs' });
-    }
-
-    const data = await response.json();
-    res.json({ url: data.signed_url });
-  } catch (err) {
-    console.error('[houston] Signed URL error:', err.message);
-    res.status(500).json({ error: 'Failed to generate signed URL' });
-  }
-});
-
-// Houston completions handler — shared between both route aliases
-async function houstonCompletions(req, res) {
-  try {
-    const { messages } = req.body;
-
-    if (!messages || !Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ error: 'Messages array is required' });
-    }
-    if (!anthropic) {
-      return res.status(503).json({ error: 'Claude not configured' });
-    }
-
-    // Extract latest user message for logging
-    const lastUserMsg = [...messages].reverse().find(m => m.role === 'user');
-    const message = typeof lastUserMsg?.content === 'string'
-      ? lastUserMsg.content
-      : lastUserMsg?.content?.map(c => c.text || '').join('') || '';
-
-    // Extract user identity from ElevenLabs custom_llm_extra_body
-    const userName = req.body.user_name || req.body.custom_llm_extra_body?.user_name || null;
-    console.log('[houston] ConvAI completions from', userName || 'unknown', ':', message.slice(0, 80));
-
-    // Build RAG system prompt with live CRM data + user personalization
-    const systemPrompt = await buildHoustonPrompt(pool, userName);
-
-    // Strip ElevenLabs' system message, keep user/assistant turns
-    const conversationMessages = messages
-      .filter(m => m.role !== 'system')
-      .map(m => ({
-        role: m.role,
-        content: typeof m.content === 'string'
-          ? m.content
-          : m.content?.map(c => c.text || '').join('') || '',
-      }));
-
-    // Stream Claude response in OpenAI SSE format
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
-
-    const chunkId = `chatcmpl-${Date.now()}`;
-    const created = Math.floor(Date.now() / 1000);
-    let isFirstChunk = true;
-
-    const stream = await anthropic.messages.stream({
-      model: 'claude-sonnet-4-20250514',
-      system: systemPrompt,
-      messages: conversationMessages,
-      max_tokens: 300,
-    });
-
-    let fullResponse = '';
-
-    for await (const event of stream) {
-      if (event.type === 'content_block_delta' && event.delta?.text) {
-        const text = event.delta.text;
-        fullResponse += text;
-
-        const delta = isFirstChunk
-          ? { role: 'assistant', content: text }
-          : { content: text };
-        isFirstChunk = false;
-
-        res.write(`data: ${JSON.stringify({
-          id: chunkId,
-          object: 'chat.completion.chunk',
-          created,
-          model: 'claude-sonnet-4-20250514',
-          choices: [{ index: 0, delta, finish_reason: null }],
-        })}\n\n`);
-      }
-    }
-
-    // Send stop chunk
-    res.write(`data: ${JSON.stringify({
-      id: chunkId,
-      object: 'chat.completion.chunk',
-      created,
-      model: 'claude-sonnet-4-20250514',
-      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-    })}\n\n`);
-    res.write('data: [DONE]\n\n');
-    res.end();
-
-    console.log('[houston] Response complete:', fullResponse.slice(0, 80));
-
-  } catch (err) {
-    console.error('[houston] Completions error:', err.message);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Chat completion failed' });
-    } else {
-      res.write(`data: ${JSON.stringify({
-        id: `chatcmpl-err-${Date.now()}`,
-        object: 'chat.completion.chunk',
-        choices: [{ delta: { content: '' }, index: 0, finish_reason: 'error' }],
-      })}\n\n`);
-      res.write('data: [DONE]\n\n');
-      res.end();
-    }
-  }
-}
-
-// POST /api/houston/completions — direct route
-app.post('/api/houston/completions', houstonCompletions);
-
-// POST /v1/chat/completions — OpenAI-compatible alias that ElevenLabs calls
-// ElevenLabs appends /chat/completions to the Server URL automatically
-// SECURITY: Requires either Agent API key or valid JWT — this is NOT under /api so requireAuth doesn't cover it
-app.post('/v1/chat/completions', (req, res, next) => {
-  // Check for agent key (ElevenLabs / external integrations)
-  const agentKey = req.headers['x-agent-key'] || req.headers['authorization']?.replace('Bearer ', '');
-  const validAgentKey = process.env.AGENT_API_KEY;
-  if (validAgentKey && agentKey === validAgentKey) {
-    return next();
-  }
-
-  // Check for JWT (browser-based calls)
-  const header = req.headers.authorization;
-  if (header && header.startsWith('Bearer ')) {
-    try {
-      const jwt = require('jsonwebtoken');
-      const { EFFECTIVE_JWT_SECRET } = require('./middleware/auth');
-      jwt.verify(header.slice(7), EFFECTIVE_JWT_SECRET);
-      return next();
-    } catch { /* invalid JWT, fall through */ }
-  }
-
-  return res.status(401).json({ error: 'Authentication required — provide X-Agent-Key or Bearer JWT' });
-}, houstonCompletions);
-
-// ============================================================
-// TEAM CHAT — REST endpoints + file upload
-// ============================================================
-registerChatRoutes(app);
 
 // POST /api/files/upload — Generic file upload (Vercel Blob + local fallback)
 // Query param: ?folder=deals|properties|chat|general (default: general)
@@ -4305,15 +4094,6 @@ app.get('*', (_req, res) => {
 // ============================================================
 initDatabase();
 initAnthropic();
-
-// Initialize Socket.io chat service (pool is created in initDatabase)
-setTimeout(() => {
-  if (pool) {
-    initChat(io, pool);
-  } else {
-    console.warn('[chat] No database pool — chat service not initialized');
-  }
-}, 1000);
 
 server.listen(PORT, () => {
   console.log(`[server] IE CRM API running on port ${PORT}`);
