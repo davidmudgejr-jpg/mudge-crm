@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react';
 
-export default function SelectFilter({ options, selected, onChange }) {
+export default function SelectFilter({ options, selected, onChange, labels }) {
   const [search, setSearch] = useState('');
+  const getLabel = (opt) => (labels && labels[opt]) || opt;
 
   const filtered = useMemo(() => {
     if (!search.trim()) return options;
     const q = search.toLowerCase();
-    return options.filter(opt => String(opt).toLowerCase().includes(q));
-  }, [options, search]);
+    return options.filter(opt => getLabel(opt).toLowerCase().includes(q));
+  }, [options, search, labels]);
 
   const selectAll = () => onChange([...filtered]);
   const clear = () => onChange([]);
@@ -48,7 +49,7 @@ export default function SelectFilter({ options, selected, onChange }) {
               onChange={() => toggle(opt)}
               className="accent-crm-accent [color-scheme:dark]"
             />
-            <span className="truncate">{opt}</span>
+            <span className="truncate">{getLabel(opt)}</span>
           </label>
         ))}
       </div>

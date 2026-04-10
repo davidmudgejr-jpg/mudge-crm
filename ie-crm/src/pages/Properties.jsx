@@ -37,6 +37,14 @@ const CONTACTED_OPTIONS = [
   'Doorknocked', 'BOV Sent', 'Offer Sent', 'Letter Sent', 'Met with Owner',
 ];
 
+const LISTING_STATUS_LABELS = { for_lease: 'For Lease', for_sale: 'For Sale', leased: 'Leased', sold: 'Sold' };
+const LISTING_STATUS_STYLES = {
+  for_lease: 'bg-gradient-to-r from-[#30D158] to-[#34C759] text-white shadow-[0_2px_6px_rgba(48,209,88,0.3)]',
+  for_sale:  'bg-gradient-to-r from-[#007AFF] to-[#5AC8FA] text-white shadow-[0_2px_6px_rgba(0,122,255,0.3)]',
+  leased:    'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
+  sold:      'bg-[rgba(142,142,147,0.2)] text-[#8e8e93]',
+};
+
 const ALL_COLUMNS = [
   // Default visible
   { key: 'property_address', label: 'Address', defaultWidth: 200, editable: false, type: 'text', filterable: true },
@@ -51,7 +59,30 @@ const ALL_COLUMNS = [
   { key: 'contacted', label: 'Contacted', defaultWidth: 120, format: 'tags', editType: 'multi-select', editOptions: CONTACTED_OPTIONS },
   { key: 'tags', label: 'Tags', defaultWidth: 120, format: 'tags', editType: 'tags' },
   // Market listing columns (AIR ingest + CoStar)
-  { key: 'listing_status', label: 'Listing Status', defaultWidth: 110, type: 'select', filterable: true, editType: 'select', editOptions: ['for_sale', 'for_lease', 'sold', 'leased'], filterOptions: ['for_sale', 'for_lease', 'sold', 'leased'] },
+  { key: 'listing_status', label: 'Listing Status', defaultWidth: 110, type: 'select', filterable: true, editType: 'select',
+    editOptions: ['for_sale', 'for_lease', 'sold', 'leased'],
+    filterOptions: ['for_sale', 'for_lease', 'sold', 'leased'],
+    filterLabels: LISTING_STATUS_LABELS,
+    renderCell: (val, row) => {
+      // Defensive: infer status from pricing columns when listing_status is NULL
+      let status = val;
+      let inferred = false;
+      if (!status && row) {
+        const leaseRate = parseFloat(row.listing_asking_lease_rate);
+        const salePrice = parseFloat(row.for_sale_price);
+        if (leaseRate > 0) { status = 'for_lease'; inferred = true; }
+        else if (salePrice > 0) { status = 'for_sale'; inferred = true; }
+      }
+      if (!status) return <span className="text-crm-muted">--</span>;
+      const label = LISTING_STATUS_LABELS[status] || status;
+      const style = LISTING_STATUS_STYLES[status] || 'bg-crm-border text-crm-muted';
+      return (
+        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${style}`} title={inferred ? 'Inferred from pricing data' : undefined}>
+          {label}
+        </span>
+      );
+    },
+  },
   { key: 'listing_asking_lease_rate', label: 'Asking Rate/SF/Mo', defaultWidth: 120, type: 'number', filterable: true, format: 'currency', editType: 'number' },
   // Hidden by default
   { key: 'property_name', label: 'Property Name', defaultWidth: 160, defaultVisible: false },

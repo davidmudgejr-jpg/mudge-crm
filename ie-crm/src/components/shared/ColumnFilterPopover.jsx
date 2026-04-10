@@ -166,6 +166,7 @@ export default function ColumnFilterPopover({
           options={column.filterOptions}
           selected={currentIn}
           onChange={handleSelectChange}
+          labels={column.filterLabels}
         />
       ) : isNumber ? (
         <NumberRangeFilter
