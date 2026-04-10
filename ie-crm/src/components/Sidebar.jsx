@@ -68,7 +68,7 @@ export default function Sidebar({ onTableChange }) {
     return opsRoutes.some(r => window.location.hash?.includes(r));
   });
 
-  // Fetch pending verification count
+  // Fetch pending verification count (suggested_updates + sandbox_contacts)
   useEffect(() => {
     const fetchCount = async () => {
       try {
@@ -76,11 +76,20 @@ export default function Sidebar({ onTableChange }) {
         const token = localStorage.getItem('crm-auth-token');
         const headers = {};
         if (token) headers['Authorization'] = `Bearer ${token}`;
-        const res = await fetch(`${API}/api/ai/suggested-updates?status=pending&limit=1`, { headers });
-        if (res.ok) {
-          const data = await res.json();
-          setVerificationCount(data.status_counts?.pending || data.count || 0);
+        const [suRes, scRes] = await Promise.all([
+          fetch(`${API}/api/ai/suggested-updates?status=pending&limit=1`, { headers }),
+          fetch(`${API}/api/sandbox-contacts?status=pending&limit=1`, { headers }),
+        ]);
+        let count = 0;
+        if (suRes.ok) {
+          const data = await suRes.json();
+          count += data.status_counts?.pending || 0;
         }
+        if (scRes.ok) {
+          const data = await scRes.json();
+          count += data.status_counts?.pending || 0;
+        }
+        setVerificationCount(count);
       } catch { /* silently fail */ }
     };
     fetchCount();

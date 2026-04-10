@@ -20,6 +20,8 @@ const STATUS_TABS = [
 const STATUS_COLORS = {
   pending: 'bg-yellow-500/15 text-yellow-400 border border-yellow-500/30',
   accepted: 'bg-green-500/15 text-green-400 border border-green-500/30',
+  approved: 'bg-green-500/15 text-green-400 border border-green-500/30',
+  promoted: 'bg-green-500/15 text-green-400 border border-green-500/30',
   rejected: 'bg-red-500/15 text-red-400 border border-red-500/30',
 };
 
@@ -56,7 +58,7 @@ function formatTimeAgo(dateStr) {
   return `${days}d ago`;
 }
 
-// ── Suggestion Card ─────────────────────────────────────────
+// ── Suggestion Card (Update Existing) ───────────────────────
 function SuggestionCard({ item, onReview }) {
   const [reviewing, setReviewing] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -94,6 +96,11 @@ function SuggestionCard({ item, onReview }) {
       editing ? 'border-crm-accent/40 bg-crm-card shadow-lg' : 'border-crm-border/50 bg-crm-card/60 hover:bg-crm-card hover:border-crm-border'
     }`}>
       <div className="flex items-center gap-3">
+        {/* Source type badge */}
+        <span className="text-[10px] px-2 py-0.5 rounded-full border flex-shrink-0 bg-blue-500/10 text-blue-400 border-blue-500/20">
+          Update
+        </span>
+
         {/* Entity type badge */}
         <span className={`text-[10px] px-2 py-0.5 rounded-full border flex-shrink-0 ${badge.cls}`}>
           {badge.label}
@@ -103,11 +110,11 @@ function SuggestionCard({ item, onReview }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <span className="text-crm-text font-medium truncate">{item.entity_name || 'Unknown'}</span>
-            <span className="text-crm-muted text-xs">›</span>
+            <span className="text-crm-muted text-xs">&rsaquo;</span>
             <span className="text-crm-muted text-xs truncate">{item.field_label || item.field_name}</span>
           </div>
 
-          {/* Current → Suggested */}
+          {/* Current -> Suggested */}
           <div className="flex items-center gap-2 mt-1">
             {item.current_value ? (
               <span className="text-crm-muted text-xs font-mono line-through truncate max-w-[200px]">{item.current_value}</span>
@@ -228,27 +235,271 @@ function SuggestionCard({ item, onReview }) {
   );
 }
 
+// ── Sandbox Contact Card (New Contact) ──────────────────────
+function SandboxContactCard({ item, onReview }) {
+  const [reviewing, setReviewing] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editFields, setEditFields] = useState({
+    full_name: item.full_name || '',
+    email: item.email || '',
+    title: item.title || '',
+  });
+  const isPending = item.status === 'pending';
+  const confidence = item.confidence_score ?? 0;
+
+  const handleApproveClick = () => {
+    setEditFields({
+      full_name: item.full_name || '',
+      email: item.email || '',
+      title: item.title || '',
+    });
+    setEditing(true);
+  };
+
+  const handleConfirm = async () => {
+    setReviewing(true);
+    // Only send changed fields
+    const changes = {};
+    if (editFields.full_name !== (item.full_name || '')) changes.full_name = editFields.full_name;
+    if (editFields.email !== (item.email || '')) changes.email = editFields.email;
+    if (editFields.title !== (item.title || '')) changes.title = editFields.title;
+    await onReview(item.id, 'approved', Object.keys(changes).length > 0 ? changes : null);
+    setReviewing(false);
+    setEditing(false);
+  };
+
+  const handleReject = async () => {
+    setReviewing(true);
+    await onReview(item.id, 'rejected');
+    setReviewing(false);
+  };
+
+  const handleCancel = () => {
+    setEditing(false);
+    setEditFields({
+      full_name: item.full_name || '',
+      email: item.email || '',
+      title: item.title || '',
+    });
+  };
+
+  const hasEdits =
+    editFields.full_name !== (item.full_name || '') ||
+    editFields.email !== (item.email || '') ||
+    editFields.title !== (item.title || '');
+
+  // Normalize status label for display
+  const displayStatus = item.status === 'approved' || item.status === 'promoted' ? 'accepted' : item.status;
+
+  return (
+    <div className={`rounded-xl border transition-all duration-200 px-4 py-3 ${
+      editing ? 'border-green-500/40 bg-crm-card shadow-lg' : 'border-crm-border/50 bg-crm-card/60 hover:bg-crm-card hover:border-crm-border'
+    }`}>
+      <div className="flex items-center gap-3">
+        {/* Source type badge */}
+        <span className="text-[10px] px-2 py-0.5 rounded-full border flex-shrink-0 bg-green-500/10 text-green-400 border-green-500/20">
+          New Contact
+        </span>
+
+        {/* Contact info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-crm-text font-medium truncate">{item.full_name || 'Unknown'}</span>
+            {item.title && (
+              <>
+                <span className="text-crm-muted text-xs">&middot;</span>
+                <span className="text-crm-muted text-xs truncate">{item.title}</span>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-3 mt-1 text-xs">
+            {item.email && (
+              <span className="text-crm-accent truncate">{item.email}</span>
+            )}
+            {item.phone_1 && (
+              <span className="text-crm-muted whitespace-nowrap">{item.phone_1}</span>
+            )}
+            {item.company_name && (
+              <span className="text-crm-muted truncate">
+                <span className="text-crm-muted/50">@</span> {item.company_name}
+              </span>
+            )}
+            {item.linkedin && (
+              <a
+                href={item.linkedin.startsWith('http') ? item.linkedin : `https://${item.linkedin}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                className="text-blue-400 hover:underline truncate"
+                title={item.linkedin}
+              >
+                LinkedIn
+              </a>
+            )}
+          </div>
+        </div>
+
+        {/* Confidence */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="w-16 h-1.5 rounded-full bg-crm-hover overflow-hidden">
+            <div className={`h-full rounded-full ${confidenceBarColor(confidence)}`} style={{ width: `${confidence}%` }} />
+          </div>
+          <span className={`text-xs font-medium tabular-nums ${confidenceColor(confidence)}`}>{confidence}%</span>
+        </div>
+
+        {/* Source */}
+        <div className="flex-shrink-0 text-right min-w-[100px]">
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-crm-hover text-crm-muted">{item.agent_name || item.data_source}</span>
+          {item.data_source && item.agent_name && (
+            <p className="text-[10px] text-crm-muted/60 mt-0.5 truncate">{item.data_source}</p>
+          )}
+        </div>
+
+        {/* Actions */}
+        {isPending && !editing ? (
+          <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+            <button
+              onClick={handleApproveClick}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+              Approve
+            </button>
+            <button
+              onClick={handleReject}
+              disabled={reviewing}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Reject
+            </button>
+          </div>
+        ) : !isPending ? (
+          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+            <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_COLORS[displayStatus] || 'bg-crm-hover text-crm-muted'}`}>
+              {displayStatus}
+            </span>
+            <span className="text-[10px] text-crm-muted">{formatTimeAgo(item.reviewed_at || item.created_at)}</span>
+          </div>
+        ) : null}
+
+        {/* Time */}
+        {isPending && !editing && (
+          <span className="text-crm-muted text-[10px] flex-shrink-0 w-14 text-right">{formatTimeAgo(item.created_at)}</span>
+        )}
+      </div>
+
+      {/* Inline edit panel — appears when Approve is clicked */}
+      {editing && (
+        <div className="mt-3 pt-3 border-t border-crm-border/30 grid grid-cols-[80px_1fr] gap-x-3 gap-y-2 items-center">
+          <span className="text-crm-muted text-xs text-right">Name:</span>
+          <input
+            autoFocus
+            value={editFields.full_name}
+            onChange={(e) => setEditFields(f => ({ ...f, full_name: e.target.value }))}
+            className="bg-crm-bg border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-text font-mono focus:outline-none focus:border-crm-accent focus:ring-1 focus:ring-crm-accent/30"
+          />
+
+          <span className="text-crm-muted text-xs text-right">Email:</span>
+          <input
+            value={editFields.email}
+            onChange={(e) => setEditFields(f => ({ ...f, email: e.target.value }))}
+            className="bg-crm-bg border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-text font-mono focus:outline-none focus:border-crm-accent focus:ring-1 focus:ring-crm-accent/30"
+          />
+
+          <span className="text-crm-muted text-xs text-right">Title:</span>
+          <input
+            value={editFields.title}
+            onChange={(e) => setEditFields(f => ({ ...f, title: e.target.value }))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleConfirm();
+              if (e.key === 'Escape') handleCancel();
+            }}
+            className="bg-crm-bg border border-crm-border rounded-lg px-3 py-1.5 text-sm text-crm-text font-mono focus:outline-none focus:border-crm-accent focus:ring-1 focus:ring-crm-accent/30"
+          />
+
+          <div className="col-span-2 flex items-center gap-3 justify-end mt-1">
+            {hasEdits && <span className="text-[10px] text-purple-400 italic">edited</span>}
+            <button
+              onClick={handleConfirm}
+              disabled={reviewing || !editFields.full_name.trim()}
+              className="flex items-center gap-1 px-4 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+            >
+              {reviewing ? (
+                <div className="w-3.5 h-3.5 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
+                </svg>
+              )}
+              Confirm &amp; Create
+            </button>
+            <button
+              onClick={handleCancel}
+              className="px-3 py-1.5 rounded-lg bg-crm-hover text-crm-muted hover:text-crm-text transition-colors text-xs"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main Page ───────────────────────────────────────────────
 export default function VerificationQueue({ onCountChange }) {
-  const [items, setItems] = useState([]);
-  const [statusCounts, setStatusCounts] = useState({});
+  const [suggestedItems, setSuggestedItems] = useState([]);
+  const [sandboxItems, setSandboxItems] = useState([]);
+  const [suCounts, setSuCounts] = useState({});
+  const [scCounts, setScCounts] = useState({});
   const [activeTab, setActiveTab] = useState('pending');
   const [loading, setLoading] = useState(true);
-  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectedIds, setSelectedIds] = useState(new Set()); // only for suggested_updates
   const { addToast } = useToast();
 
-  const fetchSuggestions = useCallback(async () => {
+  // Combined status counts for tab badges
+  const pendingCount = (suCounts.pending || 0) + (scCounts.pending || 0);
+  const acceptedCount = (suCounts.accepted || 0) + (scCounts.approved || 0) + (scCounts.promoted || 0);
+  const rejectedCount = (suCounts.rejected || 0) + (scCounts.rejected || 0);
+  const statusCounts = { pending: pendingCount, accepted: acceptedCount, rejected: rejectedCount };
+
+  // Merge both sources, tagged and sorted by created_at (newest first)
+  const allItems = [
+    ...suggestedItems.map(s => ({ ...s, _source: 'update' })),
+    ...sandboxItems.map(c => ({ ...c, _source: 'new_contact' })),
+  ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+  // ── Fetch both sources in parallel ──
+  const fetchData = useCallback(async () => {
     try {
       const statusParam = activeTab === 'all' ? '' : `status=${activeTab}&`;
-      const res = await fetch(`${API}/api/ai/suggested-updates?${statusParam}limit=50`, { headers: authHeaders() });
-      if (res.ok) {
-        const data = await res.json();
-        setItems(data.suggestions || []);
-        setStatusCounts(data.status_counts || {});
-        if (onCountChange) onCountChange(data.suggestions?.length || 0);
-      }
+
+      const [suRes, scRes] = await Promise.all([
+        fetch(`${API}/api/ai/suggested-updates?${statusParam}limit=50`, { headers: authHeaders() }),
+        fetch(`${API}/api/sandbox-contacts?${statusParam}limit=50`, { headers: authHeaders() }),
+      ]);
+
+      let suData = { suggestions: [], status_counts: {} };
+      let scData = { contacts: [], status_counts: {} };
+
+      if (suRes.ok) suData = await suRes.json();
+      if (scRes.ok) scData = await scRes.json();
+
+      setSuggestedItems(suData.suggestions || []);
+      setSandboxItems(scData.contacts || []);
+      setSuCounts(suData.status_counts || {});
+      setScCounts(scData.status_counts || {});
+
+      // Report total for the current tab
+      const totalItems = (suData.suggestions?.length || 0) + (scData.contacts?.length || 0);
+      if (onCountChange) onCountChange(totalItems);
     } catch (err) {
-      console.error('Failed to fetch suggestions:', err);
+      console.error('Failed to fetch verification data:', err);
     } finally {
       setLoading(false);
     }
@@ -257,13 +508,13 @@ export default function VerificationQueue({ onCountChange }) {
   useEffect(() => {
     setLoading(true);
     setSelectedIds(new Set());
-    fetchSuggestions();
-  }, [fetchSuggestions]);
+    fetchData();
+  }, [fetchData]);
 
+  // ── Handlers for suggested_updates ──
   const handleReview = async (id, status, appliedValue) => {
     try {
       const body = { status };
-      // If accepting with a (possibly edited) value, send it
       if (status === 'accepted' && appliedValue !== undefined) {
         body.applied_value = appliedValue;
       }
@@ -274,8 +525,8 @@ export default function VerificationQueue({ onCountChange }) {
       });
       const data = await res.json();
       if (res.ok) {
-        addToast(status === 'accepted' ? 'Confirmed — value written to record' : 'Rejected', 'success');
-        fetchSuggestions();
+        addToast(status === 'accepted' ? 'Confirmed -- value written to record' : 'Rejected', 'success');
+        fetchData();
       } else {
         addToast(data.error || 'Failed to review', 'error');
       }
@@ -296,7 +547,7 @@ export default function VerificationQueue({ onCountChange }) {
       if (res.ok) {
         addToast(`${data.processed || selectedIds.size} items ${status}`, 'success');
         setSelectedIds(new Set());
-        fetchSuggestions();
+        fetchData();
       } else {
         addToast(data.error || 'Batch failed', 'error');
       }
@@ -306,18 +557,19 @@ export default function VerificationQueue({ onCountChange }) {
   };
 
   const handleAcceptAll = async () => {
-    const pendingIds = items.filter(i => i.status === 'pending').map(i => i.id);
-    if (pendingIds.length === 0) return;
+    // Only batch-accept suggested_updates (sandbox contacts need individual review)
+    const pendingUpdateIds = suggestedItems.filter(i => i.status === 'pending').map(i => i.id);
+    if (pendingUpdateIds.length === 0) return;
     try {
       const res = await fetch(`${API}/api/ai/suggested-updates/batch`, {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ ids: pendingIds, status: 'accepted' }),
+        body: JSON.stringify({ ids: pendingUpdateIds, status: 'accepted' }),
       });
       const data = await res.json();
       if (res.ok) {
-        addToast(`${data.processed || pendingIds.length} suggestions approved`, 'success');
-        fetchSuggestions();
+        addToast(`${data.processed || pendingUpdateIds.length} updates approved`, 'success');
+        fetchData();
       } else {
         addToast(data.error || 'Batch failed', 'error');
       }
@@ -326,6 +578,32 @@ export default function VerificationQueue({ onCountChange }) {
     }
   };
 
+  // ── Handler for sandbox_contacts ──
+  const handleSandboxReview = async (id, status, fields) => {
+    try {
+      const body = { status };
+      if (fields) body.fields = fields;
+      const res = await fetch(`${API}/api/sandbox-contacts/${id}`, {
+        method: 'PATCH',
+        headers: authHeaders(),
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        const msg = status === 'approved'
+          ? `Contact created${data.was_merge ? ' (merged with existing)' : ''}`
+          : 'Contact rejected';
+        addToast(msg, 'success');
+        fetchData();
+      } else {
+        addToast(data.error || 'Failed to review', 'error');
+      }
+    } catch {
+      addToast('Network error', 'error');
+    }
+  };
+
+  // ── Selection (only for suggested_updates) ──
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -334,9 +612,8 @@ export default function VerificationQueue({ onCountChange }) {
     });
   };
 
-  const pendingCount = statusCounts.pending || 0;
-  const acceptedCount = statusCounts.accepted || 0;
-  const rejectedCount = statusCounts.rejected || 0;
+  const pendingUpdateCount = suggestedItems.filter(i => i.status === 'pending').length;
+  const pendingSandboxCount = sandboxItems.filter(i => i.status === 'pending').length;
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -344,9 +621,9 @@ export default function VerificationQueue({ onCountChange }) {
       <div className="flex-shrink-0 px-6 pt-6 pb-4">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-xl font-semibold text-crm-text">Suggested Updates</h1>
+            <h1 className="text-xl font-semibold text-crm-text">Verification Queue</h1>
             <p className="text-crm-muted text-sm mt-0.5">
-              Review AI-enriched data before it's written to your records
+              Review AI-enriched data and new contacts before they reach your records
             </p>
           </div>
 
@@ -356,6 +633,11 @@ export default function VerificationQueue({ onCountChange }) {
               <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-yellow-500/10 border border-yellow-500/20">
                 <span className="w-2 h-2 rounded-full bg-yellow-500 animate-pulse" />
                 <span className="text-yellow-400 text-sm font-medium">{pendingCount} pending</span>
+              </div>
+            )}
+            {pendingSandboxCount > 0 && (
+              <div className="px-3 py-1.5 rounded-lg bg-green-500/10 border border-green-500/20">
+                <span className="text-green-400 text-xs font-medium">{pendingSandboxCount} new contact{pendingSandboxCount !== 1 ? 's' : ''}</span>
               </div>
             )}
             {acceptedCount > 0 && (
@@ -393,8 +675,8 @@ export default function VerificationQueue({ onCountChange }) {
             })}
           </div>
 
-          {/* Batch actions */}
-          {activeTab === 'pending' && items.length > 0 && (
+          {/* Batch actions (suggested_updates only) */}
+          {activeTab === 'pending' && allItems.length > 0 && (
             <div className="flex items-center gap-2">
               {selectedIds.size > 0 && (
                 <>
@@ -412,12 +694,14 @@ export default function VerificationQueue({ onCountChange }) {
                   </button>
                 </>
               )}
-              <button
-                onClick={handleAcceptAll}
-                className="px-3 py-1.5 rounded-lg bg-crm-hover text-crm-muted hover:text-crm-text transition-colors text-xs"
-              >
-                Accept All ({items.filter(i => i.status === 'pending').length})
-              </button>
+              {pendingUpdateCount > 0 && (
+                <button
+                  onClick={handleAcceptAll}
+                  className="px-3 py-1.5 rounded-lg bg-crm-hover text-crm-muted hover:text-crm-text transition-colors text-xs"
+                >
+                  Accept All Updates ({pendingUpdateCount})
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -429,7 +713,7 @@ export default function VerificationQueue({ onCountChange }) {
           <div className="flex items-center justify-center h-40">
             <div className="w-6 h-6 border-2 border-crm-accent border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : items.length === 0 ? (
+        ) : allItems.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
             <div className="w-12 h-12 rounded-full bg-crm-accent/10 flex items-center justify-center">
               <svg className="w-6 h-6 text-crm-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -437,34 +721,35 @@ export default function VerificationQueue({ onCountChange }) {
               </svg>
             </div>
             <p className="text-sm font-medium text-crm-text">
-              {activeTab === 'pending' ? 'No pending suggestions' : `No ${activeTab} items`}
+              {activeTab === 'pending' ? 'No pending items' : `No ${activeTab} items`}
             </p>
-            <p className="text-xs text-crm-muted">AI enrichment suggestions will appear here for review.</p>
+            <p className="text-xs text-crm-muted">AI enrichment suggestions and new contacts will appear here for review.</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {/* Select-all checkbox for pending tab */}
-            {activeTab === 'pending' && items.length > 1 && (
+            {/* Select-all checkbox for pending tab (suggested_updates only) */}
+            {activeTab === 'pending' && pendingUpdateCount > 1 && (
               <label className="flex items-center gap-2 px-4 py-2 text-xs text-crm-muted cursor-pointer hover:text-crm-text">
                 <input
                   type="checkbox"
-                  checked={selectedIds.size === items.filter(i => i.status === 'pending').length && selectedIds.size > 0}
+                  checked={selectedIds.size === pendingUpdateCount && selectedIds.size > 0}
                   onChange={(e) => {
                     if (e.target.checked) {
-                      setSelectedIds(new Set(items.filter(i => i.status === 'pending').map(i => i.id)));
+                      setSelectedIds(new Set(suggestedItems.filter(i => i.status === 'pending').map(i => i.id)));
                     } else {
                       setSelectedIds(new Set());
                     }
                   }}
                   className="rounded border-crm-border text-crm-accent focus:ring-crm-accent/30"
                 />
-                Select all
+                Select all updates
               </label>
             )}
 
-            {items.map((item) => (
-              <div key={item.id} className="flex items-center gap-2">
-                {activeTab === 'pending' && item.status === 'pending' && (
+            {allItems.map((item) => (
+              <div key={`${item._source}-${item.id}`} className="flex items-center gap-2">
+                {/* Checkbox only for suggested_updates on pending tab */}
+                {activeTab === 'pending' && item.status === 'pending' && item._source === 'update' && (
                   <input
                     type="checkbox"
                     checked={selectedIds.has(item.id)}
@@ -473,7 +758,11 @@ export default function VerificationQueue({ onCountChange }) {
                   />
                 )}
                 <div className="flex-1">
-                  <SuggestionCard item={item} onReview={handleReview} />
+                  {item._source === 'update' ? (
+                    <SuggestionCard item={item} onReview={handleReview} />
+                  ) : (
+                    <SandboxContactCard item={item} onReview={handleSandboxReview} />
+                  )}
                 </div>
               </div>
             ))}

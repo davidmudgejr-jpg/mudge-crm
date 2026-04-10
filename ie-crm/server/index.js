@@ -2060,6 +2060,194 @@ app.post('/api/ai/sandbox/contacts/promote', async (req, res) => {
   }
 });
 
+// ── Sandbox Contacts — Verification Queue API ──────────────
+
+// GET /api/sandbox-contacts — List sandbox contacts for the verification queue (with status counts)
+app.get('/api/sandbox-contacts', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const { status = 'pending', limit = 50 } = req.query;
+
+    let query = 'SELECT * FROM sandbox_contacts';
+    const params = [];
+    let idx = 1;
+
+    if (status && status !== 'all') {
+      // Map 'accepted' (frontend tab name) to sandbox DB statuses
+      if (status === 'accepted') {
+        query += ` WHERE status IN ('approved', 'promoted')`;
+      } else {
+        query += ` WHERE status = $${idx++}`;
+        params.push(status);
+      }
+    }
+
+    query += ` ORDER BY confidence_score DESC, created_at DESC LIMIT $${idx++}`;
+    params.push(parseInt(limit));
+
+    const result = await pool.query(query, params);
+
+    // Status counts
+    const counts = await pool.query(
+      `SELECT status, COUNT(*)::int as count FROM sandbox_contacts GROUP BY status`
+    );
+    const statusCounts = {};
+    counts.rows.forEach(r => { statusCounts[r.status] = r.count; });
+
+    res.json({ contacts: result.rows, count: result.rows.length, status_counts: statusCounts });
+  } catch (err) {
+    console.error('[sandbox-contacts] GET error:', err.message);
+    res.status(500).json({ error: 'Failed to fetch sandbox contacts' });
+  }
+});
+
+// PATCH /api/sandbox-contacts/:id — Approve (with optional field edits + auto-promote) or reject
+app.patch('/api/sandbox-contacts/:id', async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ error: 'Database not configured' });
+    const { id } = req.params;
+    const { status, fields, review_notes } = req.body;
+
+    if (!status || !['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'status must be "approved" or "rejected"' });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+
+      // Fetch the pending sandbox contact
+      const result = await client.query(
+        'SELECT * FROM sandbox_contacts WHERE id = $1 AND status = $2', [id, 'pending']
+      );
+      if (result.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Sandbox contact not found or already reviewed' });
+      }
+      const sc = { ...result.rows[0] };
+
+      // Apply inline field edits if provided (name, email, title, etc.)
+      if (fields && typeof fields === 'object') {
+        const EDITABLE = ['full_name', 'first_name', 'email', 'phone_1', 'title', 'company_name'];
+        const sets = [];
+        const vals = [];
+        let pi = 1;
+        for (const [k, v] of Object.entries(fields)) {
+          if (EDITABLE.includes(k)) {
+            sets.push(`${k} = $${pi++}`);
+            vals.push(v);
+            sc[k] = v; // Update local copy for promote step
+          }
+        }
+        if (sets.length > 0) {
+          vals.push(id);
+          await client.query(
+            `UPDATE sandbox_contacts SET ${sets.join(', ')}, updated_at = NOW() WHERE id = $${pi}`,
+            vals
+          );
+        }
+      }
+
+      // ── Reject: just update status ──
+      if (status === 'rejected') {
+        await client.query(
+          `UPDATE sandbox_contacts SET status = 'rejected', reviewed_at = NOW(), reviewed_by = 'david', review_notes = $1, updated_at = NOW() WHERE id = $2`,
+          [review_notes || null, id]
+        );
+        await client.query('COMMIT');
+        return res.json({ ok: true, status: 'rejected' });
+      }
+
+      // ── Approve: review + promote in one transaction ──
+
+      // Dedup: check if a contact with this email already exists
+      let existingId = null;
+      if (sc.email) {
+        const existing = await client.query('SELECT contact_id FROM contacts WHERE email_1 = $1', [sc.email]);
+        if (existing.rows.length > 0) existingId = existing.rows[0].contact_id;
+      }
+
+      const dataSource = sc.data_source || ('AI Agent: ' + (sc.agent_name || 'unknown'));
+      let contactId;
+
+      if (existingId) {
+        // Merge into existing contact — fill gaps, don't overwrite
+        await client.query(
+          `UPDATE contacts SET
+            full_name = COALESCE(full_name, $1),
+            first_name = COALESCE(first_name, $2),
+            phone_1 = COALESCE($3, phone_1),
+            phone_2 = COALESCE($4, phone_2),
+            phone_3 = COALESCE($5, phone_3),
+            home_address = COALESCE($6, home_address),
+            work_address = COALESCE($7, work_address),
+            work_city = COALESCE($8, work_city),
+            work_state = COALESCE($9, work_state),
+            work_zip = COALESCE($10, work_zip),
+            title = COALESCE($11, title),
+            type = COALESCE($12, type),
+            linkedin = COALESCE($13, linkedin),
+            enrichment_status = 'enriched',
+            modified = NOW()
+          WHERE contact_id = $14`,
+          [sc.full_name, sc.first_name, sc.phone_1, sc.phone_2, sc.phone_3,
+           sc.home_address, sc.work_address, sc.work_city, sc.work_state, sc.work_zip,
+           sc.title, sc.type, sc.linkedin, existingId]
+        );
+        contactId = existingId;
+      } else {
+        // Insert new contact
+        const insert = await client.query(
+          `INSERT INTO contacts (
+            full_name, first_name, email_1, email_2, email_3,
+            phone_1, phone_2, phone_3,
+            home_address, work_address, work_city, work_state, work_zip,
+            title, type, linkedin, data_source, enrichment_status
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+          RETURNING contact_id`,
+          [sc.full_name, sc.first_name, sc.email, sc.email_2, sc.email_3,
+           sc.phone_1, sc.phone_2, sc.phone_3,
+           sc.home_address, sc.work_address, sc.work_city, sc.work_state, sc.work_zip,
+           sc.title, sc.type, sc.linkedin, dataSource, 'enriched']
+        );
+        contactId = insert.rows[0].contact_id;
+      }
+
+      // Link company relationship if company_name is present
+      if (sc.company_name) {
+        const company = await client.query(
+          'SELECT company_id FROM companies WHERE company_name ILIKE $1 LIMIT 1',
+          [sc.company_name.trim()]
+        );
+        if (company.rows.length > 0) {
+          await client.query(
+            'INSERT INTO contact_companies (contact_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+            [contactId, company.rows[0].company_id]
+          );
+        }
+      }
+
+      // Mark sandbox row as approved + promoted
+      await client.query(
+        `UPDATE sandbox_contacts SET status = 'approved', reviewed_at = NOW(), reviewed_by = 'david',
+         review_notes = $1, promoted_at = NOW(), promoted_to_id = $2, updated_at = NOW() WHERE id = $3`,
+        [review_notes || null, contactId, id]
+      );
+
+      await client.query('COMMIT');
+      res.json({ ok: true, status: 'approved', contact_id: contactId, was_merge: !!existingId });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[sandbox-contacts] PATCH error:', err.message);
+    res.status(500).json({ error: 'Failed to review sandbox contact' });
+  }
+});
+
 // GET /api/ai/heartbeats — Agent fleet health status
 app.get('/api/ai/heartbeats', async (req, res) => {
   try {
