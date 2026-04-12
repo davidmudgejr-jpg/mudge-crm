@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { getCampaigns, getCampaignContacts, query, queryWithFilters, countWithFilters } from '../api/database';
+import { getCampaigns, getCampaignContacts, updateCampaign, query, queryWithFilters, countWithFilters } from '../api/database';
 import { bulkOps } from '../api/bridge';
 import { useCustomFields } from '../hooks/useCustomFields';
 import useColumnVisibility from '../hooks/useColumnVisibility';
@@ -91,10 +91,13 @@ function CampaignDetail({ campaignId, onClose, onSave }) {
 
   const handleSave = async () => {
     try {
-      await query(
-        `UPDATE campaigns SET name=$1, type=$2, status=$3, notes=$4, sent_date=$5, modified=NOW() WHERE campaign_id=$6`,
-        [draft.name, draft.type, draft.status, draft.notes, draft.sent_date || null, campaignId]
-      );
+      await updateCampaign(campaignId, {
+        name: draft.name,
+        type: draft.type,
+        status: draft.status,
+        notes: draft.notes,
+        sent_date: draft.sent_date || null,
+      });
       setEditing(false);
       onSave();
     } catch (err) {
@@ -103,8 +106,9 @@ function CampaignDetail({ campaignId, onClose, onSave }) {
   };
 
   const handleDelete = async () => {
+    if (!window.confirm('Delete this campaign? This cannot be undone.')) return;
     try {
-      await query('DELETE FROM campaigns WHERE campaign_id = $1', [campaignId]);
+      await bulkOps.delete('campaigns', [campaignId]);
       onSave();
     } catch (err) {
       console.error('Failed to delete campaign:', err);
