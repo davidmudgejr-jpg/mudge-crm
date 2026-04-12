@@ -632,6 +632,7 @@ const SERVER_ALLOWED_COLS = {
   ]),
   campaigns: new Set([
     'name', 'type', 'status', 'sent_date', 'subject', 'body', 'notes', 'tags',
+    'assignee', 'day_time_hits',
   ]),
   action_items: new Set([
     'name', 'notes', 'notes_on_date', 'responsibility', 'high_priority',
