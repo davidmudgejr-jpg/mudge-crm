@@ -28,6 +28,9 @@ import PhotoUploadCell from '../components/shared/PhotoUploadCell';
 import PivotButton from '../components/shared/PivotButton';
 import usePivotFilter from '../hooks/usePivotFilter';
 import { readPivot } from '../utils/pivotNav';
+import { rankByRelevance } from '../utils/searchRank';
+
+const SEARCH_FIELDS = ['deal_name', 'deal_type', 'status', 'notes'];
 import { applyLinkedFilters, splitLinkedFilters } from '../utils/linkedFilter';
 import { playDealSound } from '../utils/dealSound';
 import useLiveUpdates from '../hooks/useLiveUpdates';
@@ -160,8 +163,39 @@ export default function Deals({ onCountChange }) {
   const [detailId, setDetailId] = useState(null);
   useDetailPanel(detailId);
   const [totalCount, setTotalCount] = useState(0);
+  // Slide-out animation state (deals leaving a filtered view)
+  const [transitioningDealIds, setTransitioningDealIds] = useState(new Set());
+  const [slidingOutDealIds, setSlidingOutDealIds] = useState(new Set());
+  const transitionTimers = useRef({});
+  const suppressRefetchRef = useRef(0);
   const { pivotFilter, dismiss: dismissPivot, mergeFilters: mergePivotFilters } = usePivotFilter('deals');
   const guard = useFetchGuard();
+
+  // Check if changing a field value would make the row no longer match active filters
+  const doesChangeBreakFilter = useCallback((field, newValue) => {
+    if (!view.filters?.length) return false;
+    const fieldFilters = view.filters.filter(f => f.column === field);
+    if (fieldFilters.length === 0) return false;
+    return fieldFilters.some(f => {
+      switch (f.operator) {
+        case 'equals': case '=': case 'is': return f.value !== newValue;
+        case 'not_equals': case '!=': case 'is_not': return f.value === newValue;
+        case 'in': return !f.value?.includes?.(newValue);
+        case 'not_in': return f.value?.includes?.(newValue);
+        default: return false;
+      }
+    });
+  }, [view.filters]);
+
+  // Cancel a pending slide-out transition (used by undo)
+  const cancelTransition = useCallback((dealId) => {
+    if (transitionTimers.current[dealId]) {
+      transitionTimers.current[dealId].forEach(clearTimeout);
+      delete transitionTimers.current[dealId];
+    }
+    setTransitioningDealIds(prev => { const n = new Set(prev); n.delete(dealId); return n; });
+    setSlidingOutDealIds(prev => { const n = new Set(prev); n.delete(dealId); return n; });
+  }, []);
 
   const saveViewWithPivot = useCallback(async (name) => {
     const mergedFilters = pivotFilter?.ids?.length ? mergePivotFilters(view.filters) : view.filters;
@@ -244,9 +278,10 @@ export default function Deals({ onCountChange }) {
         const filters = { search };
         const result = await getDeals({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
         if (isStale()) return;
-        setRows(result.rows || []);
-        setTotalCount(result.rows?.length || 0);
-        if (onCountChange) onCountChange(result.rows?.length || 0);
+        const fetched = result.rows || [];
+        setRows(search ? rankByRelevance(fetched, search, SEARCH_FIELDS) : fetched);
+        setTotalCount(fetched.length);
+        if (onCountChange) onCountChange(fetched.length);
       } else {
         const [result, total] = await Promise.all([
           queryWithFilters('deals', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),
@@ -266,7 +301,18 @@ export default function Deals({ onCountChange }) {
   }, [search, view.sort.column, view.sort.direction, view.sqlFilters, onCountChange, pivotFilter, guard]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  const { newRecordId } = useLiveUpdates('deal', fetchData);
+
+  // Suppress live-update refetches while a deal is transitioning out
+  const liveFetchData = useCallback(() => {
+    if (suppressRefetchRef.current > Date.now()) return;
+    fetchData();
+  }, [fetchData]);
+  const { newRecordId } = useLiveUpdates('deal', liveFetchData);
+
+  // Clean up transition timers on unmount
+  useEffect(() => () => {
+    Object.values(transitionTimers.current).forEach(arr => arr.forEach(clearTimeout));
+  }, []);
 
   const toggleSelect = (id) => {
     setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
@@ -330,7 +376,6 @@ export default function Deals({ onCountChange }) {
       if (r.deal_id !== rowId) return r;
       oldRow = { ...r };
       const updated = { ...r, [field]: value };
-      // Recompute formulas if this is a trigger field
       if (FORMULA_TRIGGER_FIELDS.has(field)) {
         Object.assign(updated, computeDealFormulas(updated));
       }
@@ -338,15 +383,45 @@ export default function Deals({ onCountChange }) {
     }));
     try {
       await updateDeal(rowId, { [field]: value });
-      addToast('Saved', 'success', 1500);
+
+      // If the new value breaks the active filter, animate the row out
+      if (doesChangeBreakFilter(field, value)) {
+        suppressRefetchRef.current = Date.now() + 7000;
+        setTransitioningDealIds(prev => new Set(prev).add(rowId));
+
+        const slideTimer = setTimeout(() => {
+          setSlidingOutDealIds(prev => new Set(prev).add(rowId));
+        }, 4500);
+        const removeTimer = setTimeout(() => {
+          cancelTransition(rowId);
+          setRows(prev => prev.filter(r => r.deal_id !== rowId));
+        }, 5200);
+        transitionTimers.current[rowId] = [slideTimer, removeTimer];
+
+        addToast(`Moved to ${value}`, 'info', 5000, {
+          action: {
+            label: 'Undo',
+            onClick: () => {
+              cancelTransition(rowId);
+              setRows(prev => prev.map(r =>
+                r.deal_id === rowId ? { ...r, [field]: oldRow[field] } : r
+              ));
+              updateDeal(rowId, { [field]: oldRow[field] }).catch(() => {
+                addToast('Undo failed', 'error', 3000);
+              });
+            },
+          },
+        });
+      } else {
+        addToast('Saved', 'success', 1500);
+      }
     } catch (err) {
-      // Roll back entire row (including computed fields)
       setRows((prev) => prev.map((r) =>
         r.deal_id === rowId && oldRow ? oldRow : r
       ));
       addToast(`Save failed: ${err.message}`, 'error', 4000);
     }
-  }, [addToast]);
+  }, [addToast, doesChangeBreakFilter, cancelTransition]);
 
   const handleColumnFilter = useCallback((columnKey, conditions) => {
     const otherFilters = view.filters.filter(f => f.column !== columnKey);
@@ -531,6 +606,8 @@ export default function Deals({ onCountChange }) {
             groupOrders={GROUP_ORDERS}
             columnDefs={ALL_COLUMNS}
             onGroupByColumn={view.updateGroupBy}
+            slidingRowIds={slidingOutDealIds}
+            transitioningRowIds={transitioningDealIds}
           />
         )}
       </div>

@@ -23,6 +23,9 @@ import ActivityModal from '../components/shared/ActivityModal';
 import { useToast } from '../components/shared/Toast';
 import EmptyState from '../components/shared/EmptyState';
 import PivotButton from '../components/shared/PivotButton';
+import { rankByRelevance } from '../utils/searchRank';
+
+const SEARCH_FIELDS = ['company_name', 'city', 'industry'];
 import usePivotFilter from '../hooks/usePivotFilter';
 import { readPivot } from '../utils/pivotNav';
 import useFetchGuard from '../hooks/useFetchGuard';
@@ -167,9 +170,10 @@ export default function Companies({ onCountChange }) {
         const filters = { search };
         const result = await getCompanies({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
         if (isStale()) return;
-        setRows(result.rows || []);
-        setTotalCount(result.rows?.length || 0);
-        if (onCountChange) onCountChange(result.rows?.length || 0);
+        const fetched = result.rows || [];
+        setRows(search ? rankByRelevance(fetched, search, SEARCH_FIELDS) : fetched);
+        setTotalCount(fetched.length);
+        if (onCountChange) onCountChange(fetched.length);
       } else {
         const [result, total] = await Promise.all([
           queryWithFilters('companies', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),

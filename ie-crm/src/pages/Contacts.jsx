@@ -28,6 +28,9 @@ import { readPivot } from '../utils/pivotNav';
 import useFetchGuard from '../hooks/useFetchGuard';
 import { bulkOps } from '../api/bridge';
 import useLiveUpdates from '../hooks/useLiveUpdates';
+import { rankByRelevance } from '../utils/searchRank';
+
+const SEARCH_FIELDS = ['full_name', 'email_1', 'phone_1', 'company_name'];
 
 const TYPE_COLORS = {
   Owner: 'bg-green-500/20 text-green-400',
@@ -203,9 +206,10 @@ export default function Contacts({ onCountChange }) {
         if (filterType) filters.type = filterType;
         const result = await getContacts({ limit: 500, orderBy: view.sort.column, order: view.sort.direction, filters });
         if (isStale()) return;
-        setRows(result.rows || []);
-        setTotalCount(result.rows?.length || 0);
-        if (onCountChange) onCountChange(result.rows?.length || 0);
+        const fetched = result.rows || [];
+        setRows(search ? rankByRelevance(fetched, search, SEARCH_FIELDS) : fetched);
+        setTotalCount(fetched.length);
+        if (onCountChange) onCountChange(fetched.length);
       } else {
         const [result, total] = await Promise.all([
           queryWithFilters('contacts', { ...view.sqlFilters, orderBy: view.sort.column, order: view.sort.direction, limit: 500 }),

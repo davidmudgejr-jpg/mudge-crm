@@ -18,6 +18,9 @@ import { useToast } from '../components/shared/Toast';
 import ExportPdfModal from '../components/shared/ExportPdfModal';
 import EmptyState from '../components/shared/EmptyState';
 import { formatDatePacific, formatDateTimePacific } from '../utils/timezone';
+import { rankByRelevance } from '../utils/searchRank';
+
+const SEARCH_FIELDS = ['name', 'type', 'status', 'assignee'];
 import useDetailPanel from '../hooks/useDetailPanel';
 
 const STATUS_COLORS = {
@@ -288,10 +291,10 @@ export default function Campaigns({ onCountChange }) {
           filters,
         });
         if (isStale()) return;
-        const rows = result.rows || [];
-        setRows(rows);
-        setTotalCount(rows.length);
-        if (onCountChange) onCountChange(rows.length);
+        const fetched = result.rows || [];
+        setRows(search ? rankByRelevance(fetched, search, SEARCH_FIELDS) : fetched);
+        setTotalCount(fetched.length);
+        if (onCountChange) onCountChange(fetched.length);
       } else {
         const [result, total] = await Promise.all([
           queryWithFilters('campaigns', {

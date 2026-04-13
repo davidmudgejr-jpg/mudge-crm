@@ -17,6 +17,10 @@ import useDetailPanel from '../hooks/useDetailPanel';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 import useFetchGuard from '../hooks/useFetchGuard';
 
+import { rankByRelevance } from '../utils/searchRank';
+
+const LEASE_SEARCH_FIELDS = ['linked_property_address', 'tenant_name', 'property_type'];
+const SALE_SEARCH_FIELDS = ['linked_property_address', 'buyer_name', 'seller_name', 'property_type'];
 const PROPERTY_TYPES = ['Industrial', 'Office', 'Retail', 'Multifamily', 'Land', 'Mixed-Use'];
 const RENT_TYPES = ['NNN', 'GRS', 'MGR'];
 const SOURCE_OPTIONS = ['Company DB', 'CoStar', 'IAR Hot Sheet', 'Manual'];
@@ -183,7 +187,8 @@ export default function Comps({ onCountChange }) {
 
       if (isStale()) return;
       const resultRows = result.rows || [];
-      setRows(resultRows);
+      const searchFields = activeTab === 'lease' ? LEASE_SEARCH_FIELDS : SALE_SEARCH_FIELDS;
+      setRows(search ? rankByRelevance(resultRows, search, searchFields) : resultRows);
       setTotalCount(total);
       if (onCountChange) onCountChange(resultRows.length);
     } catch (err) {
