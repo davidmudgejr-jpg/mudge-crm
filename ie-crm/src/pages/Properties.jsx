@@ -30,6 +30,27 @@ import { applyLinkedFilters, splitLinkedFilters } from '../utils/linkedFilter';
 import { bulkOps } from '../api/bridge';
 import useLiveUpdates from '../hooks/useLiveUpdates';
 
+/** Rank rows by search relevance so exact/close matches appear first */
+function rankByRelevance(rows, term) {
+  if (!term) return rows;
+  const lower = term.toLowerCase().trim();
+  const score = (row) => {
+    const addr = (row.property_address || '').toLowerCase();
+    if (addr === lower) return 100;
+    if (addr.startsWith(lower)) return 80;
+    if (addr.includes(lower)) return 60;
+    const owner = (row.owner_name || '').toLowerCase();
+    if (owner === lower) return 55;
+    if (owner.startsWith(lower)) return 45;
+    if (owner.includes(lower)) return 35;
+    const city = (row.city || '').toLowerCase();
+    if (city === lower) return 50;
+    if (city.startsWith(lower)) return 40;
+    return 0;
+  };
+  return [...rows].sort((a, b) => score(b) - score(a));
+}
+
 const CONTACTED_OPTIONS = [
   'Contacted Owner', 'Not Contacted', 'Broker/Not worth it',
   'Emailed Owner/Tenant', 'Cold called', 'Left VM',
@@ -365,9 +386,10 @@ export default function Properties({ onCountChange }) {
           countWithFilters('properties', mergedFilters),
         ]);
         if (isStale()) return;
-        setRows(result.rows || []);
+        const fetched = result.rows || [];
+        setRows(search ? rankByRelevance(fetched, search) : fetched);
         setTotalCount(total);
-        if (onCountChange) onCountChange(result.rows?.length || 0);
+        if (onCountChange) onCountChange(fetched.length);
       }
     } catch (err) {
       console.error('Failed to fetch properties:', err);
