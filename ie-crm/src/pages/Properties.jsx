@@ -29,9 +29,6 @@ import useFetchGuard from '../hooks/useFetchGuard';
 import { applyLinkedFilters, splitLinkedFilters } from '../utils/linkedFilter';
 import { bulkOps } from '../api/bridge';
 import useLiveUpdates from '../hooks/useLiveUpdates';
-import { rankByRelevance } from '../utils/searchRank';
-
-const SEARCH_FIELDS = ['property_address', 'owner_name', 'city', 'county'];
 
 const CONTACTED_OPTIONS = [
   'Contacted Owner', 'Not Contacted', 'Broker/Not worth it',
@@ -368,10 +365,9 @@ export default function Properties({ onCountChange }) {
           countWithFilters('properties', mergedFilters),
         ]);
         if (isStale()) return;
-        const fetched = result.rows || [];
-        setRows(search ? rankByRelevance(fetched, search, SEARCH_FIELDS) : fetched);
+        setRows(result.rows || []);
         setTotalCount(total);
-        if (onCountChange) onCountChange(fetched.length);
+        if (onCountChange) onCountChange(result.rows?.length || 0);
       }
     } catch (err) {
       console.error('Failed to fetch properties:', err);

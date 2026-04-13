@@ -72,7 +72,7 @@ const LEASE_COLUMNS = [
     },
   },
   { key: 'property_type', label: 'Property Type', defaultWidth: 110 },
-  { key: 'sf', label: 'SF', defaultWidth: 90, format: 'number' },
+  { key: 'sf', label: 'SF Leased', defaultWidth: 90, format: 'number' },
   { key: 'rate', label: 'Rate $/SF/mo', defaultWidth: 100, format: 'currency' },
   { key: 'term_months', label: 'Term (mo)', defaultWidth: 85, format: 'number' },
   { key: 'commencement_date', label: 'Commenced', defaultWidth: 100, format: 'date' },
