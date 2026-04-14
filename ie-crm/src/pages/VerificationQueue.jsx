@@ -235,6 +235,149 @@ function SuggestionCard({ item, onReview }) {
   );
 }
 
+// ── Batched Suggestion Card (Multiple Fields, Same Batch) ───
+function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
+  const [reviewing, setReviewing] = useState(false);
+  const [droppedIds, setDroppedIds] = useState(new Set());
+
+  // All items in a batch share the same entity (guaranteed by the fact that
+  // batch_id is unique per agent run, and a run always targets one entity).
+  // So we pull display-common fields from the first item.
+  const head = items[0];
+  const badge = ENTITY_BADGES[head.entity_type] || { label: head.entity_type, cls: 'bg-crm-hover text-crm-muted' };
+  const keptIds = items.filter(i => !droppedIds.has(i.id)).map(i => i.id);
+  const rejectedIds = [...droppedIds];
+
+  const toggleDrop = (id) => {
+    setDroppedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const handleRejectAll = async () => {
+    setReviewing(true);
+    try {
+      await onRejectBatch(items.map(i => i.id));
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  const handleApproveAll = async () => {
+    if (keptIds.length === 0) {
+      // User dropped every field — treat as reject-all
+      return handleRejectAll();
+    }
+    setReviewing(true);
+    try {
+      await onApproveBatch({ accept: keptIds, reject: rejectedIds });
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-crm-border/50 bg-crm-card/60 hover:bg-crm-card hover:border-crm-border transition-all duration-200">
+      {/* Header */}
+      <div className="flex items-center gap-3 px-4 pt-3 pb-2 border-b border-crm-border/30">
+        <span className="text-[10px] px-2 py-0.5 rounded-full border flex-shrink-0 bg-indigo-500/10 text-indigo-400 border-indigo-500/20">
+          Batch · {items.length}
+        </span>
+        <span className={`text-[10px] px-2 py-0.5 rounded-full border flex-shrink-0 ${badge.cls}`}>
+          {badge.label}
+        </span>
+        <span className="text-crm-text font-medium truncate flex-1">{head.entity_name || 'Unknown'}</span>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <div className="w-16 h-1.5 rounded-full bg-crm-hover overflow-hidden">
+            <div className={`h-full rounded-full ${confidenceBarColor(head.confidence)}`} style={{ width: `${head.confidence}%` }} />
+          </div>
+          <span className={`text-xs font-medium tabular-nums ${confidenceColor(head.confidence)}`}>{head.confidence}%</span>
+        </div>
+        <span className="text-[10px] px-2 py-0.5 rounded-full bg-crm-hover text-crm-muted flex-shrink-0">{head.source || head.agent_name}</span>
+        <span className="text-crm-muted text-[10px] flex-shrink-0 w-14 text-right">{formatTimeAgo(head.created_at)}</span>
+      </div>
+
+      {/* Field rows */}
+      <div className="px-4 py-2 space-y-1.5">
+        {items.map((item) => {
+          const dropped = droppedIds.has(item.id);
+          return (
+            <div
+              key={item.id}
+              className={`flex items-center gap-3 py-1 ${dropped ? 'opacity-40' : ''}`}
+            >
+              <span className="text-crm-muted text-xs flex-shrink-0 w-40 text-right truncate">
+                {item.field_label || item.field_name}:
+              </span>
+              {item.current_value ? (
+                <span className="text-crm-muted text-xs font-mono line-through truncate max-w-[140px]">{item.current_value}</span>
+              ) : (
+                <span className="text-crm-muted/50 text-xs italic">(empty)</span>
+              )}
+              <svg className="w-3 h-3 text-crm-muted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+              </svg>
+              <span className={`text-xs font-mono font-medium truncate flex-1 ${dropped ? 'text-crm-muted line-through' : 'text-green-400'}`}>
+                {item.suggested_value}
+              </span>
+              <button
+                onClick={() => toggleDrop(item.id)}
+                title={dropped ? 'Keep this field' : 'Drop this field from approval'}
+                className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
+                  dropped
+                    ? 'bg-crm-hover text-crm-muted hover:text-crm-text'
+                    : 'text-crm-muted hover:bg-red-500/15 hover:text-red-400'
+                }`}
+              >
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  {dropped
+                    ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />}
+                </svg>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Footer actions */}
+      <div className="flex items-center justify-end gap-2 px-4 py-2 border-t border-crm-border/30">
+        {droppedIds.size > 0 && (
+          <span className="text-[10px] text-crm-muted mr-auto italic">
+            {droppedIds.size} dropped, {keptIds.length} kept
+          </span>
+        )}
+        <button
+          onClick={handleApproveAll}
+          disabled={reviewing}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+        >
+          {reviewing ? (
+            <div className="w-3.5 h-3.5 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
+          ) : (
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          )}
+          Approve {keptIds.length === items.length ? 'All' : `${keptIds.length} of ${items.length}`}
+        </button>
+        <button
+          onClick={handleRejectAll}
+          disabled={reviewing}
+          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          </svg>
+          Reject All
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Sandbox Contact Card (New Contact) ──────────────────────
 function SandboxContactCard({ item, onReview }) {
   const [reviewing, setReviewing] = useState(false);
