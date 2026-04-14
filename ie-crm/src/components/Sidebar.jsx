@@ -83,11 +83,16 @@ export default function Sidebar({ onTableChange }) {
         let count = 0;
         if (suRes.ok) {
           const data = await suRes.json();
-          count += data.status_counts?.pending || 0;
+          // Prefer group_counts (number of CARDS the user sees after grouping)
+          // over status_counts (raw row count). Falls back to status_counts for
+          // old API versions that haven't deployed the group_counts field yet.
+          count += data.group_counts?.pending ?? data.status_counts?.pending ?? 0;
         }
         if (scRes.ok) {
           const data = await scRes.json();
-          count += data.status_counts?.pending || 0;
+          // Sandbox contacts are already "1 card per row" — each proposal is
+          // its own unit — so group_counts and status_counts are the same.
+          count += data.group_counts?.pending ?? data.status_counts?.pending ?? 0;
         }
         setVerificationCount(count);
       } catch { /* silently fail */ }

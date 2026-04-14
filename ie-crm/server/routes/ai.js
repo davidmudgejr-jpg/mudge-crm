@@ -2089,38 +2089,52 @@ router.post('/suggested-updates/batch', async (req, res) => {
 
     const reviewerName = req.agentName || req.user?.display_name || 'admin';
     let appliedCount = 0;
+    let reviewedCount = 0;
+    const failed = []; // per-row failures — one bad row must NOT kill the whole batch
 
     for (const id of ids) {
-      // Get suggestion
-      const suggestion = await pool.query('SELECT * FROM suggested_updates WHERE id = $1 AND status = $2', [id, 'pending']);
-      if (suggestion.rows.length === 0) continue;
-      const s = suggestion.rows[0];
+      // Per-iteration try/catch: prevents one row's error from aborting the
+      // entire batch. Without this, a single invalid field_name (e.g. a column
+      // that doesn't exist on the target table) would cascade to 500 and the
+      // user would see "Failed to batch review suggestions" with zero detail
+      // about which row(s) failed.
+      try {
+        const suggestion = await pool.query('SELECT * FROM suggested_updates WHERE id = $1 AND status = $2', [id, 'pending']);
+        if (suggestion.rows.length === 0) continue; // already reviewed, silently skip
+        const s = suggestion.rows[0];
 
-      // Update status
-      await pool.query(
-        `UPDATE suggested_updates
-         SET status = $1, reviewed_by = $2, reviewed_at = NOW(), review_notes = $3, updated_at = NOW()
-         WHERE id = $4`,
-        [status, reviewerName, review_notes || null, id]
-      );
+        // Update status first (always succeeds — writes to suggested_updates,
+        // not the target entity). If the apply step later throws, we'll still
+        // have logged the review but set applied=false.
+        await pool.query(
+          `UPDATE suggested_updates
+           SET status = $1, reviewed_by = $2, reviewed_at = NOW(), review_notes = $3, updated_at = NOW()
+           WHERE id = $4`,
+          [status, reviewerName, review_notes || null, id]
+        );
+        reviewedCount++;
 
-      // Apply if accepted
-      if (status === 'accepted') {
-        const tableMap = { contact: 'contacts', property: 'properties', company: 'companies' };
-        const idColMap = { contact: 'contact_id', property: 'property_id', company: 'company_id' };
-        const table = tableMap[s.entity_type];
-        const idCol = idColMap[s.entity_type];
+        // Apply if accepted
+        if (status === 'accepted') {
+          const tableMap = { contact: 'contacts', property: 'properties', company: 'companies' };
+          const idColMap = { contact: 'contact_id', property: 'property_id', company: 'company_id' };
+          const table = tableMap[s.entity_type];
+          const idCol = idColMap[s.entity_type];
 
-        if (table && idCol) {
-          // SECURITY: Houston audit C4 — 2026-03-30
-          validateColumn(s.field_name, table);
-          await pool.query(
-            `UPDATE ${table} SET ${quoteIdentifier(s.field_name)} = $1 WHERE ${quoteIdentifier(idCol)} = $2`,
-            [s.suggested_value, s.entity_id]
-          );
-          await pool.query('UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1', [id]);
-          appliedCount++;
+          if (table && idCol) {
+            // SECURITY: Houston audit C4 — 2026-03-30
+            validateColumn(s.field_name, table);
+            await pool.query(
+              `UPDATE ${table} SET ${quoteIdentifier(s.field_name)} = $1 WHERE ${quoteIdentifier(idCol)} = $2`,
+              [s.suggested_value, s.entity_id]
+            );
+            await pool.query('UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1', [id]);
+            appliedCount++;
+          }
         }
+      } catch (rowErr) {
+        console.error(`[AI API] batch row ${id} failed:`, rowErr.message);
+        failed.push({ id, error: rowErr.message });
       }
     }
 
@@ -2129,7 +2143,16 @@ router.post('/suggested-updates/batch', async (req, res) => {
       io.emit('suggested-updates:batch-reviewed', { ids, status, applied_count: appliedCount });
     }
 
-    res.json({ ok: true, reviewed: ids.length, applied: appliedCount });
+    // Always return 200 — partial success is still success. The frontend checks
+    // `failed.length` to decide whether to show a warning or success toast.
+    res.json({
+      ok: true,
+      reviewed: reviewedCount,
+      applied: appliedCount,
+      failed_count: failed.length,
+      failed,
+      processed: reviewedCount, // alias kept for backward-compat with existing client code
+    });
   } catch (err) {
     console.error('[AI API] POST /suggested-updates/batch error:', err.message);
     res.status(500).json({ error: 'Failed to batch review suggestions' });

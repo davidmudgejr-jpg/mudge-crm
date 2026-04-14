@@ -746,12 +746,20 @@ export default function VerificationQueue({ onCountChange }) {
   };
 
   // ── Handlers for BatchedSuggestionCard ──
+  //
+  // These handlers understand the server's new response shape:
+  //   { ok, reviewed, applied, failed_count, failed: [{id, error}] }
+  // Partial successes return 200 with failed_count > 0, so we check
+  // failed_count (not res.ok) to decide between success and warning toasts.
+
   const handleBatchApprove = async ({ accept, reject }) => {
     try {
-      // Two sequential calls — the backend /batch endpoint only accepts one
-      // status per request, and we may have both accepted and rejected IDs
-      // when the user drops some fields before approving. Reject first so
-      // that if the reject call fails, nothing has been committed yet.
+      let totalApplied = 0;
+      let totalFailed = 0;
+      const allFailures = [];
+
+      // Step 1: reject dropped fields (if any). We reject BEFORE accepting
+      // so that if the reject fails mid-way, we haven't committed yet.
       if (reject.length > 0) {
         const rejRes = await fetch(`${API}/api/ai/suggested-updates/batch`, {
           method: 'POST',
@@ -763,22 +771,44 @@ export default function VerificationQueue({ onCountChange }) {
           addToast(data.error || 'Failed to reject dropped fields', 'error');
           return;
         }
+        const rejData = await rejRes.json();
+        totalFailed += rejData.failed_count || 0;
+        if (rejData.failed?.length) allFailures.push(...rejData.failed);
       }
+
+      // Step 2: accept the kept fields
       if (accept.length > 0) {
         const accRes = await fetch(`${API}/api/ai/suggested-updates/batch`, {
           method: 'POST',
           headers: authHeaders(),
           body: JSON.stringify({ ids: accept, status: 'accepted' }),
         });
-        const data = await accRes.json();
-        if (accRes.ok) {
-          const dropMsg = reject.length > 0 ? ` (${reject.length} dropped)` : '';
-          addToast(`${data.processed || accept.length} fields approved${dropMsg}`, 'success');
-        } else {
+        if (!accRes.ok) {
+          const data = await accRes.json().catch(() => ({}));
           addToast(data.error || 'Batch approve failed', 'error');
           return;
         }
+        const accData = await accRes.json();
+        totalApplied += accData.applied || 0;
+        totalFailed += accData.failed_count || 0;
+        if (accData.failed?.length) allFailures.push(...accData.failed);
       }
+
+      // Build the toast message based on what actually happened
+      if (totalFailed > 0 && totalApplied === 0) {
+        // Total failure — show first error so user has something actionable
+        const firstErr = allFailures[0]?.error || 'unknown error';
+        addToast(`All ${totalFailed} updates failed: ${firstErr}`, 'error');
+      } else if (totalFailed > 0) {
+        // Partial success
+        const firstErr = allFailures[0]?.error || 'see server logs';
+        addToast(`${totalApplied} approved, ${totalFailed} failed (${firstErr})`, 'warning');
+      } else {
+        // Clean success
+        const dropMsg = reject.length > 0 ? ` (${reject.length} dropped)` : '';
+        addToast(`${totalApplied} fields approved${dropMsg}`, 'success');
+      }
+
       fetchData();
     } catch {
       addToast('Network error', 'error');
@@ -792,13 +822,19 @@ export default function VerificationQueue({ onCountChange }) {
         headers: authHeaders(),
         body: JSON.stringify({ ids, status: 'rejected' }),
       });
-      const data = await res.json();
-      if (res.ok) {
-        addToast(`${data.processed || ids.length} fields rejected`, 'success');
-        fetchData();
-      } else {
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
         addToast(data.error || 'Batch reject failed', 'error');
+        return;
       }
+      const data = await res.json();
+      if (data.failed_count > 0) {
+        const firstErr = data.failed?.[0]?.error || 'unknown error';
+        addToast(`${data.reviewed} rejected, ${data.failed_count} failed (${firstErr})`, 'warning');
+      } else {
+        addToast(`${data.reviewed || ids.length} fields rejected`, 'success');
+      }
+      fetchData();
     } catch {
       addToast('Network error', 'error');
     }
