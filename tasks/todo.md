@@ -757,14 +757,58 @@ git push origin main
 
 ## Review — Feature: Group verification queue by batch_id
 
-_Filled in after implementation._
+**Status**: ✅ Shipped to production on 2026-04-14.
+
+**Final commits on main** (the feature + all post-ship fixes):
+- `4769c402` feat(verification-queue): extract groupByBatch pure helper with tests
+- `1b9c67ce` feat(verification-queue): add BatchedSuggestionCard component
+- `e31d8b74` feat(verification-queue): wire groupByBatch into render loop
+- `bd576b72` docs(verification-queue): add implementation plan
+- `d107da14` fix: group by (batch_id, entity_id) + show card counts  [post-ship fix]
+- `6f20aa7b` fix: resilient batch handler + sidebar group counts     [post-ship fix]
+- `247366ad` feat(companies): add decision_maker_title/_name/email_1 columns  [migration 063]
+- `ff07e8bb` feat(verification-queue): add Review button with inline edit mode
 
 **What worked:**
+- **Incremental commits** made every step revertable. When production testing surfaced the Walker/Union Pacific bug, I could land a fix commit on top cleanly instead of rewriting history. Each of the 8 commits above is independently revertable via `git revert <sha>`.
+- **Extracting `groupByBatch` as a pure function + 10 vitest unit tests** caught edge cases (empty-string batch_id, null entity_id, slot-order preservation) before they hit production. Pure functions with good tests are the best kind of code — mechanically verifiable, trivially reasoning about.
+- **Server-side `group_counts` was a clean contract extension**. Old clients fall back to `status_counts` gracefully via `data.group_counts ?? data.status_counts`, so the frontend/backend deploys could land in either order without a broken intermediate state.
+- **Production testing with real 282-row data immediately surfaced three bugs** that unit tests couldn't have caught on synthetic data: the multi-entity grouping bug, the missing columns on `companies`, and the sidebar/header count mismatch. Real data is an irreplaceable test surface.
+- **Per-row `try/catch` in the batch approve handler** turned out to be critical infrastructure — it's the reason a single invalid field_name didn't nuke the entire 3-field batch and return a useless generic error.
 
 **What broke:**
+- **Grouping key was too coarse.** The first version keyed on `batch_id` alone. I even wrote a comment explicitly claiming "a batch always targets one entity" — and that assumption was false. Agents put ALL their updates for a single run under one `batch_id` regardless of target entity. Walker Stamping and Union Pacific got merged into one card that would have corrupted both companies on approve. Fix: compound `(batch_id, entity_id)` key, added in `d107da14` alongside a new unit test specifically for the multi-entity scenario.
+- **Agents were writing to columns that didn't exist.** All 282 pending rows targeted `decision_maker_title` / `decision_maker_name` / `email_1` on the `companies` table — but none of those columns existed in the schema. The INSERTs to `suggested_updates` succeeded (free-text `field_name` column, no constraint) but the APPLY step failed at the Postgres layer with "column does not exist". Latent for days until batch approve exposed it. Fix: migration 063 added the columns, whitelists updated in two places.
+- **Batch handler had no row-level error isolation.** One bad row → generic `500 "Failed to batch review suggestions"` → user saw zero detail. Fix: per-iteration `try/catch`, `failed[]` array in the response, specific error messages rendered in a warning toast.
+- **Sidebar and header disagreed on the pending count.** They both fetched from `/api/ai/suggested-updates` but read different fields (`status_counts.pending` = 288 raw rows vs `group_counts.pending` = 81 cards). Fix: update `Sidebar.jsx` to prefer `group_counts` with `status_counts` fallback.
 
 **What we'd do differently:**
+- **Verify grouping-key assumptions against real data BEFORE shipping.** A 30-second SQL probe would have caught the Walker/Union Pacific bug in the planning phase:
+  ```sql
+  SELECT batch_id, COUNT(DISTINCT entity_id) AS distinct_entities
+  FROM suggested_updates
+  GROUP BY batch_id
+  HAVING COUNT(DISTINCT entity_id) > 1;
+  ```
+  Instead, I trusted a mental model ("a batch is one agent run targeting one entity") that turned out to be wrong.
+- **Validate agent-written `field_name`s at POST time, not apply time.** The current flow lets bad data accumulate in `suggested_updates` indefinitely and only fails when someone tries to approve. A server-side validator on `POST /api/ai/suggested-updates` that rejects field_names not in `ALLOWED_COLS` would catch this at the source.
+- **Start every batch handler with per-row error isolation from day one.** This isn't a post-hoc fix, it's a design principle: any loop over user-provided IDs that mutates state MUST isolate per-iteration failures. Make this the default template for all new batch endpoints.
+- **Grep for all consumers of a field before renaming it.** When I renamed the frontend state from `suCounts` (row counts) to `suGroupCounts` (card counts) via `data.group_counts`, I missed that `Sidebar.jsx` was ALSO fetching and reading `status_counts` via a separate `useEffect`. A `grep 'status_counts'` before renaming would have caught it.
 
-**Follow-ups (if any):**
+**Follow-ups (not urgent but worth tracking):**
+1. **Cross-batch duplication** (Walker Stamping appears in Batch · 3 AND Batch · 2): Two agent runs both propose enrichments for the same entity with overlapping fields. My grouping correctly keeps them as separate cards, but the user still sees duplicates. Consider server-side filter: for any `(entity_id, field_name)`, show only the newest pending row.
+2. **Intra-batch duplication** (Kimley-Horn shows the same title/name/email twice): Same `batch_id`, same `entity_id`, same `field_name`, same value appearing twice. Root cause: no unique constraint. Fix is a partial index: `CREATE UNIQUE INDEX ... ON suggested_updates (batch_id, entity_id, field_name) WHERE status = 'pending';`
+3. **Agent fleet is ahead of CRM schema**: The 282 rows of `decision_maker_*` data shipped to production before the columns existed. Add a server-side validator on the `suggested_updates` POST that rejects unknown field_names. Better: FK-like constraint that references `information_schema.columns`.
+4. **Extend `/batch` endpoint to support per-id `applied_value`**: The current Review → Confirm flow uses N sequential `PATCH /:id` calls. A single `/batch` call with `{ items: [{id, applied_value}], status: 'accepted' }` would be faster for larger batches.
+5. **Keyboard UX polish in edit mode**: Add an "unsaved changes" confirmation before Escape/Cancel discards edits. Low priority; only matters once users start making non-trivial edits.
+6. **Standardize dev vs prod database**: `ie-crm/.env` points at production Neon (`ep-withered-mode`). That means "local development" actually mutates production data. Consider creating a Neon dev branch and switching local `.env` to it.
+
+---
+
+## Lessons captured
+
+See `tasks/lessons.md` for two new entries dated 2026-04-14:
+- **"Grouped-by-batch-id Without Checking Entity"** — the compound key lesson
+- **"Agents Writing to a Nonexistent Schema"** — the validate-at-POST-time lesson
 
 ---
