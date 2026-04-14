@@ -237,9 +237,16 @@ function SuggestionCard({ item, onReview }) {
 }
 
 // ── Batched Suggestion Card (Multiple Fields, Same Batch) ───
-function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
+function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch, onApproveBatchWithEdits }) {
   const [reviewing, setReviewing] = useState(false);
   const [droppedIds, setDroppedIds] = useState(new Set());
+  // Mode state for the three-button Review flow:
+  //   'view' — default, shows the agent's proposed values as read-only text
+  //   'edit' — input fields replace each row so the user can tweak values
+  //            before committing via Confirm. Entered via the yellow Review
+  //            button in the footer.
+  const [mode, setMode] = useState('view');
+  const [editValues, setEditValues] = useState({}); // { [id]: editedString }
 
   // All items in a group share the same entity because groupByBatch keys on
   // (batch_id, entity_id) — same agent run AND same target entity. So we
@@ -249,6 +256,12 @@ function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
   const badge = ENTITY_BADGES[head.entity_type] || { label: head.entity_type, cls: 'bg-crm-hover text-crm-muted' };
   const keptIds = items.filter(i => !droppedIds.has(i.id)).map(i => i.id);
   const rejectedIds = [...droppedIds];
+  // In edit mode we hide dropped items entirely — Review is for tweaking
+  // values you want to keep, not for managing drops. To un-drop, cancel
+  // edit mode, toggle ✕, and re-enter Review.
+  const visibleItems = mode === 'edit'
+    ? items.filter(i => !droppedIds.has(i.id))
+    : items;
 
   const toggleDrop = (id) => {
     setDroppedIds(prev => {
@@ -256,6 +269,48 @@ function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
+  };
+
+  // ── Edit-mode helpers ────────────────────────────────────────
+  const enterEditMode = () => {
+    // Pre-fill inputs with the agent's suggested values so the user is
+    // editing the proposal rather than retyping from scratch. Dropped items
+    // are excluded because they're already on the reject path.
+    const initial = {};
+    items.forEach(item => {
+      if (!droppedIds.has(item.id)) {
+        initial[item.id] = item.suggested_value || '';
+      }
+    });
+    setEditValues(initial);
+    setMode('edit');
+  };
+
+  const exitEditMode = () => {
+    setMode('view');
+    setEditValues({});
+  };
+
+  const handleConfirmEdits = async () => {
+    if (keptIds.length === 0) {
+      // Edge: user somehow has nothing kept — just reject everything
+      return handleRejectAll();
+    }
+    setReviewing(true);
+    try {
+      // Build per-item { id, applied_value } pairs. The parent handler
+      // calls PATCH /:id for each (needed because /batch can't carry
+      // per-id values) and does the reject-dropped-items call in one shot.
+      const edits = keptIds.map(id => ({
+        id,
+        applied_value: editValues[id] ?? '',
+      }));
+      await onApproveBatchWithEdits({ edits, rejectIds: rejectedIds });
+    } finally {
+      setReviewing(false);
+      setMode('view');
+      setEditValues({});
+    }
   };
 
   const handleRejectAll = async () => {
@@ -281,7 +336,11 @@ function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
   };
 
   return (
-    <div className="rounded-xl border border-crm-border/50 bg-crm-card/60 hover:bg-crm-card hover:border-crm-border transition-all duration-200">
+    <div className={`rounded-xl border transition-all duration-200 ${
+      mode === 'edit'
+        ? 'border-yellow-500/40 bg-crm-card shadow-lg'
+        : 'border-crm-border/50 bg-crm-card/60 hover:bg-crm-card hover:border-crm-border'
+    }`}>
       {/* Header */}
       <div className="flex items-center gap-3 px-4 pt-3 pb-2 border-b border-crm-border/30">
         <span className="text-[10px] px-2 py-0.5 rounded-full border flex-shrink-0 bg-indigo-500/10 text-indigo-400 border-indigo-500/20">
@@ -291,6 +350,11 @@ function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
           {badge.label}
         </span>
         <span className="text-crm-text font-medium truncate flex-1">{head.entity_name || 'Unknown'}</span>
+        {mode === 'edit' && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full border flex-shrink-0 bg-yellow-500/10 text-yellow-400 border-yellow-500/30 italic">
+            reviewing
+          </span>
+        )}
         <div className="flex items-center gap-2 flex-shrink-0">
           <div className="w-16 h-1.5 rounded-full bg-crm-hover overflow-hidden">
             <div className={`h-full rounded-full ${confidenceBarColor(head.confidence)}`} style={{ width: `${head.confidence}%` }} />
@@ -303,8 +367,9 @@ function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
 
       {/* Field rows */}
       <div className="px-4 py-2 space-y-1.5">
-        {items.map((item) => {
+        {visibleItems.map((item, idx) => {
           const dropped = droppedIds.has(item.id);
+          const isEditing = mode === 'edit' && !dropped;
           return (
             <div
               key={item.id}
@@ -313,32 +378,50 @@ function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
               <span className="text-crm-muted text-xs flex-shrink-0 w-40 text-right truncate">
                 {item.field_label || item.field_name}:
               </span>
-              {item.current_value ? (
-                <span className="text-crm-muted text-xs font-mono line-through truncate max-w-[140px]">{item.current_value}</span>
+              {isEditing ? (
+                // Edit mode: input pre-filled with the suggested value.
+                // Enter confirms all edits, Escape exits edit mode.
+                <input
+                  autoFocus={idx === 0}
+                  value={editValues[item.id] ?? ''}
+                  onChange={(e) => setEditValues(prev => ({ ...prev, [item.id]: e.target.value }))}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleConfirmEdits();
+                    if (e.key === 'Escape') exitEditMode();
+                  }}
+                  className="flex-1 bg-crm-bg border border-crm-accent/40 rounded-lg px-3 py-1.5 text-xs text-crm-text font-mono focus:outline-none focus:border-crm-accent focus:ring-1 focus:ring-crm-accent/30"
+                />
               ) : (
-                <span className="text-crm-muted/50 text-xs italic">(empty)</span>
+                <>
+                  {item.current_value ? (
+                    <span className="text-crm-muted text-xs font-mono line-through truncate max-w-[140px]">{item.current_value}</span>
+                  ) : (
+                    <span className="text-crm-muted/50 text-xs italic">(empty)</span>
+                  )}
+                  <svg className="w-3 h-3 text-crm-muted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                  <span className={`text-xs font-mono font-medium truncate flex-1 ${dropped ? 'text-crm-muted line-through' : 'text-green-400'}`}>
+                    {item.suggested_value}
+                  </span>
+                  {/* Drop button only in view mode — edit mode filters out dropped items */}
+                  <button
+                    onClick={() => toggleDrop(item.id)}
+                    title={dropped ? 'Keep this field' : 'Drop this field from approval'}
+                    className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
+                      dropped
+                        ? 'bg-crm-hover text-crm-muted hover:text-crm-text'
+                        : 'text-crm-muted hover:bg-red-500/15 hover:text-red-400'
+                    }`}
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      {dropped
+                        ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                        : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />}
+                    </svg>
+                  </button>
+                </>
               )}
-              <svg className="w-3 h-3 text-crm-muted flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
-              </svg>
-              <span className={`text-xs font-mono font-medium truncate flex-1 ${dropped ? 'text-crm-muted line-through' : 'text-green-400'}`}>
-                {item.suggested_value}
-              </span>
-              <button
-                onClick={() => toggleDrop(item.id)}
-                title={dropped ? 'Keep this field' : 'Drop this field from approval'}
-                className={`flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center transition-colors ${
-                  dropped
-                    ? 'bg-crm-hover text-crm-muted hover:text-crm-text'
-                    : 'text-crm-muted hover:bg-red-500/15 hover:text-red-400'
-                }`}
-              >
-                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  {dropped
-                    ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                    : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />}
-                </svg>
-              </button>
             </div>
           );
         })}
@@ -346,35 +429,81 @@ function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
 
       {/* Footer actions */}
       <div className="flex items-center justify-end gap-2 px-4 py-2 border-t border-crm-border/30">
-        {droppedIds.size > 0 && (
+        {mode === 'view' && droppedIds.size > 0 && (
           <span className="text-[10px] text-crm-muted mr-auto italic">
             {droppedIds.size} dropped, {keptIds.length} kept
           </span>
         )}
-        <button
-          onClick={handleApproveAll}
-          disabled={reviewing}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium disabled:opacity-50"
-        >
-          {reviewing ? (
-            <div className="w-3.5 h-3.5 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
-          ) : (
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          )}
-          Approve {keptIds.length === items.length ? 'All' : `${keptIds.length} of ${items.length}`}
-        </button>
-        <button
-          onClick={handleRejectAll}
-          disabled={reviewing}
-          className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors text-xs font-medium disabled:opacity-50"
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-          Reject All
-        </button>
+
+        {mode === 'view' ? (
+          <>
+            {/* Review button (yellow, secondary) — enters inline edit mode.
+                Restores the "edit before approve" flow the single SuggestionCard
+                has, adapted for multi-field batches. */}
+            <button
+              onClick={enterEditMode}
+              disabled={reviewing || keptIds.length === 0}
+              title="Edit values before approving"
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-yellow-500/15 text-yellow-400 border border-yellow-500/30 hover:bg-yellow-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+              </svg>
+              Review
+            </button>
+            <button
+              onClick={handleApproveAll}
+              disabled={reviewing}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+            >
+              {reviewing ? (
+                <div className="w-3.5 h-3.5 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              Approve {keptIds.length === items.length ? 'All' : `${keptIds.length} of ${items.length}`}
+            </button>
+            <button
+              onClick={handleRejectAll}
+              disabled={reviewing}
+              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              Reject All
+            </button>
+          </>
+        ) : (
+          <>
+            {/* Edit mode footer: Confirm commits edited values via PATCH /:id
+                (so per-row applied_value lands in updated_data JSONB for the
+                audit trail). Cancel returns to view mode without committing. */}
+            <button
+              onClick={handleConfirmEdits}
+              disabled={reviewing}
+              className="flex items-center gap-1 px-4 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium disabled:opacity-50"
+            >
+              {reviewing ? (
+                <div className="w-3.5 h-3.5 border-2 border-green-400 border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+              Confirm {keptIds.length === 1 ? '1 edit' : `${keptIds.length} edits`}
+            </button>
+            <button
+              onClick={exitEditMode}
+              disabled={reviewing}
+              className="px-3 py-1.5 rounded-lg bg-crm-hover text-crm-muted hover:text-crm-text transition-colors text-xs disabled:opacity-50"
+            >
+              Cancel
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -840,6 +969,67 @@ export default function VerificationQueue({ onCountChange }) {
     }
   };
 
+  // Approve-with-edits: called from BatchedSuggestionCard's Review → Confirm
+  // flow. Unlike handleBatchApprove, this uses PATCH /:id per item so we can
+  // send per-row applied_value (the edited value the user typed). The batch
+  // POST endpoint only supports one shared status per call and no per-id
+  // values, so per-row PATCH is the right tool here. Dropped items are
+  // rejected in a single batch call before the approves start.
+  const handleBatchEditApprove = async ({ edits, rejectIds }) => {
+    try {
+      // Step 1: reject dropped items (one batch call, fails loudly if it errors)
+      if (rejectIds && rejectIds.length > 0) {
+        const rejRes = await fetch(`${API}/api/ai/suggested-updates/batch`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ ids: rejectIds, status: 'rejected' }),
+        });
+        if (!rejRes.ok) {
+          const data = await rejRes.json().catch(() => ({}));
+          addToast(data.error || 'Failed to reject dropped fields', 'error');
+          return;
+        }
+      }
+
+      // Step 2: PATCH each kept item with its user-edited applied_value.
+      // The server stores { applied_value, original_suggestion } in
+      // updated_data JSONB when applied_value differs — audit trail for free.
+      let approved = 0;
+      const failures = [];
+      for (const edit of edits) {
+        try {
+          const res = await fetch(`${API}/api/ai/suggested-updates/${edit.id}`, {
+            method: 'PATCH',
+            headers: authHeaders(),
+            body: JSON.stringify({ status: 'accepted', applied_value: edit.applied_value }),
+          });
+          if (res.ok) {
+            approved++;
+          } else {
+            const data = await res.json().catch(() => ({}));
+            failures.push({ id: edit.id, error: data.error || `HTTP ${res.status}` });
+          }
+        } catch (e) {
+          failures.push({ id: edit.id, error: e.message });
+        }
+      }
+
+      // Step 3: single toast summarizing the outcome
+      if (failures.length > 0 && approved === 0) {
+        addToast(`All ${failures.length} edits failed: ${failures[0]?.error || 'unknown'}`, 'error');
+      } else if (failures.length > 0) {
+        const firstErr = failures[0]?.error || 'see server logs';
+        addToast(`${approved} approved with edits, ${failures.length} failed (${firstErr})`, 'warning');
+      } else {
+        addToast(`${approved} fields approved with edits`, 'success');
+      }
+
+      fetchData();
+    } catch {
+      addToast('Network error', 'error');
+    }
+  };
+
   // ── Handler for sandbox_contacts ──
   const handleSandboxReview = async (id, status, fields) => {
     try {
@@ -1017,6 +1207,7 @@ export default function VerificationQueue({ onCountChange }) {
                       items={group.items}
                       onApproveBatch={handleBatchApprove}
                       onRejectBatch={handleBatchReject}
+                      onApproveBatchWithEdits={handleBatchEditApprove}
                     />
                   </div>
                 );
