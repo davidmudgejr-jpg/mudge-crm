@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useToast } from '../components/shared/Toast';
+import { groupByBatch } from '../utils/groupByBatch';
 
 const API = import.meta.env.VITE_API_URL || '';
 
@@ -617,6 +618,20 @@ export default function VerificationQueue({ onCountChange }) {
     ...sandboxItems.map(c => ({ ...c, _source: 'new_contact' })),
   ].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+  // Group multi-field agent-run batches into single display units.
+  // Groups have uniform shape { batch_id, items, entity_name }; consumers
+  // branch on items.length > 1 to decide between BatchedSuggestionCard
+  // (multi-field) and the existing compact SuggestionCard (single-field).
+  const displayGroups = groupByBatch(allItems);
+
+  // IDs the "Select all updates" checkbox is allowed to select. We exclude
+  // items living inside batched cards because those cards don't render a
+  // checkbox — batching them into selectedIds would cause "Approve Selected"
+  // to silently operate on items the user can't see as selected.
+  const selectableSingleUpdateIds = displayGroups
+    .filter(g => g.items.length === 1 && g.items[0]._source === 'update' && g.items[0].status === 'pending')
+    .map(g => g.items[0].id);
+
   // ── Fetch both sources in parallel ──
   const fetchData = useCallback(async () => {
     try {
@@ -715,6 +730,65 @@ export default function VerificationQueue({ onCountChange }) {
         fetchData();
       } else {
         addToast(data.error || 'Batch failed', 'error');
+      }
+    } catch {
+      addToast('Network error', 'error');
+    }
+  };
+
+  // ── Handlers for BatchedSuggestionCard ──
+  const handleBatchApprove = async ({ accept, reject }) => {
+    try {
+      // Two sequential calls — the backend /batch endpoint only accepts one
+      // status per request, and we may have both accepted and rejected IDs
+      // when the user drops some fields before approving. Reject first so
+      // that if the reject call fails, nothing has been committed yet.
+      if (reject.length > 0) {
+        const rejRes = await fetch(`${API}/api/ai/suggested-updates/batch`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ ids: reject, status: 'rejected' }),
+        });
+        if (!rejRes.ok) {
+          const data = await rejRes.json().catch(() => ({}));
+          addToast(data.error || 'Failed to reject dropped fields', 'error');
+          return;
+        }
+      }
+      if (accept.length > 0) {
+        const accRes = await fetch(`${API}/api/ai/suggested-updates/batch`, {
+          method: 'POST',
+          headers: authHeaders(),
+          body: JSON.stringify({ ids: accept, status: 'accepted' }),
+        });
+        const data = await accRes.json();
+        if (accRes.ok) {
+          const dropMsg = reject.length > 0 ? ` (${reject.length} dropped)` : '';
+          addToast(`${data.processed || accept.length} fields approved${dropMsg}`, 'success');
+        } else {
+          addToast(data.error || 'Batch approve failed', 'error');
+          return;
+        }
+      }
+      fetchData();
+    } catch {
+      addToast('Network error', 'error');
+    }
+  };
+
+  const handleBatchReject = async (ids) => {
+    try {
+      const res = await fetch(`${API}/api/ai/suggested-updates/batch`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ ids, status: 'rejected' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addToast(`${data.processed || ids.length} fields rejected`, 'success');
+        fetchData();
+      } else {
+        addToast(data.error || 'Batch reject failed', 'error');
       }
     } catch {
       addToast('Network error', 'error');
@@ -871,44 +945,60 @@ export default function VerificationQueue({ onCountChange }) {
         ) : (
           <div className="space-y-2">
             {/* Select-all checkbox for pending tab (suggested_updates only) */}
-            {activeTab === 'pending' && pendingUpdateCount > 1 && (
+            {activeTab === 'pending' && selectableSingleUpdateIds.length > 1 && (
               <label className="flex items-center gap-2 px-4 py-2 text-xs text-crm-muted cursor-pointer hover:text-crm-text">
                 <input
                   type="checkbox"
-                  checked={selectedIds.size === pendingUpdateCount && selectedIds.size > 0}
+                  checked={selectedIds.size === selectableSingleUpdateIds.length && selectedIds.size > 0}
                   onChange={(e) => {
                     if (e.target.checked) {
-                      setSelectedIds(new Set(suggestedItems.filter(i => i.status === 'pending').map(i => i.id)));
+                      setSelectedIds(new Set(selectableSingleUpdateIds));
                     } else {
                       setSelectedIds(new Set());
                     }
                   }}
                   className="rounded border-crm-border text-crm-accent focus:ring-crm-accent/30"
                 />
-                Select all updates
+                Select all single-field updates
               </label>
             )}
 
-            {allItems.map((item) => (
-              <div key={`${item._source}-${item.id}`} className="flex items-center gap-2">
-                {/* Checkbox only for suggested_updates on pending tab */}
-                {activeTab === 'pending' && item.status === 'pending' && item._source === 'update' && (
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(item.id)}
-                    onChange={() => toggleSelect(item.id)}
-                    className="rounded border-crm-border text-crm-accent focus:ring-crm-accent/30 flex-shrink-0"
-                  />
-                )}
-                <div className="flex-1">
-                  {item._source === 'update' ? (
-                    <SuggestionCard item={item} onReview={handleReview} />
-                  ) : (
-                    <SandboxContactCard item={item} onReview={handleSandboxReview} />
+            {displayGroups.map((group) => {
+              // Multi-item groups with _source === 'update' → BatchedSuggestionCard
+              if (group.items.length > 1 && group.items[0]._source === 'update') {
+                return (
+                  <div key={`batch-${group.batch_id}`}>
+                    <BatchedSuggestionCard
+                      items={group.items}
+                      onApproveBatch={handleBatchApprove}
+                      onRejectBatch={handleBatchReject}
+                    />
+                  </div>
+                );
+              }
+              // Single-item groups → existing compact cards (no regression)
+              const item = group.items[0];
+              return (
+                <div key={`${item._source}-${item.id}`} className="flex items-center gap-2">
+                  {/* Checkbox only for suggested_updates on pending tab */}
+                  {activeTab === 'pending' && item.status === 'pending' && item._source === 'update' && (
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(item.id)}
+                      onChange={() => toggleSelect(item.id)}
+                      className="rounded border-crm-border text-crm-accent focus:ring-crm-accent/30 flex-shrink-0"
+                    />
                   )}
+                  <div className="flex-1">
+                    {item._source === 'update' ? (
+                      <SuggestionCard item={item} onReview={handleReview} />
+                    ) : (
+                      <SandboxContactCard item={item} onReview={handleSandboxReview} />
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
