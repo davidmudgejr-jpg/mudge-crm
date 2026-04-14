@@ -1955,14 +1955,39 @@ router.get('/suggested-updates', async (req, res) => {
 
     const result = await pool.query(query, params);
 
-    // Also get counts by status
+    // Row counts by status — individual field updates in suggested_updates.
     const counts = await pool.query(
       `SELECT status, COUNT(*) as count FROM suggested_updates GROUP BY status`
     );
     const statusCounts = {};
     counts.rows.forEach(r => { statusCounts[r.status] = parseInt(r.count); });
 
-    res.json({ suggestions: result.rows, count: result.rows.length, status_counts: statusCounts });
+    // Group counts by status — distinct (batch_id, entity_id) pairs.
+    // This represents the number of CARDS the verification queue UI will
+    // display after client-side grouping, which is what users actually see
+    // and care about (vs. raw field-level row counts). Rows missing batch_id
+    // or entity_id fall back to per-row unique keys so they count as their
+    // own cards rather than silently merging into NULL-bucket groups.
+    const groupCounts = await pool.query(
+      `SELECT status,
+         COUNT(DISTINCT
+           CASE
+             WHEN batch_id IS NULL OR entity_id IS NULL THEN 'solo-' || id::text
+             ELSE batch_id || '|' || entity_id::text
+           END
+         ) as count
+       FROM suggested_updates
+       GROUP BY status`
+    );
+    const groupCountsObj = {};
+    groupCounts.rows.forEach(r => { groupCountsObj[r.status] = parseInt(r.count); });
+
+    res.json({
+      suggestions: result.rows,
+      count: result.rows.length,
+      status_counts: statusCounts,
+      group_counts: groupCountsObj,
+    });
   } catch (err) {
     console.error('[AI API] GET /suggested-updates error:', err.message);
     res.status(500).json({ error: 'Failed to fetch suggested updates' });

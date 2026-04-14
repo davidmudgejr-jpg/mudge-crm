@@ -241,9 +241,10 @@ function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch }) {
   const [reviewing, setReviewing] = useState(false);
   const [droppedIds, setDroppedIds] = useState(new Set());
 
-  // All items in a batch share the same entity (guaranteed by the fact that
-  // batch_id is unique per agent run, and a run always targets one entity).
-  // So we pull display-common fields from the first item.
+  // All items in a group share the same entity because groupByBatch keys on
+  // (batch_id, entity_id) — same agent run AND same target entity. So we
+  // can safely pull display-common fields (entity_name, entity_type,
+  // confidence, agent_name) from the first item.
   const head = items[0];
   const badge = ENTITY_BADGES[head.entity_type] || { label: head.entity_type, cls: 'bg-crm-hover text-crm-muted' };
   const keptIds = items.filter(i => !droppedIds.has(i.id)).map(i => i.id);
@@ -599,17 +600,23 @@ function SandboxContactCard({ item, onReview }) {
 export default function VerificationQueue({ onCountChange }) {
   const [suggestedItems, setSuggestedItems] = useState([]);
   const [sandboxItems, setSandboxItems] = useState([]);
-  const [suCounts, setSuCounts] = useState({});
+  // suGroupCounts holds group_counts from the API — the number of CARDS
+  // (distinct batch_id + entity_id pairs) per status. This is what the
+  // header stats and tab labels display, matching what the user sees.
+  const [suGroupCounts, setSuGroupCounts] = useState({});
   const [scCounts, setScCounts] = useState({});
   const [activeTab, setActiveTab] = useState('pending');
   const [loading, setLoading] = useState(true);
   const [selectedIds, setSelectedIds] = useState(new Set()); // only for suggested_updates
   const { addToast } = useToast();
 
-  // Combined status counts for tab badges
-  const pendingCount = (suCounts.pending || 0) + (scCounts.pending || 0);
-  const acceptedCount = (suCounts.accepted || 0) + (scCounts.approved || 0) + (scCounts.promoted || 0);
-  const rejectedCount = (suCounts.rejected || 0) + (scCounts.rejected || 0);
+  // Combined status counts for tab badges. These reflect the CARD count
+  // (post-grouping by batch_id + entity_id), not the raw field-update row
+  // count — otherwise the user sees "282 pending" when they really have
+  // ~94 actionable cards, which is misleading and demoralizing.
+  const pendingCount = (suGroupCounts.pending || 0) + (scCounts.pending || 0);
+  const acceptedCount = (suGroupCounts.accepted || 0) + (scCounts.approved || 0) + (scCounts.promoted || 0);
+  const rejectedCount = (suGroupCounts.rejected || 0) + (scCounts.rejected || 0);
   const statusCounts = { pending: pendingCount, accepted: acceptedCount, rejected: rejectedCount };
 
   // Merge both sources, tagged and sorted by created_at (newest first)
@@ -650,7 +657,9 @@ export default function VerificationQueue({ onCountChange }) {
 
       setSuggestedItems(suData.suggestions || []);
       setSandboxItems(scData.contacts || []);
-      setSuCounts(suData.status_counts || {});
+      // Store GROUP counts, not raw row counts — the header and tab labels
+      // display these as "N pending cards" rather than "N pending rows".
+      setSuGroupCounts(suData.group_counts || suData.status_counts || {});
       setScCounts(scData.status_counts || {});
 
       // Report total for the current tab
