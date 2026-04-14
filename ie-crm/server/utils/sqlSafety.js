@@ -63,6 +63,11 @@ const ALLOWED_COLS = {
     'tenant_sic', 'tenant_naics', 'suite',
     'tags', 'created_at', 'modified', 'updated_at',
     'data_quality_flag',
+    // Decision-maker denormalized fields — migration 063 (2026-04-14).
+    // Enrichment agents (agent_m_hunter_domain_search, agent_48_enrichment, etc.)
+    // write these via suggested_updates. Whitelisted so validateColumn() lets
+    // the batch apply step through.
+    'decision_maker_title', 'decision_maker_name', 'email_1',
   ]),
   deals: new Set([
     'deal_id', 'airtable_id', 'deal_name', 'deal_type', 'deal_source', 'status',

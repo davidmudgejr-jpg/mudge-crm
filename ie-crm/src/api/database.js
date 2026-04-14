@@ -65,6 +65,9 @@ const ALLOWED_COLS = {
     'lease_exp', 'lease_months_left', 'move_in_date', 'notes', 'city',
     'tenant_sic', 'tenant_naics', 'suite',
     'tags', 'created_at', 'modified',
+    // Decision-maker denormalized fields — migration 063 (2026-04-14).
+    // Keep in sync with server/utils/sqlSafety.js companies Set.
+    'decision_maker_title', 'decision_maker_name', 'email_1',
   ]),
   deals: new Set([
     'deal_id', 'airtable_id', 'deal_name', 'deal_type', 'deal_source', 'status',
