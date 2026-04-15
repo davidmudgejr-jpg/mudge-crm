@@ -237,28 +237,9 @@ function SuggestionCard({ item, onReview }) {
 }
 
 // ── Batched Suggestion Card (Multiple Fields, Same Batch) ───
-function BatchedSuggestionCard({
-  items,
-  onApproveBatch,
-  onRejectBatch,
-  onApproveBatchWithEdits,
-  droppedIds: controlledDroppedIds,
-  onDropIdsChange,
-}) {
+function BatchedSuggestionCard({ items, onApproveBatch, onRejectBatch, onApproveBatchWithEdits }) {
   const [reviewing, setReviewing] = useState(false);
-  // `droppedIds` can be controlled by the parent (for bulk-select semantics)
-  // or managed locally. Falling back to local state keeps the card usable
-  // standalone without parent wiring.
-  const [localDroppedIds, setLocalDroppedIds] = useState(new Set());
-  const droppedIds = controlledDroppedIds ?? localDroppedIds;
-  const setDroppedIds = (updater) => {
-    const next = typeof updater === 'function' ? updater(droppedIds) : updater;
-    if (onDropIdsChange) {
-      onDropIdsChange(next);
-    } else {
-      setLocalDroppedIds(next);
-    }
-  };
+  const [droppedIds, setDroppedIds] = useState(new Set());
   // Mode state for the three-button Review flow:
   //   'view' — default, shows the agent's proposed values as read-only text
   //   'edit' — input fields replace each row so the user can tweak values
@@ -755,18 +736,7 @@ export default function VerificationQueue({ onCountChange }) {
   const [scCounts, setScCounts] = useState({});
   const [activeTab, setActiveTab] = useState('pending');
   const [loading, setLoading] = useState(true);
-  // `selectedKeys` — unified selection across all three card types. Each key
-  // is a keyed string so single updates, batched groups, and sandbox contacts
-  // never collide on raw numeric IDs. See getGroupKey() below.
-  //   "update:42"                   — single-field update row
-  //   "contact:42"                  — sandbox contact row
-  //   "batch:<batch_id>:<entity_id>" — entire batched-update group (one card)
-  const [selectedKeys, setSelectedKeys] = useState(new Set());
-  // `droppedIdsByGroup` lifts the "X this field" state out of each batched
-  // card so the parent can respect per-field drops when a batched card is
-  // bulk-approved from the sticky selection bar. Keyed by the same
-  // batch:<batch_id>:<entity_id> string we use for selection.
-  const [droppedIdsByGroup, setDroppedIdsByGroup] = useState({});
+  const [selectedIds, setSelectedIds] = useState(new Set()); // only for suggested_updates
   // `fetchSeq` — monotonically-increasing token for fetchData calls. The
   // symptom was: after 2-3 quick approves, later approves would return
   // `applied: 0` from the backend. Root cause: when multiple fetchData()
@@ -800,25 +770,13 @@ export default function VerificationQueue({ onCountChange }) {
   // (multi-field) and the existing compact SuggestionCard (single-field).
   const displayGroups = groupByBatch(allItems);
 
-  // Produce the selection/drop key for a display group. MUST match the key
-  // scheme the sticky bar and bulk handlers use to parse selection back into
-  // API calls, or selection toggles will appear to work but bulk actions will
-  // silently target the wrong items.
-  const getGroupKey = (group) => {
-    const head = group.items[0];
-    if (group.items.length > 1 && head._source === 'update') {
-      return `batch:${head.batch_id}:${head.entity_id}`;
-    }
-    return head._source === 'update' ? `update:${head.id}` : `contact:${head.id}`;
-  };
-
-  // Keys of every display group currently eligible for bulk selection. Bulk
-  // actions only run on the pending tab (accepted/rejected are read-only).
-  const selectableGroupKeys = activeTab === 'pending'
-    ? displayGroups
-        .filter(g => g.items[0].status === 'pending')
-        .map(getGroupKey)
-    : [];
+  // IDs the "Select all updates" checkbox is allowed to select. We exclude
+  // items living inside batched cards because those cards don't render a
+  // checkbox — batching them into selectedIds would cause "Approve Selected"
+  // to silently operate on items the user can't see as selected.
+  const selectableSingleUpdateIds = displayGroups
+    .filter(g => g.items.length === 1 && g.items[0]._source === 'update' && g.items[0].status === 'pending')
+    .map(g => g.items[0].id);
 
   // ── Fetch both sources in parallel ──
   const fetchData = useCallback(async () => {
@@ -866,8 +824,7 @@ export default function VerificationQueue({ onCountChange }) {
 
   useEffect(() => {
     setLoading(true);
-    setSelectedKeys(new Set());
-    setDroppedIdsByGroup({});
+    setSelectedIds(new Set());
     fetchData();
   }, [fetchData]);
 
@@ -895,129 +852,48 @@ export default function VerificationQueue({ onCountChange }) {
     }
   };
 
-  // ── Bulk selection handlers (sticky bar) ──
-  //
-  // Convert the current `selectedKeys` set into two flat ID lists the APIs
-  // expect, applying per-batched-card drops so users can X fields inside a
-  // batched card and then bulk-approve the whole card with those drops
-  // respected. Returns { updateIds, contactIds } where updateIds goes to the
-  // /suggested-updates/batch endpoint and contactIds fan out to
-  // PATCH /sandbox-contacts/:id (no batch endpoint exists server-side).
-  const expandSelection = () => {
-    const updateIds = [];
-    const contactIds = [];
-    for (const key of selectedKeys) {
-      if (key.startsWith('update:')) {
-        updateIds.push(Number(key.slice('update:'.length)));
-      } else if (key.startsWith('contact:')) {
-        contactIds.push(Number(key.slice('contact:'.length)));
-      } else if (key.startsWith('batch:')) {
-        const group = displayGroups.find(g => getGroupKey(g) === key);
-        if (!group) continue;
-        const dropped = droppedIdsByGroup[key] || new Set();
-        for (const item of group.items) {
-          if (!dropped.has(item.id)) updateIds.push(item.id);
-        }
+  const handleBatchReview = async (status) => {
+    if (selectedIds.size === 0) return;
+    try {
+      const res = await fetch(`${API}/api/ai/suggested-updates/batch`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ ids: [...selectedIds], status }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addToast(`${data.processed || selectedIds.size} items ${status}`, 'success');
+        setSelectedIds(new Set());
+        fetchData();
+      } else {
+        addToast(data.error || 'Batch failed', 'error');
       }
+    } catch {
+      addToast('Network error', 'error');
     }
-    return { updateIds, contactIds };
   };
 
-  // Shared bulk-review runner for both Approve and Reject. Fires the
-  // /suggested-updates/batch call once (if there are any update IDs) and
-  // fans out PATCH /sandbox-contacts/:id in parallel (no batch endpoint).
-  // Tallies the results and shows a single combined toast so a mixed
-  // selection still feels like "one shot."
-  const runBulkReview = async ({ mode }) => {
-    const { updateIds, contactIds } = expandSelection();
-    if (updateIds.length === 0 && contactIds.length === 0) {
-      addToast('Nothing selected', 'warning');
-      return;
+  const handleAcceptAll = async () => {
+    // Only batch-accept suggested_updates (sandbox contacts need individual review)
+    const pendingUpdateIds = suggestedItems.filter(i => i.status === 'pending').map(i => i.id);
+    if (pendingUpdateIds.length === 0) return;
+    try {
+      const res = await fetch(`${API}/api/ai/suggested-updates/batch`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ ids: pendingUpdateIds, status: 'accepted' }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addToast(`${data.processed || pendingUpdateIds.length} updates approved`, 'success');
+        fetchData();
+      } else {
+        addToast(data.error || 'Batch failed', 'error');
+      }
+    } catch {
+      addToast('Network error', 'error');
     }
-
-    // Map UX mode → each endpoint's status vocabulary.
-    //   suggested_updates: accepted | rejected
-    //   sandbox_contacts:  approved | rejected
-    const updateStatus = mode === 'approve' ? 'accepted' : 'rejected';
-    const contactStatus = mode === 'approve' ? 'approved' : 'rejected';
-
-    let succeeded = 0;
-    let failed = 0;
-    let firstError = null;
-
-    const tasks = [];
-
-    if (updateIds.length > 0) {
-      tasks.push(
-        fetch(`${API}/api/ai/suggested-updates/batch`, {
-          method: 'POST',
-          headers: authHeaders(),
-          body: JSON.stringify({ ids: updateIds, status: updateStatus }),
-        })
-          .then(async (res) => {
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) {
-              failed += updateIds.length;
-              if (!firstError) firstError = data.error || `HTTP ${res.status}`;
-              return;
-            }
-            const applied = data.applied ?? data.reviewed ?? updateIds.length;
-            succeeded += applied;
-            if (data.failed_count) {
-              failed += data.failed_count;
-              if (!firstError && data.failed?.length) {
-                firstError = data.failed[0].error;
-              }
-            }
-          })
-          .catch((e) => {
-            failed += updateIds.length;
-            if (!firstError) firstError = e.message;
-          })
-      );
-    }
-
-    for (const id of contactIds) {
-      tasks.push(
-        fetch(`${API}/api/sandbox-contacts/${id}`, {
-          method: 'PATCH',
-          headers: authHeaders(),
-          body: JSON.stringify({ status: contactStatus }),
-        })
-          .then(async (res) => {
-            if (res.ok) {
-              succeeded += 1;
-            } else {
-              const data = await res.json().catch(() => ({}));
-              failed += 1;
-              if (!firstError) firstError = data.error || `HTTP ${res.status}`;
-            }
-          })
-          .catch((e) => {
-            failed += 1;
-            if (!firstError) firstError = e.message;
-          })
-      );
-    }
-
-    await Promise.all(tasks);
-
-    const verb = mode === 'approve' ? 'approved' : 'rejected';
-    if (failed > 0 && succeeded === 0) {
-      addToast(`All ${failed} items failed${firstError ? `: ${firstError}` : ''}`, 'error');
-    } else if (failed > 0) {
-      addToast(`${succeeded} ${verb}, ${failed} failed${firstError ? ` (${firstError})` : ''}`, 'warning');
-    } else {
-      addToast(`${succeeded} ${verb}`, 'success');
-    }
-
-    setSelectedKeys(new Set());
-    setDroppedIdsByGroup({});
-    fetchData();
   };
-
-  const handleBulkApprove = () => runBulkReview({ mode: 'approve' });
-  const handleBulkReject = () => runBulkReview({ mode: 'reject' });
 
   // ── Handlers for BatchedSuggestionCard ──
   //
@@ -1200,33 +1076,16 @@ export default function VerificationQueue({ onCountChange }) {
     }
   };
 
-  // ── Selection helpers (unified across update / batch / contact cards) ──
-  const toggleSelect = (key) => {
-    setSelectedKeys(prev => {
+  // ── Selection (only for suggested_updates) ──
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
       const next = new Set(prev);
-      next.has(key) ? next.delete(key) : next.add(key);
+      next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
   };
 
-  const selectAllVisible = () => {
-    setSelectedKeys(new Set(selectableGroupKeys));
-  };
-
-  const clearSelection = () => {
-    setSelectedKeys(new Set());
-  };
-
-  // `allVisibleSelected` drives the master checkbox's checked state.
-  // `someVisibleSelected` drives the indeterminate visual when only some are
-  // selected — HTML checkboxes don't support indeterminate as a prop, so it's
-  // set via a ref callback at render time.
-  const allVisibleSelected =
-    selectableGroupKeys.length > 0 &&
-    selectableGroupKeys.every(k => selectedKeys.has(k));
-  const someVisibleSelected =
-    !allVisibleSelected && selectableGroupKeys.some(k => selectedKeys.has(k));
-
+  const pendingUpdateCount = suggestedItems.filter(i => i.status === 'pending').length;
   const pendingSandboxCount = sandboxItems.filter(i => i.status === 'pending').length;
 
   return (
@@ -1263,8 +1122,8 @@ export default function VerificationQueue({ onCountChange }) {
           </div>
         </div>
 
-        {/* Tabs — bulk actions moved to the sticky bar inside the list */}
-        <div className="flex items-center">
+        {/* Tabs + batch actions */}
+        <div className="flex items-center justify-between">
           <div className="flex gap-1 p-1 bg-crm-bg/50 rounded-lg border border-crm-border/30 w-fit">
             {STATUS_TABS.map((tab) => {
               const count = tab.key === 'all' ? null : statusCounts[tab.key];
@@ -1288,6 +1147,36 @@ export default function VerificationQueue({ onCountChange }) {
               );
             })}
           </div>
+
+          {/* Batch actions (suggested_updates only) */}
+          {activeTab === 'pending' && allItems.length > 0 && (
+            <div className="flex items-center gap-2">
+              {selectedIds.size > 0 && (
+                <>
+                  <button
+                    onClick={() => handleBatchReview('accepted')}
+                    className="px-3 py-1.5 rounded-lg bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-colors text-xs font-medium"
+                  >
+                    Approve Selected ({selectedIds.size})
+                  </button>
+                  <button
+                    onClick={() => handleBatchReview('rejected')}
+                    className="px-3 py-1.5 rounded-lg bg-red-500/15 text-red-400 border border-red-500/30 hover:bg-red-500/25 transition-colors text-xs font-medium"
+                  >
+                    Reject Selected
+                  </button>
+                </>
+              )}
+              {pendingUpdateCount > 0 && (
+                <button
+                  onClick={handleAcceptAll}
+                  className="px-3 py-1.5 rounded-lg bg-crm-hover text-crm-muted hover:text-crm-text transition-colors text-xs"
+                >
+                  Accept All Updates ({pendingUpdateCount})
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
