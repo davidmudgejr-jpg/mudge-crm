@@ -2,6 +2,48 @@
 
 > Managed per-session. Plan first, track progress, document results.
 
+## QA Audit — 2026-04-15 ✅ DONE
+
+> Full diagnostic audit of the CRM per `~/Desktop/qa-audit-prompt.md`. Report → `tasks/qa-report-2026-04-15.md`. No code/schema/data changes. **Status: 🔴 RED — 8 critical, 24 major, ~15 minor.**
+
+### Phase 1 — Static Code Audit
+- [x] 1.1 Frontend pages (33 .jsx files — more than the prompt's 16 due to detail/mobile/dupe variants)
+- [x] 1.2 Frontend API layer (bridge, database, claude, views) + AuthContext
+- [x] 1.3 Backend routes (4,181-line `server/index.js` + 4 route files)
+- [x] 1.4 Backend services + middleware
+- [x] 1.5 Migrations (78 files / 62 unique prefixes)
+- [x] 1.6 Dependencies (npm audit + lockfile drift)
+
+### Phase 2 — Database State Audit (live Neon, SELECT-only)
+- [x] 2.1 Schema drift check (136 tables, 4 views)
+- [x] 2.2 View definitions verified against migrations (deal_formulas → 060, property_tpe_scores → 015)
+- [x] 2.3 Missing index scan
+- [x] 2.4 Referential integrity (0 orphans across 9 junctions)
+- [x] 2.5 Data health (row counts match Phase 3, 43.9% null email_1 expected)
+- [x] 2.6 Migration state (no `schema_migrations` table — flagged)
+
+### Phase 3 — Live App Audit (real login, API-level)
+- [x] 3.1 Smoke-test every entity endpoint — all 200
+- [x] 3.2 CRUD smoke test on contacts with [QA-TEST-20260415] marker — clean cycle, row deleted
+- [x] 3.3 Search via whereClause — ILIKE works
+- [x] 3.4 Auth flows — login/refresh work; **rate limiter broken 🚨**
+- [x] 3.5 API contracts — unauthed=401; `/api/db/read` masks errors; **`/api/db/create` still leaks Postgres errors 🚨**
+
+### Phase 4 — Integration Audit
+- [x] 4.1 Claude AI — works; `usage` field null; no ai rate limit on /api/claude/chat
+- [x] 4.2 Instantly email — **broken in prod** (wrong API version)
+- [x] 4.3 Airtable sync — not configured in Railway; test route returns 200 for error
+- [x] 4.4 File upload — reviewed from Phase 1.4; deleteFile path traversal still live
+- [x] 4.5 Socket.io — live end-to-end (handshake + 4 frontend clients)
+- [x] 4.6 Agent heartbeats — only 2 of 11 active in last 24h; ai_usage_tracking empty
+- [x] 4.7 NEW: **88 repo-wide macOS " 2" duplicate files** — not just 13 in migrations
+
+### Review
+- See `tasks/qa-report-2026-04-15.md` for the full report with all findings, ranked fix list, and raw query transcripts.
+- **Top 4 to fix this week:** (1) auth rate limiter, (2) `/api/db/create` error leak + contacts whitelist, (3) purge 88 " 2" files, (4) JWT fallback secret.
+
+---
+
 ## Completed — 2026-04-04
 
 - [x] Fix AuthContext token not exposed → dedup pages caused force-logout

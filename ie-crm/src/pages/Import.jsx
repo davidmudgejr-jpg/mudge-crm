@@ -652,6 +652,16 @@ export default function Import() {
   const handleFileSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Size cap — FileReader will happily try to load a 500 MB CSV into memory
+    // and freeze the tab. 50 MB is a hard limit matching the server.
+    const MAX_BYTES = 50 * 1024 * 1024;
+    if (file.size > MAX_BYTES) {
+      addToast(`File too large: ${(file.size / (1024 * 1024)).toFixed(1)} MB (max 50 MB)`, 'error');
+      e.target.value = '';
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -669,6 +679,13 @@ export default function Import() {
         console.error('CSV parse error:', err);
         addToast('Failed to parse CSV file', 'error');
       }
+    };
+    // FileReader has its own error channel — previously we had no handler for
+    // it, so a corrupt/truncated file would silently fail with no UX feedback.
+    // QA audit 2026-04-15 P2-11.
+    reader.onerror = () => {
+      console.error('FileReader error:', reader.error);
+      addToast('Could not read file (corrupt or permission denied)', 'error');
     };
     reader.readAsText(file);
     e.target.value = '';

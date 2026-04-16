@@ -3,15 +3,15 @@
 
 const jwt = require('jsonwebtoken');
 
+// JWT_SECRET is REQUIRED in every environment. There is no fallback value —
+// a dev-secret-as-fallback in source would be forgeable if the env var ever
+// slipped in prod. Fail fast at require-time instead.
 const JWT_SECRET = process.env.JWT_SECRET;
-if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
-  console.error('[SECURITY] FATAL: JWT_SECRET not set in production! Auth will fail.');
-  process.exit(1);
-}
 if (!JWT_SECRET) {
-  console.warn('[SECURITY] WARNING: JWT_SECRET not set — using insecure dev fallback. Set JWT_SECRET in .env for production.');
+  console.error('[SECURITY] FATAL: JWT_SECRET is not set. Set it in .env (local) or the deploy env (Railway/Vercel).');
+  throw new Error('JWT_SECRET is required');
 }
-const EFFECTIVE_JWT_SECRET = JWT_SECRET || 'dev-secret-DO-NOT-USE-IN-PRODUCTION';
+const EFFECTIVE_JWT_SECRET = JWT_SECRET;
 
 function extractUser(req) {
   const header = req.headers.authorization;

@@ -3,9 +3,20 @@
 // Mounted BEFORE the general requireAuth middleware in index.js
 
 const express = require('express');
+const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 
 const instantly = require('../services/instantly');
+
+// Constant-time comparison for secret strings — prevents timing side-channel
+// attacks that could brute-force AGENT_API_KEY byte-by-byte. `timingSafeEqual`
+// requires same-length buffers, so we length-check first (information leak is
+// acceptable here because the length of AGENT_API_KEY is not secret).
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
 const { normalizeRecord } = require('../utils/fieldNormalizer');
 const { validateColumn, quoteIdentifier, validateTable } = require('../utils/sqlSafety'); // SECURITY: Houston audit C4 — 2026-03-30
 const { matchContact, matchContactTargeted, matchProperty, matchCompany } = require('../utils/compositeMatcher');
@@ -40,7 +51,7 @@ function requireAgentKey(req, res, next) {
   if (!validKey) {
     return res.status(503).json({ error: 'Agent API not configured — set AGENT_API_KEY env var' });
   }
-  if (!agentKey || agentKey !== validKey) {
+  if (!safeEqual(agentKey, validKey)) {
     return res.status(401).json({ error: 'Invalid or missing X-Agent-Key' });
   }
 
@@ -61,11 +72,22 @@ const agentLimiter = rateLimit({
 });
 
 // Auth: accept EITHER X-Agent-Key (for external agents) OR JWT Bearer token (for CRM dashboard)
+// requireAdminOrAgent: additional gate for destructive / write-heavy routes
+// (e.g. /command/fill-empty, /command/log-interaction). requireAgentKeyOrJwt
+// accepts any valid JWT OR a valid agent key — this narrows that to ONLY
+// admin JWTs or trusted agent keys. Non-admin logged-in users get a 403.
+// QA audit 2026-04-15 P2-15.
+function requireAdminOrAgent(req, res, next) {
+  if (req.authType === 'agent') return next();
+  if (req.authType === 'jwt' && req.user && req.user.role === 'admin') return next();
+  return res.status(403).json({ error: 'admin role or agent key required for this route' });
+}
+
 function requireAgentKeyOrJwt(req, res, next) {
   // Try agent key first
   const agentKey = req.headers['x-agent-key'];
   const validKey = process.env.AGENT_API_KEY;
-  if (validKey && agentKey === validKey) {
+  if (validKey && safeEqual(agentKey, validKey)) {
     req.agentName = req.headers['x-agent-name'] || 'unknown';
     req.authType = 'agent';
     return next();
@@ -100,6 +122,11 @@ function requireAgentKeyOrJwt(req, res, next) {
 // Apply to all AI routes
 router.use(agentLimiter);
 router.use(requireAgentKeyOrJwt);
+
+// Destructive command routes require admin role OR trusted agent key.
+// QA audit 2026-04-15 P2-15 — previously any authenticated user could hit
+// /command/fill-empty, /command/log-interaction, /command/create-task, etc.
+router.use('/command', requireAdminOrAgent);
 
 // Logging middleware
 router.use((req, _res, next) => {
@@ -4233,6 +4260,18 @@ router.post('/dedup/scan-companies', async (req, res) => {
 // ============================================================
 // INSTANTLY.AI PROXY — Direct access to Instantly API for agents + dashboard
 // ============================================================
+
+// Guard: if INSTANTLY_API_KEY is missing, every /instantly/* route returns
+// 503 cleanly. Previously the un-configured throw bubbled up as a 500 with
+// an "INSTANTLY_API_KEY not set" message. QA audit 2026-04-15 P2-13.
+router.use('/instantly', (_req, res, next) => {
+  if (!instantly.isConfigured()) {
+    return res.status(503).json({
+      error: 'Instantly integration not configured (INSTANTLY_API_KEY missing on the server)',
+    });
+  }
+  next();
+});
 
 // 39. GET /api/ai/instantly/campaigns — List all Instantly campaigns
 router.get('/instantly/campaigns', async (req, res) => {

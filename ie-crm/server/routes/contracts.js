@@ -62,9 +62,25 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
     };
   }
 
+  // Tight whitelist for formCode — prevents path traversal via crafted names.
+  // Real form codes follow the AIR CRE convention: uppercase letters, digits,
+  // hyphens, underscores, dots (no slashes, no spaces, no '..').
+  // QA audit 2026-04-15 P2-17.
+  const FORM_CODE_RE = /^[A-Z0-9][A-Z0-9._-]{0,64}$/;
+
   // Helper: create one form within a package, with auto-fill
   async function createForm(p, packageId, dealId, formCode, formOrder, crmData, author) {
+    if (typeof formCode !== 'string' || !FORM_CODE_RE.test(formCode)) {
+      throw new Error('Invalid form code: ' + formCode);
+    }
     const templatePath = path.join(PARSED_DIR, formCode + '.json');
+    // Belt-and-suspenders: after path.join, verify the resolved template
+    // actually lives inside PARSED_DIR (catches symlink and other edge cases).
+    const resolvedParsed = path.resolve(PARSED_DIR);
+    const resolvedTemplate = path.resolve(templatePath);
+    if (!resolvedTemplate.startsWith(resolvedParsed + path.sep)) {
+      throw new Error('Invalid form code: ' + formCode);
+    }
     if (!fs.existsSync(templatePath)) throw new Error('Unknown form code: ' + formCode);
     const template = JSON.parse(fs.readFileSync(templatePath, 'utf-8'));
 

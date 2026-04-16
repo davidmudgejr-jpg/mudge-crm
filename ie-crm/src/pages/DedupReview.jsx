@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../components/shared/Toast';
+import { http as bridgeHttp } from '../api/bridge';
 import ClusterCard from '../components/dedup/ClusterCard';
 import MergeWorkspace from '../components/dedup/MergeWorkspace';
 import MergeHistory from '../components/dedup/MergeHistory';
 import useDedupKeyboard from '../hooks/useDedupKeyboard';
-
-const API = import.meta.env.VITE_API_URL || '';
 
 const STATUS_TABS = [
   { key: 'pending', label: 'Pending' },
@@ -29,7 +28,11 @@ const RESOLVE_API = {
 };
 
 export default function DedupReview({ onCountChange }) {
-  const { token } = useAuth();
+  // We intentionally do NOT destructure `token` from useAuth() here. All
+  // requests go through `bridgeHttp` which injects the Authorization header
+  // from localStorage via bridge.js, and participates in the global 401
+  // refresh-and-retry interceptor installed by AuthContext. QA audit P2-10.
+  useAuth();
   const { addToast } = useToast();
 
   const [entityType, setEntityType] = useState('property');
@@ -49,18 +52,15 @@ export default function DedupReview({ onCountChange }) {
   const [activeFieldIndex, setActiveFieldIndex] = useState(0);
   const clusterListRef = useRef(null);
 
-  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
   const entityTab = ENTITY_TABS.find(t => t.key === entityType);
 
   // Load clusters + stats
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `${API}/api/dedup/clusters?entityType=${entityType}&status=${activeTab}`,
-        { headers }
+      const data = await bridgeHttp.get(
+        `/api/dedup/clusters?entityType=${entityType}&status=${activeTab}`
       );
-      const data = await res.json();
       setClusters(data.clusters || []);
       setStats(data.stats || { pending: 0, merged: 0, dismissed: 0, deferred: 0 });
     } catch (err) {
@@ -69,15 +69,14 @@ export default function DedupReview({ onCountChange }) {
     } finally {
       setLoading(false);
     }
-  }, [entityType, activeTab, token]);
+  }, [entityType, activeTab, addToast]);
 
   // Load all entity pending counts for tabs + sidebar
   const loadAllStats = useCallback(async () => {
     try {
       const results = await Promise.all(
         ['property', 'contact', 'company'].map(et =>
-          fetch(`${API}/api/dedup/clusters?entityType=${et}&status=pending`, { headers })
-            .then(r => r.json())
+          bridgeHttp.get(`/api/dedup/clusters?entityType=${et}&status=pending`)
             .catch(() => ({ clusters: [], stats: { pending: 0 } }))
         )
       );
@@ -91,7 +90,7 @@ export default function DedupReview({ onCountChange }) {
     } catch (err) {
       console.error('Failed to load all dedup stats:', err);
     }
-  }, [token]);
+  }, [onCountChange]);
 
   useEffect(() => { loadData(); }, [loadData]);
   useEffect(() => { loadAllStats(); }, [loadAllStats]);
@@ -107,10 +106,7 @@ export default function DedupReview({ onCountChange }) {
     if (!cluster) return;
     try {
       for (const candId of cluster.candidateIds) {
-        await fetch(`${API}${RESOLVE_API[entityType]}`, {
-          method: 'POST', headers,
-          body: JSON.stringify({ candidateId: candId, status }),
-        });
+        await bridgeHttp.post(RESOLVE_API[entityType], { candidateId: candId, status });
       }
       addToast(status === 'dismissed' ? 'Marked as not duplicates' : 'Deferred for later', 'success');
       refreshAfterAction();
@@ -123,12 +119,7 @@ export default function DedupReview({ onCountChange }) {
   const handleAutoMerge = async () => {
     setAutoMerging(true);
     try {
-      const res = await fetch(`${API}/api/dedup/auto-merge`, {
-        method: 'POST', headers,
-        body: JSON.stringify({ entityType }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      const data = await bridgeHttp.post('/api/dedup/auto-merge', { entityType });
       addToast(`Auto-merged ${data.autoMerged} exact-match clusters (${data.skipped} skipped)`, 'success');
       refreshAfterAction();
     } catch (err) {
