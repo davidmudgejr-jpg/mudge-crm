@@ -8,9 +8,9 @@ export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const timers = useRef({});
 
-  const addToast = useCallback((message, type = 'success', duration = 3000) => {
+  const addToast = useCallback((message, type = 'success', duration = 3000, opts) => {
     const id = ++toastId;
-    setToasts((prev) => [...prev, { id, message, type }]);
+    setToasts((prev) => [...prev, { id, message, type, action: opts?.action }]);
     timers.current[id] = setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
       delete timers.current[id];
@@ -49,6 +49,14 @@ function ToastItem({ toast, onDismiss }) {
       style={{ animation: 'toast-slide-up 350ms cubic-bezier(0.175, 0.885, 0.32, 1.275) both' }}
     >
       <span className="flex-1">{toast.message}</span>
+      {toast.action && (
+        <button
+          onClick={() => { toast.action.onClick(); onDismiss(); }}
+          className="font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity text-xs whitespace-nowrap"
+        >
+          {toast.action.label}
+        </button>
+      )}
       <button onClick={onDismiss} className="opacity-60 hover:opacity-100 transition-opacity text-xs">
         ✕
       </button>

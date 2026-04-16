@@ -1,9 +1,34 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { clearApiCache } from '../api/bridge';
 
 const AuthContext = createContext(null);
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 const TOKEN_KEY = 'crm-auth-token';
+
+// decodeJwtPayload(token): safely parse a JWT's claims payload.
+// Returns null for anything that isn't a well-formed 3-segment JWT with a
+// base64url-decodable JSON payload. Also clears the bad token from
+// localStorage so the calling code doesn't get stuck in a loop. QA P1-13.
+function decodeJwtPayload(token) {
+  if (typeof token !== 'string' || token.length === 0) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) {
+    try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+    return null;
+  }
+  try {
+    // atob accepts standard base64, JWTs use base64url — swap the two chars
+    // and pad to a multiple of 4 so atob doesn't throw on missing padding.
+    const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '==='.slice((b64.length + 3) % 4);
+    const json = atob(padded);
+    return JSON.parse(json);
+  } catch {
+    try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+    return null;
+  }
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -33,10 +58,10 @@ export function AuthProvider({ children }) {
           // Server error (500, 502, 503) — keep the token, assume server is recovering
           console.warn('[auth] Server returned', res.status, '— keeping token, assuming cold start');
           // Decode the JWT locally to get user info while server recovers
-          try {
-            const payload = JSON.parse(atob(token.split('.')[1]));
+          const payload = decodeJwtPayload(token);
+          if (payload) {
             setUser({ user_id: payload.user_id, email: payload.email, role: payload.role, display_name: payload.display_name });
-          } catch { /* can't decode — just wait */ }
+          }
           return null;
         }
         return res.json();
@@ -47,10 +72,10 @@ export function AuthProvider({ children }) {
       .catch((err) => {
         // Network error (server down, no internet) — keep the token
         console.warn('[auth] Network error on startup — keeping token:', err.message);
-        try {
-          const payload = JSON.parse(atob(token.split('.')[1]));
+        const payload = decodeJwtPayload(token);
+        if (payload) {
           setUser({ user_id: payload.user_id, email: payload.email, role: payload.role, display_name: payload.display_name });
-        } catch { /* can't decode */ }
+        }
       })
       .finally(() => setLoading(false));
   }, []);
@@ -76,6 +101,9 @@ export function AuthProvider({ children }) {
   const logout = useCallback(() => {
     localStorage.removeItem(TOKEN_KEY);
     setUser(null);
+    // Evict every cached GET response so the next user on a shared device
+    // can't see the previous user's data. QA audit 2026-04-15 P2-09.
+    try { clearApiCache(); } catch { /* bridge not loaded — fine */ }
   }, []);
 
   // Attempt to refresh the token — returns true if successful
@@ -155,10 +183,18 @@ export function AuthProvider({ children }) {
 
   // Global 401 interceptor — catch expired tokens from any fetch call
   // Instead of immediately logging out, try to refresh the token first
+  //
+  // Previously used a Set<url> to detect retry loops, which had a race
+  // condition: two concurrent requests to the same URL would both 401,
+  // the second request would see the first one's "in-flight retry" marker
+  // and incorrectly conclude "we already retried and failed" — triggering
+  // a premature logout. Replacing with a Map<url, retryCount> that tolerates
+  // N concurrent retries per URL before logging out. QA audit P3-01.
   useEffect(() => {
     if (!user) return;
     const originalFetch = window.fetch;
-    let retryingUrls = new Set();
+    const MAX_RETRIES_PER_URL = 1; // 1 refresh-retry per URL per interceptor lifetime
+    const retryCounts = new Map(); // url -> number of retries attempted so far
 
     window.fetch = async (...args) => {
       let res;
@@ -174,16 +210,17 @@ export function AuthProvider({ children }) {
 
         // Only intercept our API calls, not auth endpoints themselves
         if (url.includes('/api/') && !url.includes('/api/auth/')) {
-          // Prevent infinite retry loops
-          if (retryingUrls.has(url)) {
-            retryingUrls.delete(url);
+          const attempts = retryCounts.get(url) || 0;
+          if (attempts >= MAX_RETRIES_PER_URL) {
+            // We already retried this URL and it still 401'd — log out
             console.warn('[auth] Retry also returned 401 — logging out');
+            retryCounts.delete(url);
             localStorage.removeItem(TOKEN_KEY);
             setUser(null);
             return res;
           }
 
-          // Try to refresh the token
+          // Try to refresh the token (refreshToken dedupes concurrent callers)
           const refreshed = await refreshToken();
           if (refreshed) {
             // Retry the original request with the new token
@@ -198,13 +235,22 @@ export function AuthProvider({ children }) {
             } else {
               newInit.headers = { Authorization: `Bearer ${newToken}` };
             }
-            retryingUrls.add(url);
-            const retryRes = await window.fetch(input, newInit);
-            retryingUrls.delete(url);
-            return retryRes;
+            // Bump the retry count BEFORE awaiting the retry so concurrent
+            // 401 on the same URL don't both count as attempt #1.
+            retryCounts.set(url, attempts + 1);
+            try {
+              const retryRes = await window.fetch(input, newInit);
+              // On success, clear the counter — next 401 starts fresh.
+              if (retryRes.status !== 401) retryCounts.delete(url);
+              return retryRes;
+            } catch (retryErr) {
+              retryCounts.delete(url);
+              throw retryErr;
+            }
           } else {
             // Refresh failed — token is truly expired, log out
             console.warn('[auth] Token refresh failed — logging out');
+            retryCounts.delete(url);
             localStorage.removeItem(TOKEN_KEY);
             setUser(null);
           }

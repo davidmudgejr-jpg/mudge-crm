@@ -59,9 +59,11 @@ function requireAgentKeyOnly(req, res, next) {
 function visibilityFilter(req) {
   // Agents see everything (including internal)
   if (req.authType === 'agent') return '';
-  // David sees business + david-only
-  const email = req.user?.email || '';
-  if (email === 'david@mudgeteam.com' || email === 'david@leeassociates.com' || req.user?.role === 'admin') {
+  // Admins see business + david-only (not internal, which is reserved for
+  // agent-only memory). QA audit 2026-04-15 P2-16 — removed hardcoded
+  // email allowlist; use the role claim instead. If the user's email
+  // changes, nothing breaks.
+  if (req.user?.role === 'admin') {
     return `AND visibility != 'internal'`;
   }
   // Team members see business only

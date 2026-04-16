@@ -1,11 +1,18 @@
 // Express API Server — standalone backend for Railway deployment
 // Mirrors all Electron IPC handlers as REST endpoints
 
+// IMPORTANT: dotenv MUST load before any local require() — with the JWT_SECRET
+// dev-fallback removed (QA audit P1-01), middleware/auth.js now throws at
+// require-time if the env var is missing, so the require chain
+// `./routes/ai → ./middleware/auth` needs process.env.JWT_SECRET to be set
+// first. A later dotenv call can't rescue a throw that's already happened.
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
+
 const express = require('express');
 const http = require('http');
 const cors = require('cors');
 const compression = require('compression');
-const path = require('path');
 const crypto = require('crypto');
 const fs = require('fs');
 const { Pool } = require('pg');
@@ -21,11 +28,12 @@ const { normalizeAddress, parseAddress, normalizeCompanyName } = require('./util
 const { matchProperty, matchCompany, matchContact, matchContactTargeted, detectTable } = require('./utils/compositeMatcher');
 const { buildClusters } = require('./utils/clusterBuilder');
 
-// Load env
-require('dotenv').config({ path: path.join(__dirname, '..', '.env'), override: true });
-
 const app = express();
-app.set('trust proxy', 1); // Trust first proxy (Railway/Vercel)
+// Trust TWO proxies: Fastly (edge CDN) + Railway (internal edge). With only 1,
+// `req.ip` resolved to the Railway/Fastly proxy IP instead of the real client
+// IP — that rotated per-request, so every request got a fresh rate-limit key
+// and the counters never advanced. See QA audit 2026-04-15 Phase 3.4 finding.
+app.set('trust proxy', 2);
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3001;
 
@@ -91,25 +99,126 @@ app.use(compression());
 
 const rateLimit = require('express-rate-limit');
 
-// General API rate limit: 200 requests per minute per IP
+// Key generator that finds the real client IP even when Railway's Fastly CDN
+// rotates its edge-cache IP per request. Preference order:
+//   1. `Fastly-Client-IP`            — Fastly's own "real client IP" header
+//   2. `CF-Connecting-IP`             — if we're ever behind Cloudflare
+//   3. `X-Forwarded-For`, leftmost   — the canonical real-client slot
+//   4. `req.ip` (with trust proxy 2) — fallback
+// Normalizing via `ipKeyGenerator` keeps IPv6-safe handling consistent with
+// express-rate-limit's defaults.
+const { ipKeyGenerator } = rateLimit;
+const realClientIp = (req) => {
+  const fastly = req.headers['fastly-client-ip'];
+  if (fastly) return String(fastly).trim();
+  const cf = req.headers['cf-connecting-ip'];
+  if (cf) return String(cf).trim();
+  const xff = req.headers['x-forwarded-for'];
+  if (xff) return String(xff).split(',')[0].trim();
+  return req.ip;
+};
+const clientIpKey = (req) => {
+  const ip = realClientIp(req);
+  return typeof ipKeyGenerator === 'function' ? ipKeyGenerator(ip) : ip;
+};
+
+// General API rate limit: 200 requests per minute per real client IP
 const apiLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 200,
   standardHeaders: true,
   legacyHeaders: false,
-  validate: false,
+  keyGenerator: clientIpKey,
   message: { error: 'Too many requests, please try again later' },
 });
 
-// Strict limiter for auth endpoints: 10 attempts per 15 minutes
+// Strict limiter for auth endpoints: 10 attempts per 15 minutes per real client IP
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 10,
   standardHeaders: true,
   legacyHeaders: false,
-  validate: false,
+  keyGenerator: clientIpKey,
   message: { error: 'Too many login attempts, please try again in 15 minutes' },
 });
+
+// Strict limiter for AI endpoints: 30 requests/minute per authenticated user
+// (used by /api/claude/chat, /api/ai/chat, /api/ai/chat/sync). We colocate the
+// definition with the other limiters so routes registered before the old
+// definition site at ~line 1003 can still reference it.
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req.user && req.user.user_id) || clientIpKey(req),
+  message: { error: 'AI rate limit reached. Try again in a minute.' },
+});
+
+// safeErr(err): production-safe error message for JSON responses.
+//
+// Raw pg errors leak constraint names, column names, and table names — great
+// for attackers doing schema fingerprinting. In production we return a fixed
+// string; in dev/test we keep the original for debugging. Always log the
+// real error to stderr so operators can still diagnose.
+const IS_PROD = process.env.NODE_ENV === 'production';
+function safeErr(err) {
+  // Always log the real message to stderr — operators need this, clients don't.
+  if (err && err.message) console.error('[server error]', err.message);
+  if (IS_PROD) return 'Server error';
+  return (err && err.message) || String(err);
+}
+
+// logAudit(): best-effort audit trail for every mutation. Previously only the
+// ClaudePanel frontend wrote to undo_log; every direct /api/db/* write was
+// invisible in the audit trail. Now every write route logs a structured JSON
+// action snapshot into undo_log.action_description so operators can:
+//   (a) see who modified what and when (user_id + executed_at)
+//   (b) reconstruct the old/new state of any row (oldRow / newRow JSON blobs)
+//   (c) build a manual undo by hand if needed
+//
+// We intentionally do NOT auto-generate reverse_sql — dynamic-column inverse
+// SQL is error-prone and the JSON snapshots are strictly more useful. The
+// `reverse_sql` column is populated with a short description of what an undo
+// would do, so legacy tooling that scans it still works.
+//
+// Non-blocking: audit failures are logged but do not cause the main write to
+// fail. Audit is a "nice to have" compared to the user's actual operation.
+// QA audit 2026-04-15 P2-14.
+async function logAudit(poolOrClient, {
+  action,          // 'INSERT' | 'UPDATE' | 'DELETE' | 'LINK' | 'UNLINK' | 'BULK_DELETE'
+  table,           // e.g. 'contacts' | junction name
+  pk = null,       // primary key column (for typed entities) or null for junctions
+  pkValue = null,  // value of pk (string / uuid)
+  oldRow = null,   // previous row state for UPDATE/DELETE
+  newRow = null,   // new row state for INSERT/UPDATE
+  rowsAffected = 1,
+  userId = null,
+  sqlExecuted = null,
+}) {
+  try {
+    const payload = { action, table, pk, pkValue, oldRow, newRow };
+    const description = JSON.stringify(payload);
+    const reverseDesc = (() => {
+      switch (action) {
+        case 'INSERT': return `DELETE FROM ${table} WHERE ${pk} = '${pkValue}'`;
+        case 'DELETE': return `INSERT INTO ${table} (<snapshot>) VALUES (<snapshot>)`;
+        case 'UPDATE': return `UPDATE ${table} SET <old snapshot> WHERE ${pk} = '${pkValue}'`;
+        case 'LINK':   return `DELETE FROM ${table} WHERE <keys>`;
+        case 'UNLINK': return `INSERT INTO ${table} (<keys>) VALUES (<keys>)`;
+        case 'BULK_DELETE': return `INSERT INTO ${table} (<batch snapshots>) VALUES ...`;
+        default:       return null;
+      }
+    })();
+    await poolOrClient.query(
+      `INSERT INTO undo_log (action_description, sql_executed, reverse_sql, rows_affected, user_id, undone)
+       VALUES ($1, $2, $3, $4, $5, false)`,
+      [description, sqlExecuted, reverseDesc, rowsAffected, userId]
+    );
+  } catch (err) {
+    console.error('[logAudit] failed (non-fatal):', err.message);
+  }
+}
 
 app.use('/api', apiLimiter);
 
@@ -157,6 +266,41 @@ function initDatabase() {
 
   pool.on('error', (err) => console.error('[server] Pool error:', err.message));
   console.log('[server] Database pool created (timezone: America/Los_Angeles)');
+}
+
+// validateWhitelistsAtBoot(): cross-check every SERVER_ALLOWED_COLS entry
+// against information_schema. If a whitelist references a column that doesn't
+// exist in the DB, every /api/db/create or /api/db/update that sends that
+// field fails at the SQL layer with a confusing error. Fail fast at boot so
+// schema drift is caught during deploy, not at 2am. QA audit 2026-04-15 P1-06.
+async function validateWhitelistsAtBoot() {
+  if (!pool) return;
+  const drift = [];
+  for (const [entity, allowedSet] of Object.entries(SERVER_ALLOWED_COLS)) {
+    const meta = ENTITY_TABLES[entity];
+    if (!meta) continue;
+    try {
+      const r = await pool.query(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1",
+        [meta.table]
+      );
+      const real = new Set(r.rows.map((x) => x.column_name));
+      for (const col of allowedSet) {
+        if (!real.has(col)) drift.push(`${entity}.${col}`);
+      }
+    } catch (err) {
+      console.warn(`[whitelist-check] could not verify ${entity}: ${err.message}`);
+    }
+  }
+  if (drift.length > 0) {
+    console.error('[whitelist-check] FATAL: SERVER_ALLOWED_COLS references columns that do not exist in the DB:');
+    drift.forEach((d) => console.error('  -', d));
+    // Throwing here would crash the server — log loudly instead so an operator
+    // can see it at deploy time without taking down a running instance.
+    console.error('[whitelist-check] Writes touching those fields will 400 until the whitelist is fixed.');
+  } else {
+    console.log('[whitelist-check] SERVER_ALLOWED_COLS all match information_schema ✓');
+  }
 }
 
 // ============================================================
@@ -595,44 +739,98 @@ const ENTITY_TABLES = {
   sale_comps:   { table: 'sale_comps',   pk: 'id',             timestamp: 'updated_at' },
 };
 
-// Column whitelists per table (same as frontend ALLOWED_COLS)
+// Column whitelists per table — columns that may be written via /api/db/{create,update}.
+//
+// IMPORTANT: These MUST match the real DB schema. Keys that don't exist in the
+// actual table cause silent 400s with leaked error messages. QA audit 2026-04-15
+// Phase 3.5 found `email`, `phone`, `mobile` in the `contacts` whitelist when the
+// real columns are `email_1/2/3`, `phone_1/2/3`, plus `tenant_name` in `properties`
+// and `lead_count`/`tags` in `deals`. Each entity's list is validated against
+// information_schema at server boot — see validateWhitelistsAtBoot() below.
 const SERVER_ALLOWED_COLS = {
   deals: new Set([
-    'deal_name', 'deal_type', 'deal_source', 'status', 'repping', 'term', 'rate', 'sf',
-    'price', 'commission_rate', 'gross_fee_potential', 'net_potential', 'close_date',
-    'important_date', 'deal_dead_reason', 'notes', 'priority_deal', 'increases',
-    'escrow_url', 'surveys_brochures_url', 'photo_url', 'run_by', 'other_broker',
-    'industry', 'deadline', 'fell_through_reason', 'lead_count', 'tags', 'overflow',
+    // identity / meta
+    'deal_name', 'deal_type', 'deal_source', 'status', 'repping',
+    // commercials
+    'term', 'rate', 'sf', 'price', 'commission_rate',
+    'gross_fee_potential', 'net_potential', 'increases',
+    // timeline
+    'close_date', 'important_date', 'deadline',
+    // notes / flags
+    'deal_dead_reason', 'notes', 'priority_deal', 'fell_through_reason',
+    // attachments / links
+    'escrow_url', 'surveys_brochures_url', 'photo_url',
+    // attribution
+    'run_by', 'other_broker', 'industry',
+    // freeform
+    'overflow',
   ]),
   properties: new Set([
-    'property_address', 'property_name', 'city', 'county', 'state', 'zip', 'rba',
-    'land_area_ac', 'land_sf', 'far', 'property_type', 'building_class', 'building_status',
-    'year_built', 'year_renovated', 'ceiling_ht', 'clear_ht', 'number_of_loading_docks',
-    'drive_ins', 'column_spacing', 'sprinklers', 'power', 'construction_material', 'zoning',
-    'features', 'last_sale_date', 'last_sale_price', 'price_psf', 'plsf', 'loan_amount',
-    'debt_date', 'holding_period_years', 'listing_asking_lease_rate', 'cap_rate',
-    'vacancy_pct', 'percent_leased', 'listing_status', 'listing_first_seen_date',
-    'owner_name', 'owner_phone', 'owner_email', 'owner_address', 'tenant_name',
+    // identity / location
+    'property_address', 'property_name', 'city', 'county', 'state', 'zip',
+    // dimensions
+    'rba', 'land_area_ac', 'land_sf', 'far',
+    // classification
+    'property_type', 'building_class', 'building_status',
+    'year_built', 'year_renovated',
+    // specs
+    'ceiling_ht', 'clear_ht', 'number_of_loading_docks', 'drive_ins',
+    'column_spacing', 'sprinklers', 'power', 'construction_material', 'zoning', 'features',
+    // sale + debt
+    'last_sale_date', 'last_sale_price', 'price_psf', 'plsf',
+    'loan_amount', 'debt_date', 'holding_period_years',
+    // listing
+    'listing_asking_lease_rate', 'cap_rate', 'vacancy_pct', 'percent_leased',
+    'listing_status', 'listing_first_seen_date', 'listing_url',
+    // ownership (real columns — tenant_name removed; not in schema)
+    'owner_name', 'owner_phone', 'owner_email', 'owner_address',
+    'owner_mailing_address', 'owner_city_state_zip', 'owner_type',
+    'recorded_owner_name', 'true_owner_name',
+    // external URLs
     'costar_url', 'google_maps_url', 'zoning_map_url', 'landvision_url',
+    // notes / freeform
     'notes', 'tags', 'overflow', 'building_image_path',
   ]),
   contacts: new Set([
-    'full_name', 'first_name', 'last_name', 'email', 'phone', 'mobile', 'title',
-    'company_name', 'notes', 'city', 'tags', 'overflow', 'type', 'source',
+    // identity
+    'full_name', 'first_name', 'type', 'title',
+    // real email/phone columns — the old `email`/`phone`/`mobile` didn't exist
+    'email_1', 'email_2', 'email_3',
+    'phone_1', 'phone_2', 'phone_3',
+    'phone_hot', 'email_hot',
+    // addresses
+    'home_address', 'work_address', 'work_city', 'work_state', 'work_zip',
+    // demographics / profile
+    'age', 'client_level', 'active_need', 'linkedin',
+    // outreach / tracking
+    'follow_up', 'last_contacted', 'data_source',
+    // profile
+    'notes', 'tags', 'overflow',
+    // do-not-contact
+    'do_not_email', 'do_not_email_reason',
   ]),
   companies: new Set([
-    'company_name', 'company_type', 'industry_type', 'website', 'sf', 'employees',
-    'revenue', 'company_growth', 'company_hq', 'lease_exp', 'lease_months_left',
-    'move_in_date', 'notes', 'city', 'tenant_sic', 'tenant_naics', 'suite', 'tags', 'overflow',
+    'company_name', 'company_type', 'industry_type', 'website',
+    'sf', 'employees', 'revenue', 'company_growth', 'company_hq',
+    'lease_exp', 'lease_months_left', 'move_in_date',
+    'notes', 'city', 'tenant_sic', 'tenant_naics', 'suite',
+    'tags', 'overflow', 'data_source',
+    // decision-maker columns added by migration 062 (feat 247366ad)
+    'decision_maker_title', 'decision_maker_name', 'email_1',
   ]),
   interactions: new Set([
-    'type', 'subject', 'date', 'notes', 'email_heading', 'email_body',
-    'follow_up', 'follow_up_notes', 'lead_source', 'lead_status', 'lead_interest',
+    'type', 'subject', 'date', 'notes',
+    'email_heading', 'email_body',
+    'follow_up', 'follow_up_notes',
+    'lead_source', 'lead_status', 'lead_interest',
     'team_member', 'email_url', 'email_id',
+    'transcript_id', 'has_transcript',
+    'overflow',
   ]),
   campaigns: new Set([
-    'name', 'type', 'status', 'sent_date', 'subject', 'body', 'notes', 'tags',
-    'assignee', 'day_time_hits',
+    'name', 'type', 'status', 'sent_date',
+    'notes', 'assignee', 'day_time_hits',
+    'overflow',
   ]),
   action_items: new Set([
     'name', 'notes', 'notes_on_date', 'responsibility', 'high_priority',
@@ -676,14 +874,35 @@ app.post('/api/db/update', async (req, res) => {
   }
 
   try {
+    // Capture the old row for the audit trail (best-effort, non-fatal)
+    let oldRow = null;
+    try {
+      const pre = await pool.query(`SELECT * FROM ${meta.table} WHERE ${meta.pk} = $1`, [id]);
+      oldRow = pre.rows[0] || null;
+    } catch { /* ignore — audit only */ }
+
     const sets = keys.map((k, i) => `${k} = $${i + 2}`);
     if (meta.timestamp) sets.push(`${meta.timestamp} = NOW()`);
     const sql = `UPDATE ${meta.table} SET ${sets.join(', ')} WHERE ${meta.pk} = $1 RETURNING *`;
     const result = await pool.query(sql, [id, ...Object.values(fields)]);
+
+    // Audit (fire-and-forget)
+    logAudit(pool, {
+      action: 'UPDATE',
+      table: meta.table,
+      pk: meta.pk,
+      pkValue: id,
+      oldRow,
+      newRow: result.rows[0] || null,
+      rowsAffected: result.rowCount,
+      userId: req.user && req.user.user_id,
+      sqlExecuted: sql,
+    });
+
     res.json({ rows: result.rows, rowCount: result.rowCount });
   } catch (err) {
     console.error(`[db/update] ${entity} error:`, err.message);
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: safeErr(err) });
   }
 });
 
@@ -720,10 +939,22 @@ app.post('/api/db/link', async (req, res) => {
     const placeholders = vals.map((_, i) => `$${i + 1}`);
     const sql = `INSERT INTO ${junction} (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) ON CONFLICT DO NOTHING RETURNING *`;
     const result = await pool.query(sql, vals);
+
+    if (result.rowCount > 0) {
+      logAudit(pool, {
+        action: 'LINK',
+        table: junction,
+        newRow: result.rows[0] || null,
+        rowsAffected: result.rowCount,
+        userId: req.user && req.user.user_id,
+        sqlExecuted: sql,
+      });
+    }
+
     res.json({ rows: result.rows, rowCount: result.rowCount });
   } catch (err) {
     console.error(`[db/link] error:`, err.message);
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: safeErr(err) });
   }
 });
 
@@ -740,10 +971,22 @@ app.post('/api/db/unlink', async (req, res) => {
   try {
     const sql = `DELETE FROM ${junction} WHERE ${col1} = $1 AND ${col2} = $2 RETURNING *`;
     const result = await pool.query(sql, [id1, id2]);
+
+    if (result.rowCount > 0) {
+      logAudit(pool, {
+        action: 'UNLINK',
+        table: junction,
+        oldRow: result.rows[0] || null,
+        rowsAffected: result.rowCount,
+        userId: req.user && req.user.user_id,
+        sqlExecuted: sql,
+      });
+    }
+
     res.json({ rows: result.rows, rowCount: result.rowCount });
   } catch (err) {
     console.error(`[db/unlink] error:`, err.message);
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: safeErr(err) });
   }
 });
 
@@ -811,10 +1054,22 @@ app.post('/api/db/create', async (req, res) => {
     const placeholders = cols.map((_, i) => `$${i + 1}`);
     const sql = `INSERT INTO ${meta.table} (${cols.join(', ')}) VALUES (${placeholders.join(', ')}) RETURNING *`;
     const result = await pool.query(sql, [id, ...Object.values(fields)]);
+
+    logAudit(pool, {
+      action: 'INSERT',
+      table: meta.table,
+      pk: meta.pk,
+      pkValue: id,
+      newRow: result.rows[0] || null,
+      rowsAffected: result.rowCount,
+      userId: req.user && req.user.user_id,
+      sqlExecuted: sql,
+    });
+
     res.json({ rows: result.rows, rowCount: result.rowCount });
   } catch (err) {
     console.error(`[db/create] ${entity} error:`, err.message);
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: safeErr(err) });
   }
 });
 
@@ -824,7 +1079,7 @@ app.get('/api/db/status', async (_req, res) => {
     await pool.query('SELECT 1');
     res.json({ connected: true });
   } catch (err) {
-    res.json({ connected: false, error: err.message });
+    res.json({ connected: false, error: safeErr(err) });
   }
 });
 
@@ -838,11 +1093,21 @@ app.post('/api/db/delete', async (req, res) => {
   if (!meta) return res.status(400).json({ error: `Unknown entity: ${entity}` });
 
   try {
-    const result = await pool.query(
-      `DELETE FROM ${meta.table} WHERE ${meta.pk} = $1 RETURNING *`,
-      [id]
-    );
+    const sql = `DELETE FROM ${meta.table} WHERE ${meta.pk} = $1 RETURNING *`;
+    const result = await pool.query(sql, [id]);
     if (result.rowCount === 0) return res.status(404).json({ error: 'Record not found' });
+
+    logAudit(pool, {
+      action: 'DELETE',
+      table: meta.table,
+      pk: meta.pk,
+      pkValue: id,
+      oldRow: result.rows[0] || null,
+      rowsAffected: result.rowCount,
+      userId: req.user && req.user.user_id,
+      sqlExecuted: sql,
+    });
+
     res.json({ ok: true, deleted: result.rows[0] });
   } catch (err) {
     console.error(`[db/delete] Error deleting ${entity} ${id}:`, err.message);
@@ -883,17 +1148,34 @@ app.get('/api/db/schema', async (_req, res) => {
     }
     res.json(tables);
   } catch (err) {
-    res.status(400).json({ error: err.message });
+    res.status(400).json({ error: safeErr(err) });
   }
 });
 
 // ============================================================
 // CLAUDE AI ROUTES
 // ============================================================
-app.post('/api/claude/chat', async (req, res) => {
+// Gated by aiLimiter (30/min/user) — a malicious prompt or prompt-injected
+// CSV filename could otherwise fan out into unbounded writes.
+app.post('/api/claude/chat', aiLimiter, async (req, res) => {
   if (!anthropic) return res.status(503).json({ error: 'Claude not configured. Set ANTHROPIC_API_KEY.' });
   try {
     const { messages, systemPrompt, options = {} } = req.body;
+
+    // Payload bounds — reject pathological inputs before we pay for them
+    if (!Array.isArray(messages)) {
+      return res.status(400).json({ error: 'messages must be an array' });
+    }
+    if (messages.length > 200) {
+      return res.status(400).json({ error: 'messages too long (max 200 turns)' });
+    }
+    const totalContentChars = messages.reduce((acc, m) => {
+      if (!m || typeof m.content !== 'string') return acc;
+      return acc + m.content.length;
+    }, 0);
+    if (totalContentChars > 500_000) {
+      return res.status(400).json({ error: 'messages too large (max 500k chars)' });
+    }
 
     const apiParams = {
       model: 'claude-sonnet-4-20250514',
@@ -957,7 +1239,7 @@ app.post('/api/claude/chat', async (req, res) => {
     });
   } catch (err) {
     console.error('[server] claude/chat error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -972,16 +1254,8 @@ const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const AI_MODEL = 'claude-sonnet-4-20250514';
 const AI_MAX_TOKENS = 4096;
 
-// Rate limiter for AI endpoints: 30 requests/minute per user
-const aiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 30,
-  keyGenerator: (req) => req.user?.user_id || 'anon',
-  validate: { xForwardedForHeader: false, default: true },
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'AI rate limit reached. Try again in a minute.' },
-});
+// aiLimiter is defined above (near line ~116) with the other rate limiters so
+// that routes registered before this point (/api/claude/chat) can reference it.
 
 // Get auth credentials — prefers API key, falls back to OAuth token
 function getAnthropicAuth() {
@@ -1050,7 +1324,7 @@ app.post('/api/ai/chat', aiLimiter, async (req, res) => {
     if (!response.ok) {
       const errData = await response.json().catch(() => ({}));
       const err = handleAnthropicError(response.status, errData);
-      res.write(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`);
+      res.write(`data: ${JSON.stringify({ type: 'error', error: safeErr(err) })}\n\n`);
       res.end();
       return;
     }
@@ -1093,7 +1367,7 @@ app.post('/api/ai/chat/sync', aiLimiter, async (req, res) => {
 
     if (!response.ok) {
       const err = handleAnthropicError(response.status, data);
-      return res.status(err.code).json({ error: err.message });
+      return res.status(err.code).json({ error: safeErr(err) });
     }
 
     // Extract text content from response
@@ -1125,11 +1399,28 @@ app.get('/api/ai/status', async (_req, res) => {
 // ============================================================
 // FILE PARSING ROUTES
 // ============================================================
+//
+// NOTE on xlsx: the xlsx@0.18.5 package has two HIGH CVEs (prototype pollution
+// GHSA-4r6h-8v6p-xvw6 and ReDoS GHSA-5pgg-2g8v-p4x9) with NO fix available on
+// the npm registry. We can't upgrade without switching to `exceljs` or a
+// SheetJS Pro build. As a compensating control we enforce a strict 10 MB
+// size cap AND reject files with more than 25 worksheets. A crafted workbook
+// can still trigger prototype pollution within these bounds, so the eventual
+// fix is to migrate away from xlsx. QA audit 2026-04-15 P3-02.
+const MAX_PARSE_BYTES = 10 * 1024 * 1024; // 10 MB
+const MAX_XLSX_SHEETS = 25;
+
 app.post('/api/file/parse', async (req, res) => {
   try {
     const { base64, fileName } = req.body;
     const ext = path.extname(fileName).toLowerCase();
     const buffer = Buffer.from(base64, 'base64');
+
+    if (buffer.length > MAX_PARSE_BYTES) {
+      return res.status(413).json({
+        error: `File too large: ${(buffer.length / (1024 * 1024)).toFixed(1)} MB (max 10 MB)`,
+      });
+    }
 
     if (ext === '.pdf') {
       return res.json({ type: 'document', mediaType: 'application/pdf', data: base64, fileName });
@@ -1142,7 +1433,12 @@ app.post('/api/file/parse', async (req, res) => {
 
     if (ext === '.xlsx' || ext === '.xls' || ext === '.xlsm') {
       const XLSX = require('xlsx');
-      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const workbook = XLSX.read(buffer, { type: 'buffer', cellFormula: false, cellHTML: false });
+      if (workbook.SheetNames.length > MAX_XLSX_SHEETS) {
+        return res.status(413).json({
+          error: `Workbook has too many sheets: ${workbook.SheetNames.length} (max ${MAX_XLSX_SHEETS})`,
+        });
+      }
       const sheets = [];
       for (const sheetName of workbook.SheetNames) {
         const csv = XLSX.utils.sheet_to_csv(workbook.Sheets[sheetName]);
@@ -1157,7 +1453,7 @@ app.post('/api/file/parse', async (req, res) => {
 
     res.status(400).json({ error: `Unsupported file type: ${ext}` });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -1284,6 +1580,8 @@ const TABLE_ID_COL = {
 };
 
 // ── Bulk delete records ──────────────────────────────────────────
+// Admin-gated. Per-row audit: each deleted row's snapshot lands in undo_log
+// so ops can reconstruct who deleted what and when. QA audit P2-18.
 app.post('/api/bulk-delete', requireRole('admin'), async (req, res) => {
   try {
     const { table, ids } = req.body;
@@ -1294,16 +1592,30 @@ app.post('/api/bulk-delete', requireRole('admin'), async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'No IDs provided' });
     if (ids.length > 500) return res.status(400).json({ error: 'Max 500 IDs per request' });
 
-    // Use parameterized ANY($1) instead of string interpolation for safety
-    const result = await pool.query(
-      `DELETE FROM "${table}" WHERE "${idCol}" = ANY($1::uuid[])`,
-      [ids]
-    );
+    // RETURNING * so each deleted row's pre-state lands in the audit trail.
+    // Use parameterized ANY($1) instead of string interpolation for safety.
+    const sql = `DELETE FROM "${table}" WHERE "${idCol}" = ANY($1::uuid[]) RETURNING *`;
+    const result = await pool.query(sql, [ids]);
+
+    // Batch audit — one logAudit call per deleted row, fire-and-forget.
+    const userId = req.user && req.user.user_id;
+    for (const row of result.rows) {
+      logAudit(pool, {
+        action: 'BULK_DELETE',
+        table,
+        pk: idCol,
+        pkValue: row[idCol],
+        oldRow: row,
+        rowsAffected: 1,
+        userId,
+        sqlExecuted: sql,
+      });
+    }
 
     res.json({ deleted: result.rowCount });
   } catch (err) {
     console.error('[bulk-delete]', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -1317,7 +1629,7 @@ app.post('/api/import/detect', (req, res) => {
     const results = detectTable(headers);
     res.json({ detections: results });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -1389,7 +1701,7 @@ app.post('/api/import/preview', async (req, res) => {
     res.json({ preview: previewRows, stats });
   } catch (err) {
     console.error('[server] import/preview error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -1838,7 +2150,7 @@ app.post('/api/import/batch', denyReadOnly, async (req, res) => {
     res.json({ inserted, skipped, updated, flagged: flaggedRows.length, errors, linked, flaggedRows, firstError });
   } catch (err) {
     console.error('[server] import/batch error:', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -1863,14 +2175,17 @@ app.get('/api/airtable/fetch', async (req, res) => {
     const data = await resp.json();
     res.json(data);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
 app.get('/api/airtable/test', async (req, res) => {
   const apiKey = process.env.AIRTABLE_API_KEY;
   const baseId = process.env.AIRTABLE_BASE_ID || 'appQaZNM0Mt4Zul3q';
-  if (!apiKey) return res.json({ error: 'AIRTABLE_API_KEY not set', apiKey: null, baseId });
+  // Return 503 (not 200) when the integration isn't configured — the previous
+  // behavior of returning a 200 body with an error string caused callers that
+  // only check res.ok to treat it as success. QA audit 2026-04-15 Phase 4.3.
+  if (!apiKey) return res.status(503).json({ error: 'AIRTABLE_API_KEY not set', baseId });
 
   const { tableName } = req.query;
   const url = `https://api.airtable.com/v0/${baseId}/${encodeURIComponent(tableName)}?pageSize=5`;
@@ -1887,7 +2202,7 @@ app.get('/api/airtable/test', async (req, res) => {
       fieldNames: parsed?.records?.[0] ? Object.keys(parsed.records[0].fields) : [],
     });
   } catch (err) {
-    res.json({ error: err.message, baseId, tableName, url });
+    res.status(502).json({ error: safeErr(err), baseId, tableName });
   }
 });
 
@@ -1940,7 +2255,7 @@ app.get('/api/ai/sandbox/:table', async (req, res) => {
     res.json({ rows: result.rows, total: parseInt(countResult.rows[0].count) });
   } catch (err) {
     console.error('[ai/sandbox] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -1961,7 +2276,7 @@ app.post('/api/ai/sandbox/:table/review', async (req, res) => {
     res.json({ success: true, item: result.rows[0] });
   } catch (err) {
     console.error('[ai/sandbox/review] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2057,7 +2372,7 @@ app.post('/api/ai/sandbox/contacts/promote', async (req, res) => {
     finally { client.release(); }
   } catch (err) {
     console.error('[ai/sandbox/promote] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2255,7 +2570,7 @@ app.get('/api/ai/heartbeats', async (req, res) => {
     if (!pool) return res.status(503).json({ error: 'Database not configured' });
     const result = await pool.query('SELECT * FROM agent_heartbeats ORDER BY agent_name');
     res.json(result.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeErr(err) }); }
 });
 
 // POST /api/ai/heartbeat — Agent heartbeat upsert
@@ -2274,7 +2589,7 @@ app.post('/api/ai/heartbeat', async (req, res) => {
       [agent_name, tier, status || 'idle', current_task, items_processed_today || 0, items_in_queue || 0, last_error, metadata || {}]
     );
     res.json(result.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeErr(err) }); }
 });
 
 // POST /api/ai/log — Agent activity log
@@ -2288,7 +2603,7 @@ app.post('/api/ai/log', async (req, res) => {
       [agent_name, log_type || 'activity', content, metrics || {}]
     );
     res.json(result.rows[0]);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeErr(err) }); }
 });
 
 // GET /api/ai/sandbox/summary — Dashboard summary across all sandbox tables
@@ -2302,7 +2617,7 @@ app.get('/api/ai/sandbox/summary', async (req, res) => {
       result.rows.forEach(r => { counts[table][r.status] = parseInt(r.count); });
     }
     res.json(counts);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { res.status(500).json({ error: safeErr(err) }); }
 });
 
 // GET /api/ai/convergence — Detect signal convergence (multiple agents flagging same entity)
@@ -2344,7 +2659,7 @@ app.get('/api/ai/convergence', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('[ai/convergence] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2362,7 +2677,7 @@ app.get('/api/ai/tpe', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('TPE fetch error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2379,7 +2694,7 @@ app.get('/api/ai/tpe-config', async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2402,7 +2717,7 @@ app.patch('/api/ai/tpe-config', async (req, res) => {
     }
     res.json(results);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2438,7 +2753,7 @@ app.post('/api/ai/tpe-config/reset', async (req, res) => {
     const result = await pool.query('SELECT * FROM tpe_config ORDER BY config_category, config_key');
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2464,7 +2779,7 @@ app.get('/api/ai/tpe-gaps', async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2483,7 +2798,7 @@ app.get('/api/ai/tpe-gaps/stats', async (req, res) => {
     `);
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2547,7 +2862,7 @@ app.get('/api/ai/dashboard/summary', async (req, res) => {
     res.json(result);
   } catch (err) {
     console.error('[ai/dashboard/summary] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2570,7 +2885,7 @@ app.get('/api/ai/dashboard/pipeline', async (req, res) => {
     res.json(result.rows[0]);
   } catch (err) {
     console.error('[ai/dashboard/pipeline] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2595,7 +2910,7 @@ app.get('/api/ai/dashboard/costs', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('[ai/dashboard/costs] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2619,7 +2934,7 @@ app.get('/api/ai/logs', async (req, res) => {
     res.json(result.rows);
   } catch (err) {
     console.error('[ai/logs] Error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2859,7 +3174,7 @@ app.get('/api/council/channel-id', async (req, res) => {
     }
     res.json({ channelId: ch.rows[0].id });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2885,7 +3200,7 @@ app.get('/api/views', async (req, res) => {
     );
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2921,7 +3236,7 @@ app.post('/api/views', async (req, res) => {
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2986,7 +3301,7 @@ app.patch('/api/views/:viewId', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'View not found' });
     res.json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -2999,7 +3314,7 @@ app.delete('/api/views/:viewId', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'View not found' });
     res.json({ deleted: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3017,7 +3332,7 @@ app.get('/api/pdf-templates', async (req, res) => {
       : await pool.query('SELECT * FROM pdf_templates ORDER BY entity_type, created_at ASC');
     res.json(result.rows);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3034,7 +3349,7 @@ app.post('/api/pdf-templates', async (req, res) => {
     );
     res.status(201).json(result.rows[0]);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3046,7 +3361,7 @@ app.delete('/api/pdf-templates/:id', async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'Template not found' });
     res.json({ deleted: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3127,7 +3442,7 @@ app.get('/api/dedup/candidates', requireAuth, async (req, res) => {
     res.json({ rows, total: rows.length });
   } catch (err) {
     console.error('[dedup] list error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3141,7 +3456,7 @@ app.get('/api/dedup/stats', requireAuth, async (req, res) => {
     rows.forEach(r => { stats[r.status] = r.count; });
     res.json(stats);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3160,7 +3475,7 @@ app.post('/api/dedup/resolve', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[dedup] resolve error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3263,7 +3578,7 @@ app.post('/api/dedup/merge', requireAuth, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[dedup] merge error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   } finally {
     client.release();
   }
@@ -3291,7 +3606,7 @@ app.get('/api/dedup/contact-candidates', requireAuth, async (req, res) => {
     res.json({ rows, total: rows.length });
   } catch (err) {
     console.error('[dedup] contact list error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3304,7 +3619,7 @@ app.get('/api/dedup/contact-stats', requireAuth, async (req, res) => {
     rows.forEach(r => { stats[r.status] = r.count; });
     res.json(stats);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3322,7 +3637,7 @@ app.post('/api/dedup/contact-resolve', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[dedup] contact resolve error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3407,7 +3722,7 @@ app.post('/api/dedup/contact-merge', requireAuth, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[dedup] contact merge error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   } finally {
     client.release();
   }
@@ -3435,7 +3750,7 @@ app.get('/api/dedup/company-candidates', requireAuth, async (req, res) => {
     res.json({ rows, total: rows.length });
   } catch (err) {
     console.error('[dedup] company list error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3448,7 +3763,7 @@ app.get('/api/dedup/company-stats', requireAuth, async (req, res) => {
     rows.forEach(r => { stats[r.status] = r.count; });
     res.json(stats);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3466,7 +3781,7 @@ app.post('/api/dedup/company-resolve', requireAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[dedup] company resolve error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3557,7 +3872,7 @@ app.post('/api/dedup/company-merge', requireAuth, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[dedup] company merge error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   } finally {
     client.release();
   }
@@ -3736,7 +4051,7 @@ app.get('/api/dedup/clusters', requireAuth, async (req, res) => {
     res.json({ clusters: result, stats });
   } catch (err) {
     console.error('[dedup] clusters error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -3888,7 +4203,7 @@ app.post('/api/dedup/cluster-merge', requireAuth, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[dedup] cluster-merge error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   } finally {
     client.release();
   }
@@ -3957,7 +4272,7 @@ app.post('/api/dedup/undo-merge', requireAuth, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[dedup] undo-merge error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   } finally {
     client.release();
   }
@@ -3995,7 +4310,7 @@ app.get('/api/dedup/merge-history', requireAuth, async (req, res) => {
     res.json({ rows });
   } catch (err) {
     console.error('[dedup] merge-history error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   }
 });
 
@@ -4113,7 +4428,7 @@ app.post('/api/dedup/auto-merge', requireAuth, async (req, res) => {
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('[dedup] auto-merge error:', err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: safeErr(err) });
   } finally {
     client.release();
   }
@@ -4133,6 +4448,10 @@ app.get('*', (_req, res) => {
 // ============================================================
 initDatabase();
 initAnthropic();
+
+// Schema-drift check for write whitelists — logs loudly if any whitelisted
+// column is missing from the real DB. Fire-and-forget (non-blocking).
+if (pool) validateWhitelistsAtBoot().catch((err) => console.error('[whitelist-check]', err.message));
 
 server.listen(PORT, () => {
   console.log(`[server] IE CRM API running on port ${PORT}`);
