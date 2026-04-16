@@ -4,20 +4,63 @@
  * Used by Campaign Manager agent endpoints in ai.js.
  *
  * Docs: https://developer.instantly.ai/
+ * API index: https://developer.instantly.ai/llms.txt
  * Auth: Bearer token (API key with scopes)
  * Base URL: https://api.instantly.ai/api/v2
  */
 
 const BASE_URL = 'https://api.instantly.ai/api/v2';
 
+// Transient failures we'll retry with exponential backoff + Retry-After. We
+// treat 408, 429, 500, 502, 503, 504 as retryable — everything else either
+// succeeds or is a permanent failure (400, 401, 403, 404, etc.) that we
+// surface to the caller immediately. QA audit 2026-04-15 P2-12.
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+const DEFAULT_MAX_RETRIES = 3;
+const BASE_BACKOFF_MS = 500;
+
 function getApiKey() {
-  const key = process.env.INSTANTLY_API_KEY;
-  if (!key) throw new Error('INSTANTLY_API_KEY not set in environment');
-  return key;
+  return process.env.INSTANTLY_API_KEY || null;
+}
+
+// isConfigured(): cheap boot-time check so route handlers can 503 gracefully
+// instead of crashing with an unhandled throw from inside getApiKey().
+// QA audit 2026-04-15 P2-13.
+function isConfigured() {
+  return !!getApiKey();
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Custom error class so callers can distinguish transient vs. permanent
+ * failures and also read the HTTP status / response body without having
+ * to parse the plain Error.message.
+ */
+class InstantlyApiError extends Error {
+  constructor(message, { status, method, path, body } = {}) {
+    super(message);
+    this.name = 'InstantlyApiError';
+    this.status = status;
+    this.method = method;
+    this.path = path;
+    this.body = body; // first ~500 chars of the raw response body
+  }
 }
 
 async function instantlyFetch(path, options = {}) {
-  const { method = 'GET', body, params } = options;
+  const apiKey = getApiKey();
+  if (!apiKey) {
+    // Surface a clean 503-worthy error — routes should translate this into
+    // res.status(503).json(...) instead of crashing with an unhandled throw.
+    throw new InstantlyApiError('Instantly not configured (INSTANTLY_API_KEY missing)', {
+      status: 503,
+      method: options.method || 'GET',
+      path,
+    });
+  }
+
+  const { method = 'GET', body, params, maxRetries = DEFAULT_MAX_RETRIES } = options;
 
   let url = `${BASE_URL}${path}`;
   if (params) {
@@ -28,7 +71,7 @@ async function instantlyFetch(path, options = {}) {
   const fetchOptions = {
     method,
     headers: {
-      'Authorization': `Bearer ${getApiKey()}`,
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
   };
@@ -37,16 +80,58 @@ async function instantlyFetch(path, options = {}) {
     fetchOptions.body = JSON.stringify(body);
   }
 
-  const res = await fetch(url, fetchOptions);
+  let attempt = 0;
+  let lastError = null;
+  // Retry loop: `maxRetries + 1` total attempts (1 initial + N retries).
+  while (attempt <= maxRetries) {
+    let res;
+    try {
+      res = await fetch(url, fetchOptions);
+    } catch (networkErr) {
+      // Network-layer failure (DNS, ECONNRESET, timeout before response)
+      lastError = new InstantlyApiError(
+        `Instantly API ${method} ${path} network error: ${networkErr.message}`,
+        { status: 0, method, path }
+      );
+      if (attempt >= maxRetries) throw lastError;
+      const backoff = BASE_BACKOFF_MS * Math.pow(2, attempt);
+      console.warn(`[instantly] network error on ${method} ${path} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${backoff}ms`);
+      await sleep(backoff);
+      attempt++;
+      continue;
+    }
 
-  if (!res.ok) {
+    if (res.ok) {
+      if (res.status === 204) return null;
+      return res.json();
+    }
+
+    // Non-ok: decide whether to retry or surface to caller
     const errorText = await res.text().catch(() => 'Unknown error');
-    throw new Error(`Instantly API ${method} ${path} returned ${res.status}: ${errorText}`);
+    const truncated = errorText.slice(0, 500);
+    lastError = new InstantlyApiError(
+      `Instantly API ${method} ${path} returned ${res.status}: ${truncated}`,
+      { status: res.status, method, path, body: truncated }
+    );
+
+    if (!RETRYABLE_STATUSES.has(res.status) || attempt >= maxRetries) {
+      throw lastError;
+    }
+
+    // Honor Retry-After if present (seconds OR HTTP-date, we only support seconds)
+    const retryAfterHeader = res.headers.get('retry-after');
+    const retryAfterSec = retryAfterHeader ? parseInt(retryAfterHeader, 10) : NaN;
+    const backoff = Number.isFinite(retryAfterSec) && retryAfterSec > 0
+      ? retryAfterSec * 1000
+      : BASE_BACKOFF_MS * Math.pow(2, attempt);
+
+    console.warn(`[instantly] ${res.status} on ${method} ${path} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${backoff}ms`);
+    await sleep(backoff);
+    attempt++;
   }
 
-  // Some endpoints return no body (204)
-  if (res.status === 204) return null;
-  return res.json();
+  // Unreachable in practice, but satisfies the type checker
+  throw lastError || new InstantlyApiError('Instantly API: exhausted retries', { method, path });
 }
 
 // ============================================================
@@ -296,19 +381,31 @@ async function sendTestEmail(data) {
 
 /**
  * Get current workspace info
+ * Docs: https://developer.instantly.ai/llms.txt → GET /api/v2/workspace
  */
 async function getWorkspace() {
   return instantlyFetch('/workspace');
 }
 
 /**
- * Get billing/plan details
+ * Get billing/plan details — path changed: was `/workspace/billing/plan` but
+ * the v2 docs specify `/workspace-billing/plan`. QA audit 2026-04-15 P1-08.
  */
 async function getPlan() {
-  return instantlyFetch('/workspace/billing/plan');
+  return instantlyFetch('/workspace-billing/plan');
+}
+
+/**
+ * Get subscription details (new in v2 docs)
+ */
+async function getSubscription() {
+  return instantlyFetch('/workspace-billing/subscription');
 }
 
 module.exports = {
+  // Configuration check (so routes can 503 gracefully)
+  isConfigured,
+  InstantlyApiError,
   // Campaigns
   listCampaigns,
   getCampaign,
@@ -348,4 +445,5 @@ module.exports = {
   // Workspace
   getWorkspace,
   getPlan,
+  getSubscription,
 };

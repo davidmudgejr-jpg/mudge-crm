@@ -160,19 +160,33 @@ const ENTITY_TYPE_TO_TABLE = {
 
 /**
  * Validate a column name against the whitelist for a given table.
- * @throws {Error} if column is not in the whitelist
+ *
+ * Normalizes the input to lowercase before checking — PostgreSQL unquoted
+ * identifiers are case-folded to lowercase, so `Email_1` and `email_1`
+ * refer to the same column. Returns the NORMALIZED column name; callers
+ * should use the return value rather than the original input when building
+ * SQL so the identifier matches the whitelist + the IDENTIFIER_RE pattern.
+ *
+ * QA audit 2026-04-15 P1-07 — previously strict-case matched and rejected
+ * valid-but-mixed-case columns coming from legacy callers/imports.
+ *
+ * @throws {Error} if column (after normalization) is not in the whitelist
  */
 function validateColumn(col, table) {
+  if (typeof col !== 'string' || col.length === 0) {
+    throw new Error(`[sqlSafety] Column name must be a non-empty string, got ${typeof col}`);
+  }
+  const normalized = col.toLowerCase();
   // Resolve entity type aliases
   const resolvedTable = ENTITY_TYPE_TO_TABLE[table] || table;
   const allowed = ALLOWED_COLS[resolvedTable];
   if (!allowed) {
     throw new Error(`[sqlSafety] Unknown table: "${table}"`);
   }
-  if (!allowed.has(col)) {
+  if (!allowed.has(normalized)) {
     throw new Error(`[sqlSafety] Disallowed column "${col}" for table "${resolvedTable}"`);
   }
-  return col;
+  return normalized;
 }
 
 /**
@@ -216,8 +230,11 @@ function buildSetClauses(updates, table, startIdx = 1) {
   let idx = startIdx;
 
   for (const [key, val] of Object.entries(updates)) {
-    validateColumn(key, resolvedTable);
-    setClauses.push(`${quoteIdentifier(key)} = $${idx}`);
+    // validateColumn returns the normalized (lowercase) name; use that for
+    // both the whitelist check AND the quoted identifier so the SQL matches
+    // the real Postgres column name.
+    const safeKey = validateColumn(key, resolvedTable);
+    setClauses.push(`${quoteIdentifier(safeKey)} = $${idx}`);
     values.push(val);
     idx++;
   }

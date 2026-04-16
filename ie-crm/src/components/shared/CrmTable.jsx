@@ -336,6 +336,9 @@ export default function CrmTable({
   groupOrders,       // { [columnKey]: string[] } — custom sort orders for groups
   columnDefs,        // ALL_COLUMNS — for aggregate type detection
   onGroupByColumn,   // (column: string | null) => void — update grouping
+  // Slide-out animation (for rows leaving a filtered view)
+  slidingRowIds,     // Set<id> — rows currently animating out
+  transitioningRowIds, // Set<id> — rows pending removal (dimmed before slide)
 }) {
   /* ── Column order: drag-to-reorder with localStorage persistence ─── */
   const colOrderKey = `crm_column_order_${tableKey}`;
@@ -611,11 +614,14 @@ export default function CrmTable({
             const renderRow = (row, idx) => {
               const id = row[idField];
               const isSelected = selected.has(id);
+              const isSliding = slidingRowIds?.has(id);
+              const isTransitioning = transitioningRowIds?.has(id);
               const extraClass = rowClassName ? rowClassName(row) : '';
               return (
                 <tr
                   key={id}
                   onClick={(e) => {
+                    if (isSliding) return;
                     if (e.metaKey) {
                       onToggleSelect(id);
                     } else if (e.shiftKey && onShiftSelect) {
@@ -626,21 +632,36 @@ export default function CrmTable({
                   }}
                   onContextMenu={(e) => {
                     e.preventDefault();
+                    if (isSliding) return;
                     setContextMenu({ x: e.clientX, y: e.clientY, row });
                   }}
                   className={`border-b border-crm-border/30 cursor-pointer ${
-                    newRecordId && row[idField] === newRecordId ? 'animate-live-insert' : 'animate-row-appear'
+                    isSliding
+                      ? 'opacity-0 -translate-x-8 pointer-events-none'
+                      : isTransitioning
+                        ? 'opacity-50'
+                        : ''
+                  } ${
+                    !isSliding && !isTransitioning
+                      ? (newRecordId && row[idField] === newRecordId ? 'animate-live-insert' : 'animate-row-appear')
+                      : ''
                   } ${
                     isSelected
                       ? 'bg-crm-accent/15 shadow-[0_8px_24px_rgba(0,0,0,0.35),inset_0_0_0_1px_rgba(255,255,255,0.1)] -translate-y-[3px]'
-                      : 'hover:bg-crm-hover hover:-translate-y-[2px] hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] active:scale-[0.995]'
+                      : !isSliding && !isTransitioning
+                        ? 'hover:bg-crm-hover hover:-translate-y-[2px] hover:shadow-[0_4px_16px_rgba(0,0,0,0.15)] active:scale-[0.995]'
+                        : ''
                   } ${extraClass}`}
                   style={{
                     '--row-index': idx,
                     animationDelay: `calc(var(--row-index, 0) * 30ms)`,
-                    transition: 'transform 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94), background-color 150ms ease',
+                    transition: isSliding
+                      ? 'opacity 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94), transform 0.7s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+                      : isTransitioning
+                        ? 'opacity 0.3s ease, transform 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275), background-color 150ms ease'
+                        : 'transform 200ms cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 200ms cubic-bezier(0.25, 0.46, 0.45, 0.94), background-color 150ms ease',
                     borderRadius: '8px',
-                    ...(idx % 2 === 1 ? { backgroundColor: 'rgba(255,255,255,0.02)' } : {}),
+                    ...(idx % 2 === 1 && !isSliding && !isTransitioning ? { backgroundColor: 'rgba(255,255,255,0.02)' } : {}),
                   }}
                 >
                   <td

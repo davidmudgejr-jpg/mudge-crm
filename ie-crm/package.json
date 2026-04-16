@@ -6,17 +6,25 @@
   "scripts": {
     "dev": "concurrently \"npm run dev:react\" \"npm run dev:electron\"",
     "dev:react": "vite",
-    "dev:electron": "wait-on http://localhost:5173 && electron .",
+    "dev:electron": "node scripts/wait-for-port.js 5173 127.0.0.1 60 && electron .",
     "dev:web": "concurrently \"npm run dev:react\" \"npm run dev:server\"",
     "dev:server": "node server/index.js",
+    "prestart": "node scripts/check-duplicate-filenames.js",
+    "prebuild": "node scripts/check-duplicate-filenames.js",
+    "prebuild:web": "node scripts/check-duplicate-filenames.js",
     "build": "vite build && electron-builder",
     "build:web": "vite build",
     "start": "node server/index.js",
     "preview": "vite preview",
-    "audit:schema-columns": "node scripts/audit-schema-columns.js"
+    "audit:schema-columns": "node scripts/audit-schema-columns.js",
+    "migrate": "node scripts/migrate.js",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=20 <27"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.80.0",
+    "@anthropic-ai/sdk": "^0.89.0",
     "@elevenlabs/elevenlabs-js": "^2.39.0",
     "@react-three/drei": "^9.122.0",
     "@react-three/fiber": "^8.18.0",
@@ -55,8 +63,8 @@
     "electron-builder": "^25.1.8",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.15",
-    "vite": "^6.0.3",
-    "wait-on": "^8.0.1"
+    "vite": "^6.4.2",
+    "vitest": "^2.1.8"
   },
   "build": {
     "appId": "com.iecrm.app",
@@ -94,8 +102,7 @@
       "!node_modules/postcss/**",
       "!node_modules/electron/**",
       "!node_modules/electron-builder/**",
-      "!node_modules/concurrently/**",
-      "!node_modules/wait-on/**"
+      "!node_modules/concurrently/**"
     ],
     "asar": true
   }

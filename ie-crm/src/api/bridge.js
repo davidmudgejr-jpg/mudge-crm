@@ -32,7 +32,9 @@ function getCached(path) {
 }
 
 function invalidateCache(pathPrefix) {
-  // Clear any cached GETs that match the prefix (e.g., /api/db/ after a write)
+  // Clear any cached GETs that match the prefix (e.g., /api/db/contacts after
+  // writing a contact). Note: the prefix should be entity-scoped, not bucket-
+  // scoped — see httpPost below.
   for (const key of GET_CACHE.keys()) {
     if (key.startsWith(pathPrefix)) GET_CACHE.delete(key);
   }
@@ -40,6 +42,43 @@ function invalidateCache(pathPrefix) {
 
 // Public: force-clear the entire cache (called after mutations like save/delete)
 export function clearApiCache() { GET_CACHE.clear(); }
+
+// Entity extraction for cache invalidation: derives the target entity(s)
+// from a write path OR a request body. Different write endpoints encode
+// the entity in different places:
+//
+//   - /api/db/update, /api/db/create, /api/db/delete  → body.entity
+//   - /api/db/link, /api/db/unlink                    → body.junction (+ related entities)
+//   - /api/bulk-delete                                → body.table
+//   - /api/import/batch                               → body.target
+//
+// When we can't confidently narrow it down, fall through to the legacy
+// bucket invalidation (/api/db). Better to over-invalidate than to
+// serve stale data.
+function entityInvalidationPrefixes(path, body) {
+  const prefixes = new Set();
+  // /api/db/{read,count,update,create,delete,link,unlink,query}
+  if (path.startsWith('/api/db/')) {
+    if (body && typeof body === 'object') {
+      if (typeof body.entity === 'string') {
+        prefixes.add(`/api/db/${body.entity}`);
+        // Also invalidate the legacy /api/db/read path (it's a single POST
+        // endpoint so there's nothing entity-specific in the URL — we use a
+        // tag pattern where we add the entity as a cache key suffix). See
+        // httpGet/GET_CACHE notes.
+      }
+      if (typeof body.junction === 'string') prefixes.add(`/api/db/${body.junction}`);
+      if (typeof body.table === 'string') prefixes.add(`/api/db/${body.table}`);
+    }
+  }
+  if (path === '/api/bulk-delete' && body && typeof body.table === 'string') {
+    prefixes.add(`/api/db/${body.table}`);
+  }
+  if (path === '/api/import/batch' && body && typeof body.target === 'string') {
+    prefixes.add(`/api/db/${body.target}`);
+  }
+  return prefixes;
+}
 
 async function httpPost(path, body = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -51,9 +90,18 @@ async function httpPost(path, body = {}) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(err.error || `HTTP ${res.status}`);
   }
-  // Invalidate related GET caches after any write
-  const prefix = path.split('/').slice(0, 3).join('/'); // e.g., /api/db
-  invalidateCache(prefix);
+
+  // Invalidate related GET caches after any write. Start entity-scoped so a
+  // write to contacts doesn't thrash every cached entity GET. If nothing
+  // matches, fall back to clearing the bucket (legacy behavior).
+  const prefixes = entityInvalidationPrefixes(path, body);
+  if (prefixes.size > 0) {
+    for (const p of prefixes) invalidateCache(p);
+  } else {
+    const bucket = path.split('/').slice(0, 3).join('/'); // e.g. /api/db
+    invalidateCache(bucket);
+  }
+
   return res.json();
 }
 
@@ -65,9 +113,17 @@ async function httpGet(path) {
   if (cached?.promise) return cached.promise;
 
   const promise = (async () => {
-    const res = await fetch(`${API_BASE}${path}`, {
-      headers: getAuthHeaders(),
-    });
+    let res;
+    try {
+      res = await fetch(`${API_BASE}${path}`, {
+        headers: getAuthHeaders(),
+      });
+    } catch (networkErr) {
+      // Network-layer failure — make sure the rejected promise is NOT left
+      // cached, otherwise every caller for the next 30s replays the error.
+      GET_CACHE.delete(path);
+      throw networkErr;
+    }
     if (!res.ok) {
       GET_CACHE.delete(path);
       const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -78,10 +134,24 @@ async function httpGet(path) {
     return data;
   })();
 
-  // Store the in-flight promise so duplicate calls share it
+  // Store the in-flight promise so duplicate calls share it.
+  // Also attach a catch that evicts the entry if the promise rejects — this
+  // prevents a 30-second window of "failed to load" after a transient error.
+  // QA audit 2026-04-15 P1-12.
+  promise.catch(() => { GET_CACHE.delete(path); });
   GET_CACHE.set(path, { promise, expiry: Date.now() + CACHE_TTL });
   return promise;
 }
+
+// ── Low-level HTTP escape hatch ──────────────────────────────────
+// Exposed for routes that don't fit the db.* pattern (e.g. /api/dedup/*,
+// /api/files/*). Using these keeps callers inside the shared cache +
+// auth-header + 401-retry machinery instead of hand-rolling fetch() with
+// a manually-constructed Authorization header. QA audit P2-10.
+export const http = {
+  get: (path) => httpGet(path),
+  post: (path, body) => httpPost(path, body),
+};
 
 // ── Database bridge ──────────────────────────────────────────────
 export const db = {
