@@ -3130,10 +3130,20 @@ router.post('/air/ingest', async (req, res) => {
       try {
         const propertyId = await findOrCreateProperty(comp);
 
-        // Dedup: use air_entry_number first, fall back to address + tenant.
+        // Dedup: use air_entry_number first, fall back to
+        // (address, tenant_name, air_sheet_date) composite.
+        //
         // Match source with LIKE '%air_sheet%' to catch enriched rows too
         // (e.g. 'air_sheet+reapps_powerbroker'). Strict '=' match would miss
         // those and duplicate-insert on re-ingest.
+        //
+        // The fallback uses COALESCE on tenant_name because the Python AIR
+        // parser doesn't emit tenant_name for "Research in Progress" listings
+        // — existing rows have tenant_name IS NULL, and LOWER(NULL) doesn't
+        // equal LOWER(''), so a naïve equality would always miss the match
+        // and duplicate on every re-POST. Date-bounding on air_sheet_date
+        // makes the composite per-day-unique for listings that reappear
+        // across consecutive daily sheets.
         const exists = comp.air_entry_number
           ? await pool.query(
               `SELECT id FROM lease_comps
@@ -3143,8 +3153,10 @@ router.post('/air/ingest', async (req, res) => {
           : await pool.query(
               `SELECT id FROM lease_comps
                WHERE LOWER(property_address) = LOWER($1)
-               AND LOWER(tenant_name) = LOWER($2)`,
-              [comp.address, comp.tenant_name || '']
+                 AND COALESCE(LOWER(TRIM(tenant_name)), '') = LOWER(TRIM(COALESCE($2::text, '')))
+                 AND source LIKE '%air_sheet%'
+                 AND air_sheet_date = $3::date`,
+              [comp.address, comp.tenant_name, parsed_date]
             );
 
         if (exists.rows.length === 0) {
