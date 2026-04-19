@@ -2969,6 +2969,26 @@ router.post('/air/ingest', async (req, res) => {
       return null;
     }
 
+    // Strip suite/unit/ste from an address string. Returns { base, suite }.
+    // Matches the behavior of the legacy air_db_ingest.js so lease_comp
+    // property_address values stay consistent whether ingested via the old
+    // direct-DB path or the new Railway endpoint (floor_suite captures the
+    // suite separately). Preventing suite from landing in property_address
+    // is critical for dedup — existing rows have base-only addresses.
+    function stripSuite(address) {
+      if (!address) return { base: '', suite: '' };
+      const patterns = [
+        /[,\s]+(?:bldg\.?\s*\d+[,\s]+(?:unit|ste\.?|suite|spc|space)\s*[#]?\s*.+)$/i,
+        /[,\s]+(?:ste\.?|suite|unit|spc|space|bldg\.?)\s*[#]?\s*(.+)$/i,
+        /[,\s]+#\s*(.+)$/i,
+      ];
+      for (const p of patterns) {
+        const m = address.match(p);
+        if (m) return { base: address.slice(0, m.index).trim().replace(/[,\s]+$/, ''), suite: m[0].replace(/^[,\s]+/, '').trim() };
+      }
+      return { base: address.trim(), suite: '' };
+    }
+
     async function findOrCreateProperty(rawEntry) {
       const norm = normalizeRecord(rawEntry, 'properties', 'air_sheet');
       const addr = (rawEntry.address || norm.property_address || '').trim();
@@ -3130,6 +3150,14 @@ router.post('/air/ingest', async (req, res) => {
       try {
         const propertyId = await findOrCreateProperty(comp);
 
+        // Split suite out of address: suite → floor_suite, base → property_address.
+        // Legacy air_db_ingest.js did this; doing it here keeps historical
+        // base-only dedup keys matching new incoming payloads that may carry
+        // a suite in the address field.
+        const { base: baseAddress, suite: derivedSuite } = stripSuite(comp.address || '');
+        const addressForComp = baseAddress || comp.address;
+        const floorSuite = comp.floor_suite || derivedSuite || null;
+
         // Dedup: use air_entry_number first, fall back to
         // (address, tenant_name, air_sheet_date) composite.
         //
@@ -3156,7 +3184,7 @@ router.post('/air/ingest', async (req, res) => {
                  AND COALESCE(LOWER(TRIM(tenant_name)), '') = LOWER(TRIM(COALESCE($2::text, '')))
                  AND source LIKE '%air_sheet%'
                  AND air_sheet_date = $3::date`,
-              [comp.address, comp.tenant_name, parsed_date]
+              [addressForComp, comp.tenant_name, parsed_date]
             );
 
         if (exists.rows.length === 0) {
@@ -3168,13 +3196,13 @@ router.post('/air/ingest', async (req, res) => {
           await pool.query(
             `INSERT INTO lease_comps
                (property_id, company_id, property_address, city, tenant_name, sf, rate, rent_type,
-                sign_date, term_months, building_rba,
+                sign_date, term_months, building_rba, floor_suite,
                 tenant_rep_agents, landlord_rep_agents,
                 source, air_sheet_date, air_entry_number, notes)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'air_sheet',$14,$15,$16)`,
-            [propertyId, tenantCompanyId, comp.address, comp.city, comp.tenant_name,
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,'air_sheet',$15,$16,$17)`,
+            [propertyId, tenantCompanyId, addressForComp, comp.city, comp.tenant_name,
              comp.sf, comp.rate, comp.rate_type,
-             comp.sign_date, comp.term_months, comp.building_sf,
+             comp.sign_date, comp.term_months, comp.building_sf, floorSuite,
              comp.tenant_rep, comp.landlord_rep,
              parsed_date, comp.air_entry_number, comp.notes]
           );
