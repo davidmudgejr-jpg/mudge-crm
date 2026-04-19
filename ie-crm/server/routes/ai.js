@@ -2932,6 +2932,8 @@ router.post('/air/ingest', async (req, res) => {
       properties_created: 0,
       properties_updated: 0,
       lease_comps_created: 0,
+      lease_comps_company_linked: 0,
+      lease_comps_tenant_unmatched: 0,
       sale_comps_created: 0,
       market_tracking_created: 0,
       market_tracking_updated: 0,
@@ -2944,6 +2946,28 @@ router.post('/air/ingest', async (req, res) => {
     const allProperties = (await pool.query(
       `SELECT property_id, property_address, city, zip FROM properties`
     )).rows;
+
+    // Preload companies for tenant→company matching during lease_comp ingest.
+    // AIR sheets give us tenant_name as text; we fuzzy-match to existing
+    // companies so lease_comps land with company_id populated (prevents the
+    // orphan-tenant backlog we had before 2026-04-18).
+    const allCompanies = (await pool.query(
+      `SELECT company_id, company_name, city FROM companies WHERE company_name IS NOT NULL`
+    )).rows;
+
+    // AIR uses these strings when a tenant isn't publicly disclosed. Don't try
+    // to match them — they'd resolve to the wrong company every time.
+    const TENANT_PLACEHOLDERS = new Set([
+      'not disclosed', 'confidential', 'undisclosed', 'unknown',
+      'tbd', 'vacant', 'n/a', 'to be determined', 'redacted', 'tba', '',
+    ]);
+    function resolveTenantCompanyId(tenantName, city) {
+      if (!tenantName) return null;
+      if (TENANT_PLACEHOLDERS.has(tenantName.trim().toLowerCase())) return null;
+      const result = matchCompany(tenantName, allCompanies, city);
+      if (result.match && result.match.confidence >= 85) return result.match.id;
+      return null;
+    }
 
     async function findOrCreateProperty(rawEntry) {
       const norm = normalizeRecord(rawEntry, 'properties', 'air_sheet');
@@ -3106,11 +3130,14 @@ router.post('/air/ingest', async (req, res) => {
       try {
         const propertyId = await findOrCreateProperty(comp);
 
-        // Dedup: use air_entry_number first, fall back to address + tenant
+        // Dedup: use air_entry_number first, fall back to address + tenant.
+        // Match source with LIKE '%air_sheet%' to catch enriched rows too
+        // (e.g. 'air_sheet+reapps_powerbroker'). Strict '=' match would miss
+        // those and duplicate-insert on re-ingest.
         const exists = comp.air_entry_number
           ? await pool.query(
               `SELECT id FROM lease_comps
-               WHERE air_entry_number = $1 AND source = 'air_sheet'`,
+               WHERE air_entry_number = $1 AND source LIKE '%air_sheet%'`,
               [comp.air_entry_number]
             )
           : await pool.query(
@@ -3121,14 +3148,19 @@ router.post('/air/ingest', async (req, res) => {
             );
 
         if (exists.rows.length === 0) {
+          const tenantCompanyId = resolveTenantCompanyId(comp.tenant_name, comp.city);
+          if (tenantCompanyId) results.lease_comps_company_linked++;
+          else if (comp.tenant_name && !TENANT_PLACEHOLDERS.has(comp.tenant_name.trim().toLowerCase())) {
+            results.lease_comps_tenant_unmatched++;
+          }
           await pool.query(
             `INSERT INTO lease_comps
-               (property_id, property_address, city, tenant_name, sf, rate, rent_type,
+               (property_id, company_id, property_address, city, tenant_name, sf, rate, rent_type,
                 sign_date, term_months, building_rba,
                 tenant_rep_agents, landlord_rep_agents,
                 source, air_sheet_date, air_entry_number, notes)
-             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'air_sheet',$13,$14,$15)`,
-            [propertyId, comp.address, comp.city, comp.tenant_name,
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,'air_sheet',$14,$15,$16)`,
+            [propertyId, tenantCompanyId, comp.address, comp.city, comp.tenant_name,
              comp.sf, comp.rate, comp.rate_type,
              comp.sign_date, comp.term_months, comp.building_sf,
              comp.tenant_rep, comp.landlord_rep,
