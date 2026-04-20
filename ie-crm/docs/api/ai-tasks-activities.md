@@ -36,7 +36,7 @@ List tasks with optional filters. Response:
 | Param | Type | Notes |
 |-------|------|-------|
 | `assignee` | string, repeatable | Case-insensitive match within `responsibility[]`. `?assignee=David&assignee=Sarah` returns tasks assigned to either. |
-| `status` | string, repeatable | One or more status values. `?status=open` is an alias for "status NOT IN ('Done','Dead')" and supersedes explicit statuses. |
+| `status` | string, repeatable | One or more status values (case-insensitive, canonicalized to the DB enum). `?status=open` is an alias for "status NOT IN ('Done','Dead')". **Combining `open` with explicit values returns `400` — use one or the other** (Issue #10 — previously the explicit values were silently dropped). |
 | `high_priority` | bool | `true`/`1`/`yes` filters to high-priority only. |
 | `due_before` | date (ISO-8601 or YYYY-MM-DD) | `due_date <= value`. |
 | `due_after` | date | `due_date >= value`. |
@@ -193,10 +193,16 @@ curl -s -X POST "$BASE/api/ai/deals/$DEAL_ID/activities" \
   -d '{ "type": "note", "notes": "Owner wants 12-month term, not 7." }'
 ```
 
-`type` must be one of the values in the `chk_interaction_type` constraint
-(see migration 041). Invalid values are rejected by the DB with a `500`
-wrapped in `{ "error": "Failed to log activity" }` — future work could
-validate client-side first.
+`type` is case-insensitive on input and canonicalized to the form the
+`chk_interaction_type` constraint accepts (`'call'` → `'Call'`,
+`'phone call'` → `'Phone Call'`, etc.). Unknown values return `400`
+with the allowed list. Allowed values:
+
+`Lead`, `Phone Call`, `Cold Call`, `Voicemail`, `Outbound Email`,
+`Inbound Email`, `Cold Email`, `Check in Email`, `Email Campaign`,
+`Text`, `Meeting`, `Tour`, `Door Knock`, `Drive By`, `Snail Mail`,
+`Offer Sent`, `Survey Sent`, `BOV Sent`, `Call`, `Email`, `Note`,
+`LinkedIn`, `Other`.
 
 ### `GET /api/ai/activities/:interaction_id`
 
@@ -221,6 +227,12 @@ Every write hits `agent_logs` with one of these `log_type` values:
 `task_create`, `task_update`, `task_complete`, `task_delete`,
 `activity_create`, `activity_update`. The `metrics` JSON includes the
 entity ID, before/after snapshots (for updates), and link-change counts.
+
+**`log_type='error'`** — When a pg constraint or data-exception (22xxx /
+23xxx / 42xxx codes) fires inside one of these endpoints, the server
+returns the usual generic 500 but also persists the pg error metadata
+(`pg_code`, `constraint`, `detail`, `table`, `column`) to `agent_logs`
+so future debugging doesn't require a DB shell.
 
 ```sql
 SELECT agent_name, log_type, content, created_at
