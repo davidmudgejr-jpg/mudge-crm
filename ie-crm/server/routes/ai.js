@@ -6114,9 +6114,13 @@ function isUuid(val) {
   return typeof val === 'string' && UUID_RE.test(val);
 }
 
+// Returns the canonicalized (lowercase) UUID. PostgreSQL always returns UUIDs
+// in lowercase, so normalizing on input means the JS-level string compares in
+// assertEntitiesExist() match DB results even when the caller sent uppercase.
+// (Codex P1 on PR #8: uppercase UUIDs triggered spurious 400 "Unknown ... IDs".)
 function assertUuid(val, name) {
   if (!isUuid(val)) throw httpError(400, `Invalid UUID for "${name}"`);
-  return val;
+  return val.toLowerCase();
 }
 
 function normalizeTaskStatus(input) {
@@ -6188,10 +6192,27 @@ function parseTasksStatusQuery(rawStatuses) {
 function parseDateInput(val, field) {
   if (val == null || val === '') return null;
   const s = String(val).trim();
-  if (!/^\d{4}-\d{2}-\d{2}([T ].+)?$/.test(s)) {
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})([T ].+)?$/);
+  if (!m) {
     throw httpError(400, `Invalid date for "${field}" (expected YYYY-MM-DD or ISO-8601)`);
   }
-  // Double-check by letting Date parse it — catches '2026-13-45'
+  const year = parseInt(m[1], 10);
+  const month = parseInt(m[2], 10);
+  const day = parseInt(m[3], 10);
+  // Round-trip the declared YMD through Date.UTC to catch calendar rollover
+  // — JS normalizes "2026-02-31" to March 3 and "2026-13-01" to next Jan
+  // instead of throwing. Without this, bad dates pass the validator and
+  // then blow up as pg 22007 (invalid_datetime_format) masked as a generic
+  // 500. (Codex P2 on PR #8.)
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (
+    check.getUTCFullYear() !== year
+    || check.getUTCMonth() !== month - 1
+    || check.getUTCDate() !== day
+  ) {
+    throw httpError(400, `Invalid calendar date for "${field}" (got "${s}")`);
+  }
+  // Still run the full parser so bad time portions ("...T25:99:99") are caught.
   const d = new Date(s);
   if (isNaN(d.getTime())) {
     throw httpError(400, `Invalid date for "${field}"`);
@@ -6470,9 +6491,9 @@ router.get('/tasks', requireAgentKey, async (req, res) => {
     ];
     for (const [col, val, tbl] of linkFilters) {
       if (val) {
-        assertUuid(val, col);
+        const normalizedVal = assertUuid(val, col);
         conditions.push(
-          `EXISTS (SELECT 1 FROM ${tbl} lj WHERE lj.action_item_id = a.action_item_id AND lj.${col} = ${push(val)}::uuid)`
+          `EXISTS (SELECT 1 FROM ${tbl} lj WHERE lj.action_item_id = a.action_item_id AND lj.${col} = ${push(normalizedVal)}::uuid)`
         );
       }
     }

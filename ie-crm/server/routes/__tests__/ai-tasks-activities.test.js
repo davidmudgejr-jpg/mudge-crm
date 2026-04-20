@@ -66,9 +66,23 @@ describe('UUID validation', () => {
     expect(isUuid({})).toBe(false);
   });
 
-  it('assertUuid returns the value when valid', () => {
+  it('assertUuid returns the canonical lowercase form when valid', () => {
     const id = 'a1b2c3d4-5678-4abc-8def-1234567890ab';
     expect(assertUuid(id, 'deal_id')).toBe(id);
+  });
+
+  // Codex P1 on PR #8: uppercase UUIDs pass the regex but Postgres returns
+  // canonical lowercase, so assertEntitiesExist's Set.has() compare saw
+  // them as "missing" and rejected legit links with 400. Normalizing in
+  // assertUuid cascades — every call site gets the lowercase form.
+  it('assertUuid lowercases uppercase input so JS-level compares match PG output', () => {
+    const upper = 'A1B2C3D4-5678-4ABC-8DEF-1234567890AB';
+    expect(assertUuid(upper, 'deal_id')).toBe(upper.toLowerCase());
+  });
+
+  it('assertUuid lowercases mixed-case input', () => {
+    const mixed = 'A1b2C3d4-5678-4AbC-8DeF-1234567890aB';
+    expect(assertUuid(mixed, 'id')).toBe(mixed.toLowerCase());
   });
 
   it('assertUuid throws 400 error on invalid', () => {
@@ -163,6 +177,54 @@ describe('Date input parsing', () => {
     } catch (err) {
       expect(err.status).toBe(400);
     }
+  });
+
+  // Codex P2 on PR #8: JS silently rolls over invalid calendar dates
+  // ("2026-02-31" → March 3). Validator now catches this with a
+  // YMD round-trip instead of letting PG emit a masked 500.
+  it('rejects calendar-rollover dates (Feb 31 → would silently become Mar 3)', () => {
+    for (const bad of ['2026-02-31', '2026-02-30', '2026-04-31', '2026-06-31', '2026-09-31', '2026-11-31']) {
+      try {
+        parseDateInput(bad, 'due_date');
+        expect.fail(`should have thrown for ${bad}`);
+      } catch (err) {
+        expect(err.status).toBe(400);
+        expect(err.message).toMatch(/Invalid calendar date/);
+      }
+    }
+  });
+
+  it('rejects month-13 rollover (2026-13-01 → would become 2027-01-01)', () => {
+    try {
+      parseDateInput('2026-13-01', 'due_date');
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err.status).toBe(400);
+      expect(err.message).toMatch(/Invalid calendar date/);
+    }
+  });
+
+  it('accepts Feb 29 in leap years', () => {
+    expect(parseDateInput('2024-02-29', 'due_date')).toBe('2024-02-29');
+    expect(parseDateInput('2000-02-29', 'due_date')).toBe('2000-02-29');
+  });
+
+  it('rejects Feb 29 in non-leap years', () => {
+    for (const bad of ['2026-02-29', '2025-02-29', '2100-02-29']) {
+      try {
+        parseDateInput(bad, 'due_date');
+        expect.fail(`should have thrown for ${bad}`);
+      } catch (err) {
+        expect(err.status).toBe(400);
+      }
+    }
+  });
+
+  it('still accepts ISO-8601 datetime with timezone offsets (no false-positive rollover)', () => {
+    // These date-parts are valid; a TZ offset that shifts UTC day must
+    // NOT be flagged as rollover by the round-trip check.
+    expect(parseDateInput('2026-04-20T23:30:00-05:00', 'date')).toBe('2026-04-20T23:30:00-05:00');
+    expect(parseDateInput('2026-02-28T23:30:00+09:00', 'date')).toBe('2026-02-28T23:30:00+09:00');
   });
 
   it('includes the field name in the error message', () => {
