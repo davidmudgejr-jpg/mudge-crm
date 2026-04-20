@@ -6131,6 +6131,58 @@ function normalizeTaskStatus(input) {
   return canonical;
 }
 
+// Interaction types — must match the chk_interaction_type CHECK constraint
+// (migration 041 / 043). Case-insensitive on input, canonicalized to the
+// capitalization the DB accepts. Fixes Issue #9 where lowercase "call" /
+// "email" produced 500s because the raw value violated the constraint.
+const INTERACTION_TYPES = [
+  'Lead', 'Phone Call', 'Cold Call', 'Voicemail',
+  'Outbound Email', 'Inbound Email', 'Cold Email', 'Check in Email',
+  'Email Campaign', 'Text', 'Meeting', 'Tour', 'Door Knock',
+  'Drive By', 'Snail Mail', 'Offer Sent', 'Survey Sent', 'BOV Sent',
+  'Call', 'Email', 'Note', 'LinkedIn', 'Other',
+];
+const INTERACTION_TYPE_LOOKUP = new Map(
+  INTERACTION_TYPES.map((t) => [t.toLowerCase(), t])
+);
+
+function normalizeInteractionType(input) {
+  if (input == null || input === '') return null;
+  const canonical = INTERACTION_TYPE_LOOKUP.get(
+    String(input).toLowerCase().trim().replace(/\s+/g, ' ')
+  );
+  if (!canonical) {
+    throw httpError(
+      400,
+      `Invalid interaction type "${input}". Allowed: ${INTERACTION_TYPES.join(', ')}`
+    );
+  }
+  return canonical;
+}
+
+// Parse the ?status= query for GET /tasks. Returns { openAlias, explicit }
+// and rejects the ambiguous open+explicit combo with 400 (Issue #10) —
+// previously the explicit values were silently dropped, which is
+// audit-hostile.
+function parseTasksStatusQuery(rawStatuses) {
+  const normalized = asArray(rawStatuses).filter(
+    (s) => s && String(s).trim() !== ''
+  );
+  const openAlias = normalized.some(
+    (s) => String(s).toLowerCase() === 'open'
+  );
+  const explicit = normalized
+    .filter((s) => String(s).toLowerCase() !== 'open')
+    .map(normalizeTaskStatus);
+  if (openAlias && explicit.length) {
+    throw httpError(
+      400,
+      'status=open cannot be combined with explicit statuses — use one or the other.'
+    );
+  }
+  return { openAlias, explicit };
+}
+
 // Accept ISO-8601 datetime OR YYYY-MM-DD date. Returns the original string
 // (Postgres handles both literal formats). Rejects anything else with 400.
 function parseDateInput(val, field) {
@@ -6306,12 +6358,45 @@ async function assertEntitiesExist(client, table, pkCol, ids) {
   }
 }
 
+// pg error codes worth persisting for debugging:
+//   22xxx — data exception (e.g. invalid text representation)
+//   23xxx — integrity constraint violation (CHECK/UNIQUE/FK/NOT NULL)
+//   42xxx — syntax / access (unexpected from our own code; signal of drift)
+const PG_DEBUG_CODE_RE = /^(22|23|42)/;
+
 // Narrow error mapper — 4xx with err.status goes through verbatim, else 500.
-function sendRouteError(res, err, fallbackMessage) {
+// When the 500 is driven by a pg constraint / data violation, persist
+// err.code/constraint/detail to agent_logs (log_type='error') so future
+// agents don't need a DB shell to diagnose. Issue #9 ate 30 min because
+// this detail was lost; keeping the public message generic but surfacing
+// the pg metadata internally is the right trade.
+function sendRouteError(res, err, fallbackMessage, ctx = null) {
   if (err && typeof err.status === 'number' && err.status >= 400 && err.status < 500) {
     return res.status(err.status).json({ error: err.message });
   }
   console.error(`[ai-tasks-activities] ${fallbackMessage}:`, err && err.message);
+  if (
+    ctx && ctx.pool
+    && err && typeof err.code === 'string'
+    && PG_DEBUG_CODE_RE.test(err.code)
+  ) {
+    // fire-and-forget — logAgentAction already swallows its own errors
+    logAgentAction(
+      ctx.pool,
+      ctx.agentName || 'unknown',
+      'error',
+      `${ctx.routeTag || fallbackMessage}: pg ${err.code}`,
+      {
+        pg_code: err.code,
+        constraint: err.constraint || null,
+        detail: err.detail || null,
+        schema: err.schema || null,
+        table: err.table || null,
+        column: err.column || null,
+        message: err.message || null,
+      }
+    );
+  }
   return res.status(500).json({ error: fallbackMessage });
 }
 
@@ -6334,11 +6419,8 @@ router.get('/tasks', requireAgentKey, async (req, res) => {
     } = req.query;
 
     const assignees = asArray(req.query.assignee).filter((s) => s && String(s).trim() !== '');
-    const rawStatuses = asArray(req.query.status).filter((s) => s && String(s).trim() !== '');
-    const openAlias = rawStatuses.some((s) => String(s).toLowerCase() === 'open');
-    const explicitStatuses = rawStatuses
-      .filter((s) => String(s).toLowerCase() !== 'open')
-      .map(normalizeTaskStatus);
+    // parseTasksStatusQuery rejects open+explicit combos with 400 (Issue #10)
+    const { openAlias, explicit: explicitStatuses } = parseTasksStatusQuery(req.query.status);
 
     const limit = clampLimitAt(req.query.limit, 100, 500);
     const offset = clampOffset(req.query.offset);
@@ -6421,7 +6503,7 @@ router.get('/tasks', requireAgentKey, async (req, res) => {
 
     res.json({ tasks, total, limit, offset });
   } catch (err) {
-    sendRouteError(res, err, 'Failed to list tasks');
+    sendRouteError(res, err, 'Failed to list tasks', { pool, agentName: req.agentName, routeTag: 'GET /api/ai/tasks' });
   }
 });
 
@@ -6510,7 +6592,7 @@ router.post('/tasks', requireAgentKey, async (req, res) => {
     res.status(201).json({ task });
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
-    sendRouteError(res, err, 'Failed to create task');
+    sendRouteError(res, err, 'Failed to create task', { pool, agentName: req.agentName, routeTag: 'POST /api/ai/tasks' });
   } finally {
     if (client) client.release();
   }
@@ -6653,7 +6735,7 @@ router.patch('/tasks/:id', requireAgentKey, async (req, res) => {
     res.json({ task: after });
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
-    sendRouteError(res, err, 'Failed to update task');
+    sendRouteError(res, err, 'Failed to update task', { pool, agentName: req.agentName, routeTag: 'PATCH /api/ai/tasks/:id' });
   } finally {
     if (client) client.release();
   }
@@ -6716,7 +6798,7 @@ router.post('/tasks/:id/complete', requireAgentKey, async (req, res) => {
     res.json({ task: after });
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
-    sendRouteError(res, err, 'Failed to complete task');
+    sendRouteError(res, err, 'Failed to complete task', { pool, agentName: req.agentName, routeTag: 'POST /api/ai/tasks/:id/complete' });
   } finally {
     if (client) client.release();
   }
@@ -6786,7 +6868,7 @@ router.delete('/tasks/:id', requireAgentKey, async (req, res) => {
     res.json({ task: after });
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
-    sendRouteError(res, err, 'Failed to delete task');
+    sendRouteError(res, err, 'Failed to delete task', { pool, agentName: req.agentName, routeTag: 'DELETE /api/ai/tasks/:id' });
   } finally {
     if (client) client.release();
   }
@@ -6897,7 +6979,7 @@ router.get('/deals/:deal_id/activities', requireAgentKey, async (req, res) => {
       offset,
     });
   } catch (err) {
-    sendRouteError(res, err, 'Failed to list activities');
+    sendRouteError(res, err, 'Failed to list activities', { pool, agentName: req.agentName, routeTag: 'GET /api/ai/deals/:deal_id/activities' });
   }
 });
 
@@ -6914,6 +6996,10 @@ router.post('/deals/:deal_id/activities', requireAgentKey, async (req, res) => {
     const body = req.body || {};
     const rawType = body.type ? String(body.type).trim() : '';
     if (!rawType) throw httpError(400, '"type" is required');
+    // Canonicalize to match chk_interaction_type (Issue #9). Throws 400 with
+    // the allowed list on unknown values. The note branch below stays as a
+    // lowercase compare since both 'Note' and 'note' normalize to 'Note'.
+    const type = normalizeInteractionType(rawType);
 
     client = await pool.connect();
     await client.query('BEGIN');
@@ -6939,7 +7025,7 @@ router.post('/deals/:deal_id/activities', requireAgentKey, async (req, res) => {
     await assertEntitiesExist(client, 'properties', 'property_id', linkSet.properties);
 
     // Note branch — type='note' routes to notes table (direct FK columns).
-    if (rawType.toLowerCase() === 'note') {
+    if (type.toLowerCase() === 'note') {
       const content = body.notes || body.content;
       if (!content || !String(content).trim()) {
         throw httpError(400, '"notes" (or "content") is required for type=note');
@@ -6991,7 +7077,7 @@ router.post('/deals/:deal_id/activities', requireAgentKey, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
        RETURNING *`,
       [
-        rawType,
+        type,
         body.subject || null,
         date,
         body.notes || null,
@@ -7035,8 +7121,8 @@ router.post('/deals/:deal_id/activities', requireAgentKey, async (req, res) => {
     const linksMap = await fetchInteractionLinks(pool, [interaction.interaction_id]);
     interaction.links = linksMap.get(interaction.interaction_id);
 
-    logAgentAction(pool, req.agentName, 'activity_create', `Logged ${rawType} on deal ${dealId}`, {
-      interaction_id: interaction.interaction_id, deal_id: dealId, type: rawType,
+    logAgentAction(pool, req.agentName, 'activity_create', `Logged ${type} on deal ${dealId}`, {
+      interaction_id: interaction.interaction_id, deal_id: dealId, type,
     });
 
     const io = getIo();
@@ -7050,7 +7136,7 @@ router.post('/deals/:deal_id/activities', requireAgentKey, async (req, res) => {
     });
   } catch (err) {
     if (client) await client.query('ROLLBACK').catch(() => {});
-    sendRouteError(res, err, 'Failed to log activity');
+    sendRouteError(res, err, 'Failed to log activity', { pool, agentName: req.agentName, routeTag: 'POST /api/ai/deals/:deal_id/activities' });
   } finally {
     if (client) client.release();
   }
@@ -7069,7 +7155,7 @@ router.get('/activities/:interaction_id', requireAgentKey, async (req, res) => {
     interaction.links = linksMap.get(id);
     res.json({ activity: { source: 'interaction', ...interaction } });
   } catch (err) {
-    sendRouteError(res, err, 'Failed to fetch activity');
+    sendRouteError(res, err, 'Failed to fetch activity', { pool, agentName: req.agentName, routeTag: 'GET /api/ai/activities/:id' });
   }
 });
 
@@ -7125,7 +7211,7 @@ router.patch('/activities/:interaction_id', requireAgentKey, async (req, res) =>
 
     res.json({ activity: { source: 'interaction', ...interaction } });
   } catch (err) {
-    sendRouteError(res, err, 'Failed to update activity');
+    sendRouteError(res, err, 'Failed to update activity', { pool, agentName: req.agentName, routeTag: 'PATCH /api/ai/activities/:id' });
   }
 });
 
@@ -7161,11 +7247,14 @@ module.exports = {
     UUID_RE,
     TASK_STATUSES,
     TASK_CLOSED_STATUSES,
+    INTERACTION_TYPES,
     INTERACTION_MUTABLE_FIELDS,
     httpError,
     isUuid,
     assertUuid,
     normalizeTaskStatus,
+    normalizeInteractionType,
+    parseTasksStatusQuery,
     parseDateInput,
     clampLimitAt,
     clampOffset,

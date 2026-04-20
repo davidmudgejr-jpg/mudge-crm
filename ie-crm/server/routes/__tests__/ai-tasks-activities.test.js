@@ -29,11 +29,14 @@ const {
   UUID_RE,
   TASK_STATUSES,
   TASK_CLOSED_STATUSES,
+  INTERACTION_TYPES,
   INTERACTION_MUTABLE_FIELDS,
   httpError,
   isUuid,
   assertUuid,
   normalizeTaskStatus,
+  normalizeInteractionType,
+  parseTasksStatusQuery,
   parseDateInput,
   clampLimitAt,
   clampOffset,
@@ -321,5 +324,129 @@ describe('Status transition rules (spec)', () => {
     expect(transitionEffect({
       oldStatus: 'Todo', newStatus: 'Todo', oldDateCompleted: null,
     })).toEqual({ date_completed: 'unchanged' });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Issue #9 — interaction type canonicalization. Agents were sending
+// lowercase ("call", "email") which the chk_interaction_type CHECK
+// constraint rejected with a 500. normalizeInteractionType folds any
+// casing to the constraint's expected form and returns 400 with the
+// allowed list on anything else.
+// ─────────────────────────────────────────────────────────────────
+describe('Interaction type normalization (Issue #9)', () => {
+  it('canonicalizes every value from the CHECK constraint', () => {
+    for (const t of INTERACTION_TYPES) {
+      expect(normalizeInteractionType(t)).toBe(t);
+    }
+  });
+
+  // The bug from prod: lowercase "call" / "email" → 500.
+  it('folds lowercase type to canonical capitalization', () => {
+    expect(normalizeInteractionType('call')).toBe('Call');
+    expect(normalizeInteractionType('email')).toBe('Email');
+    expect(normalizeInteractionType('note')).toBe('Note');
+  });
+
+  it('folds multi-word types case-insensitively', () => {
+    expect(normalizeInteractionType('phone call')).toBe('Phone Call');
+    expect(normalizeInteractionType('PHONE CALL')).toBe('Phone Call');
+    expect(normalizeInteractionType('Outbound Email')).toBe('Outbound Email');
+    expect(normalizeInteractionType('outbound email')).toBe('Outbound Email');
+  });
+
+  it('collapses extra whitespace in multi-word types', () => {
+    expect(normalizeInteractionType('  phone    call  ')).toBe('Phone Call');
+  });
+
+  it('returns null for null / empty (endpoint enforces required separately)', () => {
+    expect(normalizeInteractionType(null)).toBeNull();
+    expect(normalizeInteractionType(undefined)).toBeNull();
+    expect(normalizeInteractionType('')).toBeNull();
+  });
+
+  it('rejects unknown values with 400 listing allowed types', () => {
+    try {
+      normalizeInteractionType('Cheeseburger');
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err.status).toBe(400);
+      expect(err.message).toMatch(/Invalid interaction type "Cheeseburger"/);
+      // The message must list allowed values so agents can self-correct
+      expect(err.message).toMatch(/Phone Call/);
+      expect(err.message).toMatch(/LinkedIn/);
+    }
+  });
+
+  it('rejects close-but-wrong values (e.g. pluralization)', () => {
+    for (const bad of ['Calls', 'Emails', 'phone_call', 'call-back']) {
+      expect(() => normalizeInteractionType(bad)).toThrow(/Invalid interaction type/);
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────
+// Issue #10 — status=open no longer silently drops explicit values.
+// parseTasksStatusQuery now rejects the ambiguous combination.
+// ─────────────────────────────────────────────────────────────────
+describe('Tasks status query parsing (Issue #10)', () => {
+  it('open alone returns openAlias=true, no explicit list', () => {
+    expect(parseTasksStatusQuery('open')).toEqual({ openAlias: true, explicit: [] });
+    expect(parseTasksStatusQuery(['open'])).toEqual({ openAlias: true, explicit: [] });
+  });
+
+  it('open is case-insensitive', () => {
+    expect(parseTasksStatusQuery('OPEN')).toEqual({ openAlias: true, explicit: [] });
+    expect(parseTasksStatusQuery('Open')).toEqual({ openAlias: true, explicit: [] });
+  });
+
+  it('explicit statuses alone return openAlias=false and a canonicalized list', () => {
+    expect(parseTasksStatusQuery(['Todo', 'done'])).toEqual({
+      openAlias: false,
+      explicit: ['Todo', 'Done'],
+    });
+  });
+
+  it('no status params returns both empty', () => {
+    expect(parseTasksStatusQuery(undefined)).toEqual({ openAlias: false, explicit: [] });
+    expect(parseTasksStatusQuery(null)).toEqual({ openAlias: false, explicit: [] });
+    expect(parseTasksStatusQuery([])).toEqual({ openAlias: false, explicit: [] });
+  });
+
+  // The audit-hostile case from Issue #10 — previously the Todo was
+  // silently dropped. Now we reject with 400 so the agent notices.
+  it('rejects open combined with explicit values with 400', () => {
+    try {
+      parseTasksStatusQuery(['open', 'Todo']);
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err.status).toBe(400);
+      expect(err.message).toMatch(/open cannot be combined with explicit statuses/);
+    }
+  });
+
+  it('rejects mixed-case open combined with explicit values', () => {
+    expect(() => parseTasksStatusQuery(['OPEN', 'Todo', 'Pending'])).toThrow(
+      /open cannot be combined/
+    );
+  });
+
+  // Invalid explicit values still 400 via normalizeTaskStatus.
+  it('invalid explicit status is rejected with 400 listing allowed values', () => {
+    try {
+      parseTasksStatusQuery(['bogus']);
+      expect.fail('should have thrown');
+    } catch (err) {
+      expect(err.status).toBe(400);
+      expect(err.message).toMatch(/Invalid status "bogus"/);
+    }
+  });
+
+  // Empty strings in the array are filtered out (not treated as a status)
+  it('filters empty strings from status array', () => {
+    expect(parseTasksStatusQuery(['', 'Todo', ''])).toEqual({
+      openAlias: false,
+      explicit: ['Todo'],
+    });
   });
 });
