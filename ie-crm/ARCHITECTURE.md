@@ -351,7 +351,7 @@ Claude reviews daily logs, rewrites agent instructions → system improves
 All sandbox rows carry: `agent_name`, `confidence_score`, `status` (pending → approved/rejected → promoted), `reviewed_by`, `reviewed_at`, `promoted_at`
 
 ### AI API Endpoints
-Scoped routes under `/api/ai/` with API key auth (`X-Agent-Key` header). Each agent gets its own key with tier-appropriate permissions. See `ai-system/ROADMAP.md` Phase 0B for full endpoint list.
+Scoped routes under `/api/ai/` with API key auth (`X-Agent-Key` header). Each agent gets its own key with tier-appropriate permissions. See `ai-system/ROADMAP.md` Phase 0B for full endpoint list. Team-task + deal-activity endpoints for Hermes/Agent M/Agent 48 are documented in `docs/api/ai-tasks-activities.md`.
 
 ### Agent Dashboard
 New IE CRM page ("AI Ops") showing agent status cards, approval queue, log viewer, and system health. Nav position: between Campaigns and Import.

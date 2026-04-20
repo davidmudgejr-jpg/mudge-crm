@@ -6077,6 +6077,1059 @@ router.get('/verification/stats', async (req, res) => {
 });
 
 // ============================================================
+// AGENT FLEET — Team Tasks + Deal Activities (2026-04-19)
+// ============================================================
+// Specced by Houston to give Hermes / Agent M / Agent 48 clean,
+// versioned endpoints so agents stop hand-crafting /api/db/* writes.
+// See docs/api/ai-tasks-activities.md for request/response details.
+// ============================================================
+
+// -- Shared helpers -----------------------------------------------------------
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// DB uses lowercase 'In progress' per migration 041's CHECK constraint —
+// spec lists 'In Progress' with caps; normalizeTaskStatus folds both to this.
+const TASK_STATUSES = [
+  'Todo', 'Reminders', 'In progress', 'Done', 'Dead',
+  'Email', 'Needs and Wants', 'Pending',
+];
+const TASK_STATUS_LOOKUP = new Map(TASK_STATUSES.map((s) => [s.toLowerCase(), s]));
+const TASK_CLOSED_STATUSES = ['Done', 'Dead'];
+
+// Mutable-in-PATCH interaction columns (type/date/subject are immutable per spec
+// so agents delete+recreate rather than silently rewriting audit trail).
+const INTERACTION_MUTABLE_FIELDS = [
+  'notes', 'follow_up', 'follow_up_notes',
+  'lead_status', 'lead_interest', 'team_member',
+];
+
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function isUuid(val) {
+  return typeof val === 'string' && UUID_RE.test(val);
+}
+
+function assertUuid(val, name) {
+  if (!isUuid(val)) throw httpError(400, `Invalid UUID for "${name}"`);
+  return val;
+}
+
+function normalizeTaskStatus(input) {
+  if (input == null || input === '') return null;
+  const canonical = TASK_STATUS_LOOKUP.get(String(input).toLowerCase().trim());
+  if (!canonical) {
+    throw httpError(
+      400,
+      `Invalid status "${input}". Allowed: ${TASK_STATUSES.join(', ')}`
+    );
+  }
+  return canonical;
+}
+
+// Accept ISO-8601 datetime OR YYYY-MM-DD date. Returns the original string
+// (Postgres handles both literal formats). Rejects anything else with 400.
+function parseDateInput(val, field) {
+  if (val == null || val === '') return null;
+  const s = String(val).trim();
+  if (!/^\d{4}-\d{2}-\d{2}([T ].+)?$/.test(s)) {
+    throw httpError(400, `Invalid date for "${field}" (expected YYYY-MM-DD or ISO-8601)`);
+  }
+  // Double-check by letting Date parse it — catches '2026-13-45'
+  const d = new Date(s);
+  if (isNaN(d.getTime())) {
+    throw httpError(400, `Invalid date for "${field}"`);
+  }
+  return s;
+}
+
+function clampLimitAt(val, def, max) {
+  const n = parseInt(val, 10);
+  if (isNaN(n) || n < 1) return def;
+  return Math.min(n, max);
+}
+
+function clampOffset(val) {
+  const n = parseInt(val, 10);
+  if (isNaN(n) || n < 0) return 0;
+  return n;
+}
+
+function asArray(val) {
+  if (val == null) return [];
+  return Array.isArray(val) ? val : [val];
+}
+
+function truthyParam(val) {
+  if (val === true) return true;
+  if (val == null) return false;
+  const s = String(val).toLowerCase();
+  return s === 'true' || s === '1' || s === 'yes';
+}
+
+// Best-effort agent_logs insert — never breaks the main request.
+async function logAgentAction(pool, agentName, logType, content, metrics = {}) {
+  try {
+    await pool.query(
+      `INSERT INTO agent_logs (agent_name, log_type, content, metrics)
+       VALUES ($1, $2, $3, $4)`,
+      [agentName || 'unknown', logType, content, JSON.stringify(metrics || {})]
+    );
+  } catch (logErr) {
+    console.error(`[ai-tasks] agent_logs insert failed (${logType}):`, logErr.message);
+  }
+}
+
+// Batch-fetch links for a set of task IDs. Always uses the pool directly
+// (not tied to any transaction client) because link enrichment is a read-
+// after-commit and doesn't need to see in-flight writes.
+async function fetchTaskLinks(pool, taskIds) {
+  const out = new Map();
+  if (!taskIds.length) return out;
+  for (const id of taskIds) out.set(id, { contacts: [], companies: [], deals: [], properties: [] });
+
+  const queries = [
+    pool.query(
+      `SELECT aic.action_item_id, c.contact_id, c.full_name
+         FROM action_item_contacts aic
+         JOIN contacts c ON c.contact_id = aic.contact_id
+        WHERE aic.action_item_id = ANY($1::uuid[])`,
+      [taskIds]
+    ),
+    pool.query(
+      `SELECT aico.action_item_id, co.company_id, co.company_name
+         FROM action_item_companies aico
+         JOIN companies co ON co.company_id = aico.company_id
+        WHERE aico.action_item_id = ANY($1::uuid[])`,
+      [taskIds]
+    ),
+    pool.query(
+      `SELECT aid.action_item_id, d.deal_id, d.deal_name
+         FROM action_item_deals aid
+         JOIN deals d ON d.deal_id = aid.deal_id
+        WHERE aid.action_item_id = ANY($1::uuid[])`,
+      [taskIds]
+    ),
+    pool.query(
+      `SELECT aip.action_item_id, p.property_id,
+              COALESCE(p.property_name, p.property_address) AS name
+         FROM action_item_properties aip
+         JOIN properties p ON p.property_id = aip.property_id
+        WHERE aip.action_item_id = ANY($1::uuid[])`,
+      [taskIds]
+    ),
+  ];
+  const [contacts, companies, deals, properties] = await Promise.all(queries);
+
+  for (const r of contacts.rows) {
+    out.get(r.action_item_id).contacts.push({ contact_id: r.contact_id, name: r.full_name });
+  }
+  for (const r of companies.rows) {
+    out.get(r.action_item_id).companies.push({ company_id: r.company_id, name: r.company_name });
+  }
+  for (const r of deals.rows) {
+    out.get(r.action_item_id).deals.push({ deal_id: r.deal_id, name: r.deal_name });
+  }
+  for (const r of properties.rows) {
+    out.get(r.action_item_id).properties.push({ property_id: r.property_id, name: r.name });
+  }
+  return out;
+}
+
+async function fetchInteractionLinks(pool, interactionIds) {
+  const out = new Map();
+  if (!interactionIds.length) return out;
+  for (const id of interactionIds) out.set(id, { contacts: [], companies: [], deals: [], properties: [] });
+
+  const [contacts, companies, deals, properties] = await Promise.all([
+    pool.query(
+      `SELECT ic.interaction_id, c.contact_id, c.full_name
+         FROM interaction_contacts ic
+         JOIN contacts c ON c.contact_id = ic.contact_id
+        WHERE ic.interaction_id = ANY($1::uuid[])`,
+      [interactionIds]
+    ),
+    pool.query(
+      `SELECT ico.interaction_id, co.company_id, co.company_name
+         FROM interaction_companies ico
+         JOIN companies co ON co.company_id = ico.company_id
+        WHERE ico.interaction_id = ANY($1::uuid[])`,
+      [interactionIds]
+    ),
+    pool.query(
+      `SELECT idd.interaction_id, d.deal_id, d.deal_name
+         FROM interaction_deals idd
+         JOIN deals d ON d.deal_id = idd.deal_id
+        WHERE idd.interaction_id = ANY($1::uuid[])`,
+      [interactionIds]
+    ),
+    pool.query(
+      `SELECT ip.interaction_id, p.property_id,
+              COALESCE(p.property_name, p.property_address) AS name
+         FROM interaction_properties ip
+         JOIN properties p ON p.property_id = ip.property_id
+        WHERE ip.interaction_id = ANY($1::uuid[])`,
+      [interactionIds]
+    ),
+  ]);
+  for (const r of contacts.rows) {
+    out.get(r.interaction_id).contacts.push({ contact_id: r.contact_id, name: r.full_name });
+  }
+  for (const r of companies.rows) {
+    out.get(r.interaction_id).companies.push({ company_id: r.company_id, name: r.company_name });
+  }
+  for (const r of deals.rows) {
+    out.get(r.interaction_id).deals.push({ deal_id: r.deal_id, name: r.deal_name });
+  }
+  for (const r of properties.rows) {
+    out.get(r.interaction_id).properties.push({ property_id: r.property_id, name: r.name });
+  }
+  return out;
+}
+
+// Verify that entity IDs exist before inserting into link tables. Skipping
+// this would produce orphan rows (junctions have no FK — see schema.sql).
+async function assertEntitiesExist(client, table, pkCol, ids) {
+  if (!ids.length) return;
+  const r = await client.query(
+    `SELECT ${pkCol} FROM ${table} WHERE ${pkCol} = ANY($1::uuid[])`,
+    [ids]
+  );
+  const found = new Set(r.rows.map((row) => row[pkCol]));
+  const missing = ids.filter((id) => !found.has(id));
+  if (missing.length) {
+    throw httpError(400, `Unknown ${table} IDs: ${missing.join(', ')}`);
+  }
+}
+
+// Narrow error mapper — 4xx with err.status goes through verbatim, else 500.
+function sendRouteError(res, err, fallbackMessage) {
+  if (err && typeof err.status === 'number' && err.status >= 400 && err.status < 500) {
+    return res.status(err.status).json({ error: err.message });
+  }
+  console.error(`[ai-tasks-activities] ${fallbackMessage}:`, err && err.message);
+  return res.status(500).json({ error: fallbackMessage });
+}
+
+// ── GET /api/ai/tasks ──────────────────────────────────────────────────────
+// List tasks with filters. Returns { tasks, total, limit, offset }.
+router.get('/tasks', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const {
+      high_priority,
+      due_before,
+      due_after,
+      overdue,
+      linked_deal_id,
+      linked_contact_id,
+      linked_company_id,
+      linked_property_id,
+      include,
+    } = req.query;
+
+    const assignees = asArray(req.query.assignee).filter((s) => s && String(s).trim() !== '');
+    const rawStatuses = asArray(req.query.status).filter((s) => s && String(s).trim() !== '');
+    const openAlias = rawStatuses.some((s) => String(s).toLowerCase() === 'open');
+    const explicitStatuses = rawStatuses
+      .filter((s) => String(s).toLowerCase() !== 'open')
+      .map(normalizeTaskStatus);
+
+    const limit = clampLimitAt(req.query.limit, 100, 500);
+    const offset = clampOffset(req.query.offset);
+    const wantLinks = include && String(include).split(',').map((s) => s.trim()).includes('links');
+
+    const conditions = [];
+    const params = [];
+    const push = (val) => { params.push(val); return `$${params.length}`; };
+
+    if (assignees.length) {
+      // Case-insensitive ANY-match: task qualifies if any element of its
+      // responsibility[] (lowered) equals any of the lowered query assignees.
+      conditions.push(
+        `EXISTS (SELECT 1 FROM unnest(a.responsibility) r WHERE LOWER(r) = ANY(${push(assignees.map((s) => String(s).toLowerCase()))}::text[]))`
+      );
+    }
+
+    if (openAlias) {
+      // 'open' alias = NOT IN ('Done','Dead'). Supersedes any explicit statuses
+      // to keep the filter semantics simple (open means open, not a union).
+      conditions.push(`(a.status IS NULL OR a.status <> ALL(${push(TASK_CLOSED_STATUSES)}::text[]))`);
+    } else if (explicitStatuses.length) {
+      conditions.push(`a.status = ANY(${push(explicitStatuses)}::text[])`);
+    }
+
+    if (truthyParam(high_priority)) {
+      conditions.push(`a.high_priority = true`);
+    }
+
+    if (due_before) {
+      conditions.push(`a.due_date <= ${push(parseDateInput(due_before, 'due_before'))}::date`);
+    }
+    if (due_after) {
+      conditions.push(`a.due_date >= ${push(parseDateInput(due_after, 'due_after'))}::date`);
+    }
+
+    if (truthyParam(overdue)) {
+      conditions.push(`a.due_date < CURRENT_DATE`);
+      conditions.push(`(a.status IS NULL OR a.status NOT IN ('Done','Dead'))`);
+    }
+
+    const linkFilters = [
+      ['deal_id', linked_deal_id, 'action_item_deals'],
+      ['contact_id', linked_contact_id, 'action_item_contacts'],
+      ['company_id', linked_company_id, 'action_item_companies'],
+      ['property_id', linked_property_id, 'action_item_properties'],
+    ];
+    for (const [col, val, tbl] of linkFilters) {
+      if (val) {
+        assertUuid(val, col);
+        conditions.push(
+          `EXISTS (SELECT 1 FROM ${tbl} lj WHERE lj.action_item_id = a.action_item_id AND lj.${col} = ${push(val)}::uuid)`
+        );
+      }
+    }
+
+    const whereSql = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limitIdx = push(limit);
+    const offsetIdx = push(offset);
+
+    const sql = `
+      SELECT a.*, COUNT(*) OVER() AS _total
+        FROM action_items a
+        ${whereSql}
+       ORDER BY
+         COALESCE(a.high_priority, false) DESC,
+         a.due_date ASC NULLS LAST,
+         a.created_at DESC
+       LIMIT ${limitIdx} OFFSET ${offsetIdx}
+    `;
+
+    const { rows } = await pool.query(sql, params);
+    const total = rows.length ? parseInt(rows[0]._total, 10) : 0;
+    const tasks = rows.map(({ _total, ...rest }) => rest);
+
+    if (wantLinks && tasks.length) {
+      const links = await fetchTaskLinks(pool, tasks.map((t) => t.action_item_id));
+      for (const t of tasks) t.links = links.get(t.action_item_id);
+    }
+
+    res.json({ tasks, total, limit, offset });
+  } catch (err) {
+    sendRouteError(res, err, 'Failed to list tasks');
+  }
+});
+
+// ── POST /api/ai/tasks ─────────────────────────────────────────────────────
+// Create a task with optional links, all in one transaction.
+router.post('/tasks', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+
+  let client;
+  try {
+    const body = req.body || {};
+    if (!body.name || typeof body.name !== 'string' || !body.name.trim()) {
+      throw httpError(400, '"name" is required');
+    }
+
+    const responsibility = Array.isArray(body.responsibility)
+      ? body.responsibility.filter((s) => typeof s === 'string' && s.trim())
+      : [];
+    const status = normalizeTaskStatus(body.status) || 'Todo';
+    const dueDate = body.due_date !== undefined ? parseDateInput(body.due_date, 'due_date') : null;
+    const highPriority = body.high_priority === true || body.high_priority === 'true';
+    const source = (body.source && String(body.source).trim()) || req.agentName || 'agent';
+    const notes = body.notes != null ? String(body.notes) : null;
+
+    // Validate link UUIDs up-front (before opening a transaction)
+    const linksIn = body.links || {};
+    const linkSet = {
+      contacts: asArray(linksIn.contacts).map((id) => assertUuid(id, 'links.contacts')),
+      companies: asArray(linksIn.companies).map((id) => assertUuid(id, 'links.companies')),
+      deals: asArray(linksIn.deals).map((id) => assertUuid(id, 'links.deals')),
+      properties: asArray(linksIn.properties).map((id) => assertUuid(id, 'links.properties')),
+    };
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    // Existence checks inside txn so a concurrent delete can't slip through
+    await assertEntitiesExist(client, 'contacts', 'contact_id', linkSet.contacts);
+    await assertEntitiesExist(client, 'companies', 'company_id', linkSet.companies);
+    await assertEntitiesExist(client, 'deals', 'deal_id', linkSet.deals);
+    await assertEntitiesExist(client, 'properties', 'property_id', linkSet.properties);
+
+    const ins = await client.query(
+      `INSERT INTO action_items
+         (name, notes, responsibility, high_priority, status, due_date, source)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [body.name.trim(), notes, responsibility, highPriority, status, dueDate, source]
+    );
+    const task = ins.rows[0];
+
+    const linkInserts = [
+      ['action_item_contacts', 'contact_id', linkSet.contacts],
+      ['action_item_companies', 'company_id', linkSet.companies],
+      ['action_item_deals', 'deal_id', linkSet.deals],
+      ['action_item_properties', 'property_id', linkSet.properties],
+    ];
+    for (const [tbl, col, ids] of linkInserts) {
+      for (const id of ids) {
+        await client.query(
+          `INSERT INTO ${tbl} (action_item_id, ${col}) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+          [task.action_item_id, id]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+
+    const linksMap = await fetchTaskLinks(pool, [task.action_item_id]);
+    task.links = linksMap.get(task.action_item_id);
+
+    logAgentAction(pool, req.agentName, 'task_create', `Created task "${task.name}"`, {
+      action_item_id: task.action_item_id,
+      status: task.status,
+      responsibility: task.responsibility,
+      link_counts: {
+        contacts: linkSet.contacts.length, companies: linkSet.companies.length,
+        deals: linkSet.deals.length, properties: linkSet.properties.length,
+      },
+    });
+
+    const io = getIo();
+    if (io) io.emit('crm:record-created', { table: 'action_items', record: task });
+
+    res.status(201).json({ task });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    sendRouteError(res, err, 'Failed to create task');
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// ── PATCH /api/ai/tasks/:id ────────────────────────────────────────────────
+// Partial update of mutable columns + links_add/links_remove.
+router.patch('/tasks/:id', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+
+  let client;
+  try {
+    const taskId = assertUuid(req.params.id, 'id');
+    const body = req.body || {};
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const before = (await client.query(
+      `SELECT * FROM action_items WHERE action_item_id = $1 FOR UPDATE`,
+      [taskId]
+    )).rows[0];
+    if (!before) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    // Build SET from whitelisted mutable fields
+    const sets = [];
+    const params = [];
+    const push = (v) => { params.push(v); return `$${params.length}`; };
+
+    if (body.name !== undefined) {
+      if (typeof body.name !== 'string' || !body.name.trim()) {
+        throw httpError(400, '"name" must be a non-empty string');
+      }
+      sets.push(`name = ${push(body.name.trim())}`);
+    }
+    if (body.notes !== undefined) sets.push(`notes = ${push(body.notes == null ? null : String(body.notes))}`);
+    if (body.notes_on_date !== undefined) sets.push(`notes_on_date = ${push(body.notes_on_date == null ? null : String(body.notes_on_date))}`);
+    if (body.responsibility !== undefined) {
+      const arr = Array.isArray(body.responsibility)
+        ? body.responsibility.filter((s) => typeof s === 'string' && s.trim())
+        : [];
+      sets.push(`responsibility = ${push(arr)}`);
+    }
+    if (body.high_priority !== undefined) {
+      sets.push(`high_priority = ${push(body.high_priority === true || body.high_priority === 'true')}`);
+    }
+    if (body.due_date !== undefined) {
+      sets.push(`due_date = ${push(parseDateInput(body.due_date, 'due_date'))}`);
+    }
+    if (body.source !== undefined) {
+      sets.push(`source = ${push(body.source == null ? null : String(body.source))}`);
+    }
+
+    // Status transition handling — spec: auto-set date_completed on transition
+    // into 'Done', null it on transition out. An explicit body.date_completed
+    // overrides the auto behavior (agents can set a historical close date).
+    let newStatus = before.status;
+    if (body.status !== undefined) {
+      newStatus = normalizeTaskStatus(body.status);
+      sets.push(`status = ${push(newStatus)}`);
+    }
+    const transitionedToDone = before.status !== 'Done' && newStatus === 'Done';
+    const transitionedOffDone = before.status === 'Done' && newStatus !== 'Done';
+    if (body.date_completed !== undefined) {
+      sets.push(`date_completed = ${push(body.date_completed == null ? null : parseDateInput(body.date_completed, 'date_completed'))}`);
+    } else if (transitionedToDone && before.date_completed == null) {
+      sets.push(`date_completed = NOW()`);
+    } else if (transitionedOffDone) {
+      sets.push(`date_completed = NULL`);
+    }
+
+    sets.push(`updated_at = NOW()`);
+
+    let after = before;
+    if (sets.length > 1) {
+      // >1 because updated_at is always in the set — only UPDATE if caller
+      // actually changed something else
+      const sql = `
+        UPDATE action_items SET ${sets.join(', ')}
+         WHERE action_item_id = ${push(taskId)}
+       RETURNING *
+      `;
+      const r = await client.query(sql, params);
+      after = r.rows[0];
+    }
+
+    // Links add/remove (validated UUIDs)
+    const addIn = body.links_add || {};
+    const remIn = body.links_remove || {};
+    const linkOps = [
+      ['action_item_contacts', 'contact_id', 'contacts', 'contacts'],
+      ['action_item_companies', 'company_id', 'companies', 'companies'],
+      ['action_item_deals', 'deal_id', 'deals', 'deals'],
+      ['action_item_properties', 'property_id', 'properties', 'properties'],
+    ];
+    const entityMap = { contacts: ['contacts', 'contact_id'], companies: ['companies', 'company_id'], deals: ['deals', 'deal_id'], properties: ['properties', 'property_id'] };
+    let linksChanged = false;
+    for (const [tbl, col, keyAdd, keyRem] of linkOps) {
+      const toAdd = asArray(addIn[keyAdd]).map((id) => assertUuid(id, `links_add.${keyAdd}`));
+      const toRem = asArray(remIn[keyRem]).map((id) => assertUuid(id, `links_remove.${keyRem}`));
+      if (toAdd.length) {
+        const [entTable, entCol] = entityMap[keyAdd];
+        await assertEntitiesExist(client, entTable, entCol, toAdd);
+        for (const id of toAdd) {
+          await client.query(
+            `INSERT INTO ${tbl} (action_item_id, ${col}) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [taskId, id]
+          );
+        }
+        linksChanged = true;
+      }
+      if (toRem.length) {
+        await client.query(
+          `DELETE FROM ${tbl} WHERE action_item_id = $1 AND ${col} = ANY($2::uuid[])`,
+          [taskId, toRem]
+        );
+        linksChanged = true;
+      }
+    }
+
+    await client.query('COMMIT');
+
+    const linksMap = await fetchTaskLinks(pool, [taskId]);
+    after.links = linksMap.get(taskId);
+
+    logAgentAction(pool, req.agentName, 'task_update', `Updated task "${after.name}"`, {
+      action_item_id: taskId,
+      before: { status: before.status, date_completed: before.date_completed, name: before.name },
+      after: { status: after.status, date_completed: after.date_completed, name: after.name },
+      links_changed: linksChanged,
+    });
+
+    const io = getIo();
+    if (io) io.emit('crm:record-updated', { table: 'action_items', record: after });
+
+    res.json({ task: after });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    sendRouteError(res, err, 'Failed to update task');
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// ── POST /api/ai/tasks/:id/complete ────────────────────────────────────────
+// Convenience: set status='Done', optional notes_append with timestamp prefix.
+router.post('/tasks/:id/complete', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  let client;
+  try {
+    const taskId = assertUuid(req.params.id, 'id');
+    const notesAppend = req.body && typeof req.body.notes_append === 'string'
+      ? req.body.notes_append.trim()
+      : '';
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const before = (await client.query(
+      `SELECT * FROM action_items WHERE action_item_id = $1 FOR UPDATE`,
+      [taskId]
+    )).rows[0];
+    if (!before) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const appendedNotes = notesAppend
+      ? `${before.notes ? before.notes + '\n\n' : ''}[${new Date().toISOString()} ${req.agentName || 'agent'}] ${notesAppend}`
+      : before.notes;
+
+    const autoCompletedAt = before.status !== 'Done' && before.date_completed == null;
+    const r = await client.query(
+      `UPDATE action_items
+          SET status = 'Done',
+              date_completed = ${autoCompletedAt ? 'NOW()' : 'date_completed'},
+              notes = $2,
+              updated_at = NOW()
+        WHERE action_item_id = $1
+      RETURNING *`,
+      [taskId, appendedNotes]
+    );
+    await client.query('COMMIT');
+
+    const after = r.rows[0];
+    const linksMap = await fetchTaskLinks(pool, [taskId]);
+    after.links = linksMap.get(taskId);
+
+    logAgentAction(pool, req.agentName, 'task_complete', `Completed task "${after.name}"`, {
+      action_item_id: taskId,
+      previous_status: before.status,
+      notes_appended: Boolean(notesAppend),
+    });
+
+    const io = getIo();
+    if (io) io.emit('crm:record-updated', { table: 'action_items', record: after });
+
+    res.json({ task: after });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    sendRouteError(res, err, 'Failed to complete task');
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// ── DELETE /api/ai/tasks/:id ───────────────────────────────────────────────
+// Soft-delete by default (status='Dead'). Hard-delete only if body.hard=true
+// AND X-Agent-Name=houston — other agents get 403 on hard.
+router.delete('/tasks/:id', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  let client;
+  try {
+    const taskId = assertUuid(req.params.id, 'id');
+    const hard = Boolean(req.body && req.body.hard === true);
+    if (hard && String(req.agentName || '').toLowerCase() !== 'houston') {
+      return res.status(403).json({ error: 'Hard delete requires X-Agent-Name=houston' });
+    }
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const existing = (await client.query(
+      `SELECT action_item_id, name, status FROM action_items
+        WHERE action_item_id = $1 FOR UPDATE`,
+      [taskId]
+    )).rows[0];
+    if (!existing) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    if (hard) {
+      await client.query(`DELETE FROM action_item_contacts WHERE action_item_id = $1`, [taskId]);
+      await client.query(`DELETE FROM action_item_companies WHERE action_item_id = $1`, [taskId]);
+      await client.query(`DELETE FROM action_item_deals WHERE action_item_id = $1`, [taskId]);
+      await client.query(`DELETE FROM action_item_properties WHERE action_item_id = $1`, [taskId]);
+      await client.query(`DELETE FROM action_items WHERE action_item_id = $1`, [taskId]);
+      await client.query('COMMIT');
+
+      logAgentAction(pool, req.agentName, 'task_delete', `Hard-deleted task "${existing.name}"`, {
+        action_item_id: taskId, hard: true,
+      });
+      return res.json({ ok: true, hard: true, action_item_id: taskId });
+    }
+
+    const r = await client.query(
+      `UPDATE action_items
+          SET status = 'Dead', updated_at = NOW()
+        WHERE action_item_id = $1
+      RETURNING *`,
+      [taskId]
+    );
+    await client.query('COMMIT');
+
+    const after = r.rows[0];
+    const linksMap = await fetchTaskLinks(pool, [taskId]);
+    after.links = linksMap.get(taskId);
+
+    logAgentAction(pool, req.agentName, 'task_delete', `Soft-deleted task "${after.name}"`, {
+      action_item_id: taskId, hard: false, previous_status: existing.status,
+    });
+
+    const io = getIo();
+    if (io) io.emit('crm:record-updated', { table: 'action_items', record: after });
+
+    res.json({ task: after });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    sendRouteError(res, err, 'Failed to delete task');
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// ── GET /api/ai/deals/:deal_id/activities ──────────────────────────────────
+// Unified feed: interactions + notes, sorted by date desc.
+// Pagination strategy: pull both sets fully for the deal (scale is small —
+// typical deal <100 activities per 209-deal dataset), merge in JS, then
+// slice. For larger scales, switch to a UNION ALL with SQL-side LIMIT.
+router.get('/deals/:deal_id/activities', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const dealId = assertUuid(req.params.deal_id, 'deal_id');
+    const limit = clampLimitAt(req.query.limit, 50, 200);
+    const offset = clampOffset(req.query.offset);
+    const since = req.query.since ? parseDateInput(req.query.since, 'since') : null;
+    const typesParam = req.query.types
+      ? String(req.query.types).split(',').map((s) => s.trim()).filter(Boolean)
+      : null;
+
+    // Verify the deal exists up front so clients don't confuse empty-feed
+    // with wrong-UUID.
+    const dealExists = await pool.query(`SELECT 1 FROM deals WHERE deal_id = $1`, [dealId]);
+    if (!dealExists.rowCount) return res.status(404).json({ error: 'Deal not found' });
+
+    const includeNotes = !typesParam
+      || typesParam.some((t) => t.toLowerCase() === 'note');
+    const interactionTypeFilter = typesParam
+      ? typesParam.filter((t) => t.toLowerCase() !== 'note')
+      : null;
+
+    // interactions for this deal (via junction)
+    const interactionParams = [dealId];
+    const interactionConds = [];
+    if (since) {
+      interactionParams.push(since);
+      interactionConds.push(`COALESCE(i.date, i.created_at) >= $${interactionParams.length}::timestamp`);
+    }
+    if (interactionTypeFilter && interactionTypeFilter.length) {
+      interactionParams.push(interactionTypeFilter);
+      interactionConds.push(`i.type = ANY($${interactionParams.length}::text[])`);
+    }
+    const interactionSql = `
+      SELECT i.*
+        FROM interactions i
+        JOIN interaction_deals idd ON idd.interaction_id = i.interaction_id
+       WHERE idd.deal_id = $1
+         ${interactionConds.length ? 'AND ' + interactionConds.join(' AND ') : ''}
+       ORDER BY COALESCE(i.date, i.created_at) DESC
+    `;
+    const interactions = (await pool.query(interactionSql, interactionParams)).rows;
+
+    // notes for this deal (direct FK)
+    let notes = [];
+    if (includeNotes) {
+      const noteParams = [dealId];
+      let noteSql = `SELECT note_id, content, created_at FROM notes WHERE deal_id = $1`;
+      if (since) {
+        noteParams.push(since);
+        noteSql += ` AND created_at >= $2::timestamp`;
+      }
+      noteSql += ` ORDER BY created_at DESC`;
+      notes = (await pool.query(noteSql, noteParams)).rows;
+    }
+
+    const linksMap = interactions.length
+      ? await fetchInteractionLinks(pool, interactions.map((i) => i.interaction_id))
+      : new Map();
+
+    // Merge: interactions and notes into one activity stream, sorted by date desc
+    const combined = [
+      ...interactions.map((i) => ({
+        source: 'interaction',
+        interaction_id: i.interaction_id,
+        type: i.type,
+        subject: i.subject,
+        date: i.date || i.created_at,
+        notes: i.notes,
+        team_member: i.team_member,
+        follow_up: i.follow_up,
+        follow_up_notes: i.follow_up_notes,
+        lead_status: i.lead_status,
+        lead_interest: i.lead_interest,
+        created_at: i.created_at,
+        links: linksMap.get(i.interaction_id) || { contacts: [], companies: [], deals: [], properties: [] },
+      })),
+      ...notes.map((n) => ({
+        source: 'note',
+        note_id: n.note_id,
+        date: n.created_at,
+        content: n.content,
+      })),
+    ];
+    combined.sort((a, b) => {
+      const ta = a.date ? new Date(a.date).getTime() : 0;
+      const tb = b.date ? new Date(b.date).getTime() : 0;
+      return tb - ta;
+    });
+    const paged = combined.slice(offset, offset + limit);
+
+    res.json({
+      deal_id: dealId,
+      activities: paged,
+      counts: { interactions: interactions.length, notes: notes.length, total: combined.length },
+      limit,
+      offset,
+    });
+  } catch (err) {
+    sendRouteError(res, err, 'Failed to list activities');
+  }
+});
+
+// ── POST /api/ai/deals/:deal_id/activities ─────────────────────────────────
+// Log a new activity. type='note' routes to the notes table; otherwise
+// writes an interactions row + interaction_deals link + optional
+// contact/company/property links.
+router.post('/deals/:deal_id/activities', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  let client;
+  try {
+    const dealId = assertUuid(req.params.deal_id, 'deal_id');
+    const body = req.body || {};
+    const rawType = body.type ? String(body.type).trim() : '';
+    if (!rawType) throw httpError(400, '"type" is required');
+
+    client = await pool.connect();
+    await client.query('BEGIN');
+
+    const dealExists = await client.query(
+      `SELECT 1 FROM deals WHERE deal_id = $1`, [dealId]
+    );
+    if (!dealExists.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Deal not found' });
+    }
+
+    // Links validation (applies to both interaction + note paths, though
+    // notes use only the first of each via direct FK columns).
+    const linksIn = body.links || {};
+    const linkSet = {
+      contacts: asArray(linksIn.contacts).map((id) => assertUuid(id, 'links.contacts')),
+      companies: asArray(linksIn.companies).map((id) => assertUuid(id, 'links.companies')),
+      properties: asArray(linksIn.properties).map((id) => assertUuid(id, 'links.properties')),
+    };
+    await assertEntitiesExist(client, 'contacts', 'contact_id', linkSet.contacts);
+    await assertEntitiesExist(client, 'companies', 'company_id', linkSet.companies);
+    await assertEntitiesExist(client, 'properties', 'property_id', linkSet.properties);
+
+    // Note branch — type='note' routes to notes table (direct FK columns).
+    if (rawType.toLowerCase() === 'note') {
+      const content = body.notes || body.content;
+      if (!content || !String(content).trim()) {
+        throw httpError(400, '"notes" (or "content") is required for type=note');
+      }
+      const r = await client.query(
+        `INSERT INTO notes (content, deal_id, contact_id, company_id, property_id)
+         VALUES ($1, $2, $3, $4, $5)
+         RETURNING note_id, content, deal_id, contact_id, company_id, property_id, created_at`,
+        [
+          String(content),
+          dealId,
+          linkSet.contacts[0] || null,
+          linkSet.companies[0] || null,
+          linkSet.properties[0] || null,
+        ]
+      );
+      await client.query('COMMIT');
+
+      const note = r.rows[0];
+      logAgentAction(pool, req.agentName, 'activity_create', `Logged note on deal ${dealId}`, {
+        note_id: note.note_id, deal_id: dealId, type: 'note',
+      });
+
+      const io = getIo();
+      if (io) io.emit('crm:record-created', { table: 'notes', record: note });
+
+      return res.status(201).json({
+        activity: {
+          source: 'note',
+          note_id: note.note_id,
+          date: note.created_at,
+          content: note.content,
+          deal_id: note.deal_id,
+          contact_id: note.contact_id,
+          company_id: note.company_id,
+          property_id: note.property_id,
+        },
+      });
+    }
+
+    // Interaction branch
+    const date = body.date !== undefined ? parseDateInput(body.date, 'date') : null;
+    const followUp = body.follow_up !== undefined ? parseDateInput(body.follow_up, 'follow_up') : null;
+
+    const r = await client.query(
+      `INSERT INTO interactions
+         (type, subject, date, notes, team_member,
+          follow_up, follow_up_notes, lead_status, lead_interest, lead_source)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+       RETURNING *`,
+      [
+        rawType,
+        body.subject || null,
+        date,
+        body.notes || null,
+        body.team_member || null,
+        followUp,
+        body.follow_up_notes || null,
+        body.lead_status || null,
+        body.lead_interest || null,
+        body.lead_source || req.agentName || null,
+      ]
+    );
+    const interaction = r.rows[0];
+
+    // Link to deal (from URL param)
+    await client.query(
+      `INSERT INTO interaction_deals (interaction_id, deal_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [interaction.interaction_id, dealId]
+    );
+    // Optional contact/company/property links
+    for (const id of linkSet.contacts) {
+      await client.query(
+        `INSERT INTO interaction_contacts (interaction_id, contact_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [interaction.interaction_id, id]
+      );
+    }
+    for (const id of linkSet.companies) {
+      await client.query(
+        `INSERT INTO interaction_companies (interaction_id, company_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [interaction.interaction_id, id]
+      );
+    }
+    for (const id of linkSet.properties) {
+      await client.query(
+        `INSERT INTO interaction_properties (interaction_id, property_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [interaction.interaction_id, id]
+      );
+    }
+
+    await client.query('COMMIT');
+
+    const linksMap = await fetchInteractionLinks(pool, [interaction.interaction_id]);
+    interaction.links = linksMap.get(interaction.interaction_id);
+
+    logAgentAction(pool, req.agentName, 'activity_create', `Logged ${rawType} on deal ${dealId}`, {
+      interaction_id: interaction.interaction_id, deal_id: dealId, type: rawType,
+    });
+
+    const io = getIo();
+    if (io) io.emit('crm:record-created', { table: 'interactions', record: interaction });
+
+    res.status(201).json({
+      activity: {
+        source: 'interaction',
+        ...interaction,
+      },
+    });
+  } catch (err) {
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    sendRouteError(res, err, 'Failed to log activity');
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// ── GET /api/ai/activities/:interaction_id ─────────────────────────────────
+router.get('/activities/:interaction_id', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const id = assertUuid(req.params.interaction_id, 'interaction_id');
+    const r = await pool.query(`SELECT * FROM interactions WHERE interaction_id = $1`, [id]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Interaction not found' });
+    const interaction = r.rows[0];
+    const linksMap = await fetchInteractionLinks(pool, [id]);
+    interaction.links = linksMap.get(id);
+    res.json({ activity: { source: 'interaction', ...interaction } });
+  } catch (err) {
+    sendRouteError(res, err, 'Failed to fetch activity');
+  }
+});
+
+// ── PATCH /api/ai/activities/:interaction_id ───────────────────────────────
+// Only mutable fields per spec (type/date/subject are immutable for audit).
+router.patch('/activities/:interaction_id', requireAgentKey, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const id = assertUuid(req.params.interaction_id, 'interaction_id');
+    const body = req.body || {};
+
+    const sets = [];
+    const params = [];
+    const push = (v) => { params.push(v); return `$${params.length}`; };
+
+    for (const f of INTERACTION_MUTABLE_FIELDS) {
+      if (body[f] === undefined) continue;
+      if (f === 'follow_up') {
+        sets.push(`${f} = ${push(body[f] == null ? null : parseDateInput(body[f], 'follow_up'))}`);
+      } else {
+        sets.push(`${f} = ${push(body[f] == null ? null : String(body[f]))}`);
+      }
+    }
+
+    // Reject attempts to set immutable fields with a clear 400.
+    for (const f of ['type', 'date', 'subject']) {
+      if (body[f] !== undefined) {
+        throw httpError(400, `"${f}" is immutable; delete + recreate the activity to change it`);
+      }
+    }
+
+    if (!sets.length) throw httpError(400, 'No mutable fields supplied');
+
+    params.push(id);
+    const sql = `
+      UPDATE interactions SET ${sets.join(', ')}
+       WHERE interaction_id = $${params.length}
+      RETURNING *
+    `;
+    const r = await pool.query(sql, params);
+    if (!r.rowCount) return res.status(404).json({ error: 'Interaction not found' });
+    const interaction = r.rows[0];
+    const linksMap = await fetchInteractionLinks(pool, [id]);
+    interaction.links = linksMap.get(id);
+
+    logAgentAction(pool, req.agentName, 'activity_update', `Updated interaction ${id}`, {
+      interaction_id: id, fields: Object.keys(body).filter((k) => INTERACTION_MUTABLE_FIELDS.includes(k)),
+    });
+
+    const io = getIo();
+    if (io) io.emit('crm:record-updated', { table: 'interactions', record: interaction });
+
+    res.json({ activity: { source: 'interaction', ...interaction } });
+  } catch (err) {
+    sendRouteError(res, err, 'Failed to update activity');
+  }
+});
+
+// ============================================================
 // MOUNT FUNCTION — called from server/index.js
 // ============================================================
 
@@ -6101,4 +7154,22 @@ function mountAiRoutes(app, deps) {
   console.log('[server] AI Master System API mounted at /api/ai (+ directives)');
 }
 
-module.exports = { mountAiRoutes };
+module.exports = {
+  mountAiRoutes,
+  // Exported for unit tests in server/routes/__tests__/ai-tasks-activities.test.js
+  __testing: {
+    UUID_RE,
+    TASK_STATUSES,
+    TASK_CLOSED_STATUSES,
+    INTERACTION_MUTABLE_FIELDS,
+    httpError,
+    isUuid,
+    assertUuid,
+    normalizeTaskStatus,
+    parseDateInput,
+    clampLimitAt,
+    clampOffset,
+    asArray,
+    truthyParam,
+  },
+};
