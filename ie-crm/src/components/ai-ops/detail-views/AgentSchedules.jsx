@@ -226,8 +226,8 @@ export default function AgentSchedules() {
   const [filter, setFilter] = useState('all'); // 'all', 'online', 'offline'
   const [typeFilter, setTypeFilter] = useState('all');
 
-  const token = localStorage.getItem('token');
-  const headers = { Authorization: `Bearer ${token}` };
+  const token = localStorage.getItem('crm-auth-token');
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
   const fetchData = useCallback(async () => {
     try {

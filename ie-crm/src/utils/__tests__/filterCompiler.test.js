@@ -59,7 +59,7 @@ describe('compileFilters', () => {
   it('compiles is_empty with no params', () => {
     const filters = [{ column: 'lease_exp', operator: 'is_empty' }];
     expect(compileFilters(filters, COLUMN_DEFS)).toEqual({
-      whereClause: 'WHERE lease_exp IS NULL',
+      whereClause: "WHERE (lease_exp IS NULL OR CAST(lease_exp AS TEXT) = '')",
       params: [],
     });
   });

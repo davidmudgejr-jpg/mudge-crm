@@ -1,7 +1,7 @@
 {
-  "name": "IE CRM — Mission Control",
+  "name": "IE CRM",
   "short_name": "IE CRM",
-  "description": "Inland Empire Commercial Real Estate CRM with AI-powered intelligence",
+  "description": "Inland Empire Commercial Real Estate CRM",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

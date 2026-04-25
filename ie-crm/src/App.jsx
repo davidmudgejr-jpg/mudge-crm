@@ -21,7 +21,6 @@ const Import = lazy(() => import('./pages/Import'));
 const Settings = lazy(() => import('./pages/Settings'));
 const TPE = lazy(() => import('./pages/TPE'));
 const TPEEnrichment = lazy(() => import('./pages/TPEEnrichment'));
-const AIOps = lazy(() => import('./pages/AIOps'));
 const VerificationQueue = lazy(() => import('./pages/VerificationQueue'));
 const DedupReview = lazy(() => import('./pages/DedupReview'));
 const Contracts = lazy(() => import('./pages/Contracts'));
@@ -115,7 +114,6 @@ function AppShell() {
             <Route path="/action-items" element={<ActionItems onCountChange={setRowCount} />} />
             <Route path="/comps" element={<Comps onCountChange={setRowCount} />} />
             <Route path="/knowledge" element={<Knowledge />} />
-            <Route path="/ai-ops" element={<AIOps />} />
             <Route path="/import" element={<Import />} />
             <Route path="/dedup" element={<DedupReview onCountChange={setRowCount} />} />
             <Route path="/contracts" element={<Contracts onCountChange={setRowCount} />} />
@@ -182,7 +180,7 @@ class ErrorBoundary extends React.Component {
             <div className="text-5xl mb-4">&#x26A0;&#xFE0F;</div>
             <h1 className="text-xl font-semibold text-crm-text mb-2">Something went wrong</h1>
             <p className="text-sm text-crm-muted mb-6">
-              Houston hit a snag. Try refreshing — if it keeps happening, let David know.
+              The app hit a snag. Try refreshing. If it keeps happening, let David know.
             </p>
             <button
               onClick={() => { this.setState({ hasError: false, error: null }); window.location.reload(); }}
