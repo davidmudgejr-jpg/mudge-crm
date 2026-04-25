@@ -231,8 +231,8 @@ export default function CouncilMeetings() {
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [roundFilter, setRoundFilter] = useState('all');
 
-  const token = localStorage.getItem('token');
-  const headers = { Authorization: `Bearer ${token}` };
+  const token = localStorage.getItem('crm-auth-token');
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
 
   // Fetch meetings list
   const fetchMeetings = useCallback(async () => {

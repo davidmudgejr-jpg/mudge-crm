@@ -23,7 +23,7 @@ const { mountAiRoutes } = require('./routes/ai');
 const { mountVerificationRoutes } = require('./routes/verification');
 const { mountContractRoutes } = require('./routes/contracts');
 const { mountKnowledgeRoutes } = require('./routes/knowledge');
-const { uploadFile, deleteFile } = require('./services/fileUpload');
+const { uploadFile } = require('./services/fileUpload');
 const { normalizeAddress, parseAddress, normalizeCompanyName } = require('./utils/addressNormalizer');
 const { matchProperty, matchCompany, matchContact, matchContactTargeted, detectTable } = require('./utils/compositeMatcher');
 const { buildClusters } = require('./utils/clusterBuilder');
@@ -169,8 +169,8 @@ function safeErr(err) {
   return (err && err.message) || String(err);
 }
 
-// logAudit(): best-effort audit trail for every mutation. Previously only the
-// ClaudePanel frontend wrote to undo_log; every direct /api/db/* write was
+// logAudit(): best-effort audit trail for every mutation. Previously only a
+// narrow frontend workflow wrote to undo_log; every direct /api/db/* write was
 // invisible in the audit trail. Now every write route logs a structured JSON
 // action snapshot into undo_log.action_description so operators can:
 //   (a) see who modified what and when (user_id + executed_at)
@@ -3390,32 +3390,6 @@ app.post('/api/files/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// POST /api/chat/upload — Chat file upload (uses shared service, folder = "chat")
-app.post('/api/chat/upload', upload.single('file'), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    const file = req.file;
-
-    const filePath = path.join(uploadsDir, file.filename);
-    const fileBuffer = fs.readFileSync(filePath);
-    const result = await uploadFile(fileBuffer, file.filename, 'chat', file.mimetype, file.size);
-
-    if (!result.url.startsWith('/uploads/')) {
-      try { fs.unlinkSync(filePath); } catch {}
-    }
-
-    res.json({
-      url: result.url,
-      filename: file.originalname,
-      mime_type: file.mimetype,
-      size_bytes: file.size,
-    });
-  } catch (err) {
-    console.error('[chat] Upload error:', err.message);
-    res.status(500).json({ error: 'Upload failed' });
-  }
-});
-
 // Serve locally uploaded files (fallback for dev)
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
@@ -4438,10 +4412,18 @@ app.post('/api/dedup/auto-merge', requireAuth, async (req, res) => {
 // SERVE STATIC FRONTEND (production)
 // ============================================================
 const distPath = path.join(__dirname, '..', 'dist');
-app.use(express.static(distPath));
-app.get('*', (_req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
-});
+const indexPath = path.join(distPath, 'index.html');
+if (fs.existsSync(indexPath)) {
+  app.use(express.static(distPath));
+  app.get('*', (_req, res) => {
+    res.sendFile(indexPath);
+  });
+} else {
+  console.warn('[server] dist/index.html not found; serving API-only mode');
+  app.get('*', (_req, res) => {
+    res.status(404).json({ error: 'Not found' });
+  });
+}
 
 // ============================================================
 // START

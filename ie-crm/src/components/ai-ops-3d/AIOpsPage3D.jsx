@@ -48,7 +48,7 @@ const proposalsBtnStyle = {
 
 // ─── API helpers ───
 function getHeaders() {
-  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+  const token = typeof localStorage !== 'undefined' ? localStorage.getItem('crm-auth-token') : null;
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
