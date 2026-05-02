@@ -738,15 +738,16 @@ router.post('/agent/log', async (req, res) => {
 
     const resolvedType = log_type || (level === 'error' ? 'error' : 'activity');
 
-    await pool.query(
+    const result = await pool.query(
       `INSERT INTO agent_logs (agent_name, log_type, content, metrics)
-       VALUES ($1, $2, $3, $4)`,
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
       [
         agent_name, resolvedType, message,
         details ? JSON.stringify(details) : '{}',
       ]
     );
-    res.json({ ok: true });
+    res.json({ ok: true, id: result.rows[0]?.id });
   } catch (err) {
     console.error('[AI API] /agent/log error:', err.message);
     res.status(500).json({ error: 'Failed to insert agent log' });

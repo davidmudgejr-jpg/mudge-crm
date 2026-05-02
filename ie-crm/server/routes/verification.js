@@ -26,6 +26,7 @@ function mountVerificationRoutes(app, { getPool, requireAuth, optionalAuth }) {
     // Check X-Agent-Key first (for agents)
     const agentKey = req.headers['x-agent-key'];
     if (agentKey && agentKey === process.env.AGENT_API_KEY) {
+      req.authType = 'agent';
       return next();
     }
 
@@ -38,6 +39,7 @@ function mountVerificationRoutes(app, { getPool, requireAuth, optionalAuth }) {
         const { EFFECTIVE_JWT_SECRET } = require('../middleware/auth');
         const decoded = jwt.verify(token, EFFECTIVE_JWT_SECRET);
         req.user = decoded;
+        req.authType = 'jwt';
         return next();
       } catch (err) {
         return res.status(401).json({ error: 'Invalid JWT token' });
@@ -46,6 +48,12 @@ function mountVerificationRoutes(app, { getPool, requireAuth, optionalAuth }) {
 
     return res.status(401).json({ error: 'Authentication required — provide JWT or X-Agent-Key' });
   });
+
+  function requireWritableUserOrAgent(req, res, next) {
+    if (req.authType === 'agent') return next();
+    if (req.user && ['admin', 'broker'].includes(req.user.role || 'broker')) return next();
+    return res.status(403).json({ error: 'admin or broker role required' });
+  }
 
   // ──────────────────────────────────────────────────
   // POST /api/ai/verification/request
@@ -190,7 +198,7 @@ function mountVerificationRoutes(app, { getPool, requireAuth, optionalAuth }) {
   // David resolves a verification request
   // Triggers auto-promote via DB trigger
   // ──────────────────────────────────────────────────
-  router.post('/resolve', async (req, res) => {
+  router.post('/resolve', requireWritableUserOrAgent, async (req, res) => {
     try {
       const {
         verification_id,

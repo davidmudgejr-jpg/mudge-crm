@@ -1,6 +1,9 @@
 node_modules/
 dist/
 build/
+!ie-crm/build/
+ie-crm/build/*
+!ie-crm/build/icon.icns
 .env
 .DS_Store
 *.log

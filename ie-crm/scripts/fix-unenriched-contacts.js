@@ -5,7 +5,7 @@
  */
 
 const { Pool } = require('pg');
-const xlsx = require('xlsx');
+const xlsx = require('@e965/xlsx');
 const { normalizeContactName, normalizeCompanyName } = require('../server/utils/addressNormalizer');
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '.env'), override: true });

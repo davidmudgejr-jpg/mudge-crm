@@ -10,7 +10,7 @@
 
 const path = require('path');
 const { Pool } = require('pg');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 const { matchContact, matchCompany } = require('../server/utils/compositeMatcher');
 const { normalizeCompanyName, normalizeContactName, similarity } = require('../server/utils/addressNormalizer');
 

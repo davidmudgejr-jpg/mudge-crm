@@ -5,7 +5,7 @@
 //   node scripts/migrate-airtable-campaigns.js --live       # commit to DB
 
 const { Pool } = require('pg');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 const { parseAirtableCampaignRow } = require('../server/utils/airtableCampaignParser');
 const { processAirtableCampaigns } = require('../server/utils/airtableCampaignEngine');
 

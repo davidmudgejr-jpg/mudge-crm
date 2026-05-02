@@ -6,7 +6,7 @@
 //   node scripts/migrate-airtable-companies.js --live --start-row=100  # resume
 
 const { Pool } = require('pg');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 const { parseAirtableCompanyRow } = require('../server/utils/airtableCompanyParser');
 const { processAirtableCompanies } = require('../server/utils/airtableCompanyEngine');
 

@@ -2,6 +2,22 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
+const manualChunkGroups = [
+  ['vendor-three', ['three', '@react-three/fiber', '@react-three/drei', '@react-three/postprocessing']],
+  ['vendor-motion', ['framer-motion', 'gsap']],
+  ['vendor-react', ['react', 'react-dom', 'react-router-dom']],
+];
+
+function manualChunks(id) {
+  if (!id.includes('node_modules')) return undefined;
+  for (const [chunkName, packages] of manualChunkGroups) {
+    if (packages.some((pkg) => id.includes(`/node_modules/${pkg}/`))) {
+      return chunkName;
+    }
+  }
+  return undefined;
+}
+
 export default defineConfig({
   plugins: [react()],
   base: './',
@@ -12,11 +28,7 @@ export default defineConfig({
         main: resolve(__dirname, 'index.html'),
       },
       output: {
-        manualChunks: {
-          'vendor-three': ['three', '@react-three/fiber', '@react-three/drei', '@react-three/postprocessing'],
-          'vendor-motion': ['framer-motion', 'gsap'],
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-        },
+        manualChunks,
       },
     },
   },

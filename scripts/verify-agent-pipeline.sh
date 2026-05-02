@@ -2,8 +2,13 @@
 # Agent Pipeline Verification — run after deploying agents on 48GB Mini
 # Tests the full pipeline: heartbeat → API read → sandbox write → queue check
 
-AGENT_KEY="ak_iecrm_2026_Kx9mWvPqLt7nRjF3hYbZ8dUc"
+AGENT_KEY="${AGENT_KEY:-${CRM_AGENT_KEY:-}}"
 API="https://mudge-crm-production.up.railway.app"
+
+if [ -z "$AGENT_KEY" ]; then
+  echo "AGENT_KEY or CRM_AGENT_KEY must be set to run this verification."
+  exit 2
+fi
 
 echo "═══════════════════════════════════════════"
 echo "  AGENT PIPELINE VERIFICATION"
@@ -68,7 +73,7 @@ LOG=$(curl -s -X POST "$API/api/ai/agent/log" \
   -H "X-Agent-Key: $AGENT_KEY" \
   -H "X-Agent-Name: pipeline_test" \
   -d '{"agent_name":"pipeline_test","log_type":"activity","message":"[PIPELINE TEST] Verification log entry"}' 2>/dev/null)
-check "Write agent log" "$(echo "$LOG" | grep -q '"id"' && echo OK || echo "$LOG")"
+check "Write agent log" "$(echo "$LOG" | grep -Eq '"(ok|id)"' && echo OK || echo "$LOG")"
 
 # 9. Ollama check (only if running on agent machine)
 if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then

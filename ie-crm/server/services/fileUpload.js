@@ -2,6 +2,14 @@ const fs = require('fs');
 const path = require('path');
 
 const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads');
+const ALLOWED_UPLOAD_FOLDERS = new Set(['general', 'deals', 'properties', 'chat']);
+
+function normalizeUploadFolder(folder) {
+  if (typeof folder !== 'string' || folder.length === 0) return 'general';
+  const normalized = folder.trim().toLowerCase();
+  if (!ALLOWED_UPLOAD_FOLDERS.has(normalized)) return 'general';
+  return normalized;
+}
 
 /**
  * Upload a file to Vercel Blob (persistent) with local filesystem fallback.
@@ -16,12 +24,13 @@ const UPLOADS_DIR = path.join(__dirname, '..', '..', 'uploads');
  */
 async function uploadFile(buffer, filename, folder, mimetype, sizeBytes) {
   const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+  const safeFolder = normalizeUploadFolder(folder);
 
   // Try Vercel Blob first (persistent, CDN-backed)
   if (blobToken) {
     try {
       const { put } = require('@vercel/blob');
-      const blob = await put(`${folder}/${filename}`, buffer, {
+      const blob = await put(`${safeFolder}/${filename}`, buffer, {
         access: 'public',
         contentType: mimetype,
         token: blobToken,
@@ -33,19 +42,19 @@ async function uploadFile(buffer, filename, folder, mimetype, sizeBytes) {
         size_bytes: sizeBytes,
       };
     } catch (err) {
-      console.error(`[fileUpload] Blob upload failed for ${folder}/${filename}, falling back to local:`, err.message);
+      console.error(`[fileUpload] Blob upload failed for ${safeFolder}/${filename}, falling back to local:`, err.message);
     }
   }
 
   // Fallback: local filesystem (dev only — ephemeral on Railway/Vercel)
-  const folderDir = path.join(UPLOADS_DIR, folder);
+  const folderDir = path.join(UPLOADS_DIR, safeFolder);
   if (!fs.existsSync(folderDir)) fs.mkdirSync(folderDir, { recursive: true });
 
   const localPath = path.join(folderDir, filename);
   fs.writeFileSync(localPath, buffer);
 
   return {
-    url: `/uploads/${folder}/${filename}`,
+    url: `/uploads/${safeFolder}/${filename}`,
     filename,
     mime_type: mimetype,
     size_bytes: sizeBytes,
@@ -113,4 +122,4 @@ async function deleteFile(url) {
   }
 }
 
-module.exports = { uploadFile, deleteFile };
+module.exports = { uploadFile, deleteFile, normalizeUploadFolder };

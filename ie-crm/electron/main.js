@@ -296,10 +296,10 @@ ipcMain.handle('file:parse', async (_event, arrayBuffer, fileName) => {
     };
   }
 
-  // Excel — parse to CSV text using xlsx
+  // Excel — parse to CSV text using the maintained SheetJS-compatible fork
   if (ext === '.xlsx' || ext === '.xls' || ext === '.xlsm') {
     try {
-      const XLSX = require('xlsx');
+      const XLSX = require('@e965/xlsx');
       const workbook = XLSX.read(buffer, { type: 'buffer' });
       const sheets = [];
       for (const sheetName of workbook.SheetNames) {

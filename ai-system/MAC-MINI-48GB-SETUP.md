@@ -272,7 +272,7 @@ done
 Edit `~/Desktop/AI-Agents/shared/crm-connection.md` and replace any placeholder with:
 ```
 API Base: https://mudge-crm-production.up.railway.app
-Agent Key: ak_iecrm_2026_Kx9mWvPqLt7nRjF3hYbZ8dUc
+Agent Key: <CRM_AGENT_KEY from secure env>
 ```
 
 ---
@@ -305,7 +305,7 @@ cat > ~/Desktop/AI-Agents/shared/heartbeat-48gb.sh << 'SCRIPT'
 #!/bin/bash
 # Heartbeat for all 7 Tier 3 agents on 48GB Mini
 BASE="https://mudge-crm-production.up.railway.app/api/ai/agent/heartbeat"
-KEY="ak_iecrm_2026_Kx9mWvPqLt7nRjF3hYbZ8dUc"
+KEY="${CRM_AGENT_KEY:?CRM_AGENT_KEY is required}"
 
 for agent in enricher researcher matcher scout logger postmaster campaign_manager; do
   # Only send heartbeat if agent's OpenClaw process is running
@@ -381,7 +381,7 @@ Run these checks after each agent is enabled:
 - [ ] Both models loaded: `ollama list` shows both
 - [ ] Memory OK: `top` shows <35 GB used
 - [ ] SSH from work Mac: `ssh mini48 'echo ok'`
-- [ ] CRM API reachable: `curl -s -H "X-Agent-Key: ak_iecrm_2026_Kx9mWvPqLt7nRjF3hYbZ8dUc" https://mudge-crm-production.up.railway.app/api/ai/stats`
+- [ ] CRM API reachable: `curl -s -H "X-Agent-Key: $CRM_AGENT_KEY" https://mudge-crm-production.up.railway.app/api/ai/stats`
 
 ### Per-Agent (repeat for each enabled agent)
 - [ ] agent.md exists in agent folder
@@ -424,7 +424,7 @@ ollama run qwen3.5:20b "test"
 ### Agent can't reach CRM API
 ```bash
 # Test connectivity
-curl -s -H "X-Agent-Key: ak_iecrm_2026_Kx9mWvPqLt7nRjF3hYbZ8dUc" \
+curl -s -H "X-Agent-Key: $CRM_AGENT_KEY" \
   https://mudge-crm-production.up.railway.app/api/ai/stats
 # If fails, check: internet connection, API key, Railway status
 ```
@@ -434,7 +434,7 @@ curl -s -H "X-Agent-Key: ak_iecrm_2026_Kx9mWvPqLt7nRjF3hYbZ8dUc" \
 # Manually send a test heartbeat
 curl -s -X POST "https://mudge-crm-production.up.railway.app/api/ai/agent/heartbeat" \
   -H "Content-Type: application/json" \
-  -H "X-Agent-Key: ak_iecrm_2026_Kx9mWvPqLt7nRjF3hYbZ8dUc" \
+  -H "X-Agent-Key: $CRM_AGENT_KEY" \
   -d '{"agent_name":"enricher","tier":3,"status":"testing","current_task":"heartbeat test"}'
 # Then check AI Ops page — if it shows, the cron is the issue
 ```

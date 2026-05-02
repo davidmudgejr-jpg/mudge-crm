@@ -5,7 +5,7 @@
 //   node scripts/migrate-airtable-properties.js --live       # commit to DB
 
 const { Pool } = require('pg');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 const { parseAirtableRow } = require('../server/utils/airtablePropertyParser');
 const { processAirtableProperties } = require('../server/utils/airtablePropertyEngine');
 

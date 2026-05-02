@@ -19,8 +19,12 @@ const API_BASE = process.env.CRM_API_URL
   || process.argv.find((a, i) => process.argv[i - 1] === '--api-url')
   || 'https://mudge-crm-production.up.railway.app';
 
-const API_KEY = process.env.CRM_AGENT_KEY
-  || 'ak_iecrm_2026_Kx9mWvPqLt7nRjF3hYbZ8dUc';
+const API_KEY = process.env.CRM_AGENT_KEY || process.env.AGENT_KEY;
+
+if (!API_KEY) {
+  console.error('[sync-vault] CRM_AGENT_KEY or AGENT_KEY must be set');
+  process.exit(2);
+}
 
 const SKIP_FOLDERS = new Set(['personal', 'templates']);
 

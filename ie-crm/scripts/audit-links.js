@@ -86,7 +86,7 @@ async function main() {
 
   // Check how many contacts CSV rows had a Companies field
   console.log('\n=== CONTACTS CSV: Companies field population ===');
-  const xlsx = require('xlsx');
+  const xlsx = require('@e965/xlsx');
   const wb = xlsx.readFile('/Users/davidmudgejr/Downloads/Contacts-All (DON\'T DELETE) (1).csv');
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const data = xlsx.utils.sheet_to_json(sheet);

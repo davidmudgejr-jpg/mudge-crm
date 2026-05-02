@@ -340,6 +340,14 @@ app.get('/robots.txt', (req, res) => {
 const bcrypt = require('bcryptjs');
 const { requireAuth, optionalAuth, requireRole, signToken } = require('./middleware/auth');
 const denyReadOnly = requireRole('admin', 'broker');
+const PASSWORD_MIN_LENGTH = 12;
+
+function validateNewPassword(password) {
+  if (typeof password !== 'string' || password.length < PASSWORD_MIN_LENGTH) {
+    return `Password must be at least ${PASSWORD_MIN_LENGTH} characters`;
+  }
+  return null;
+}
 
 // POST /api/auth/login — email + password → JWT
 app.post('/api/auth/login', authLimiter, async (req, res) => {
@@ -424,6 +432,8 @@ app.post('/api/auth/change-password', authLimiter, requireAuth, async (req, res)
   try {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords required' });
+    const passwordError = validateNewPassword(newPassword);
+    if (passwordError) return res.status(400).json({ error: passwordError });
 
     const result = await pool.query('SELECT password_hash FROM users WHERE user_id = $1', [req.user.user_id]);
     const user = result.rows[0];
@@ -432,7 +442,7 @@ app.post('/api/auth/change-password', authLimiter, requireAuth, async (req, res)
     const valid = await bcrypt.compare(currentPassword, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Current password incorrect' });
 
-    const hash = await bcrypt.hash(newPassword, 10);
+    const hash = await bcrypt.hash(newPassword, 12);
     await pool.query('UPDATE users SET password_hash = $1 WHERE user_id = $2', [hash, req.user.user_id]);
     res.json({ ok: true });
   } catch (err) {
@@ -458,7 +468,7 @@ mountKnowledgeRoutes(app, { getPool: () => pool });
 app.use('/api', requireAuth);
 
 // Mount Contracts routes (after requireAuth — needs JWT)
-mountContractRoutes(app, { getPool: () => pool, requireAuth });
+mountContractRoutes(app, { getPool: () => pool, requireAuth, denyReadOnly });
 
 // ============================================================
 // USER MANAGEMENT (admin only)
@@ -483,6 +493,8 @@ app.post('/api/users', requireRole('admin'), async (req, res) => {
     if (!email || !display_name || !password) {
       return res.status(400).json({ error: 'Email, name, and password required' });
     }
+    const passwordError = validateNewPassword(password);
+    if (passwordError) return res.status(400).json({ error: passwordError });
     if (!['admin', 'broker', 'readonly'].includes(role || 'broker')) {
       return res.status(400).json({ error: 'Invalid role' });
     }
@@ -547,9 +559,8 @@ app.post('/api/users/:id/reset-password', requireRole('admin'), async (req, res)
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
-    if (!newPassword || newPassword.length < 8) {
-      return res.status(400).json({ error: 'Password must be at least 8 characters' });
-    }
+    const passwordError = validateNewPassword(newPassword);
+    if (passwordError) return res.status(400).json({ error: passwordError });
 
     const hash = await bcrypt.hash(newPassword, 12); // Houston audit H5/L5 — increased rounds
     const result = await pool.query(
@@ -672,6 +683,49 @@ const READ_SORT_COLS = new Set([
   'tenant_name', 'commencement_date', 'notes',
 ]);
 
+const WHERE_BLOCKED_TOKENS = /\b(SELECT|INSERT|UPDATE|DELETE|DROP|TRUNCATE|ALTER|CREATE|GRANT|REVOKE|EXECUTE|COPY|CALL|DO|SET|RESET|SHOW|EXPLAIN|ANALYZE|VACUUM|LOCK|UNION|FROM|JOIN|INTO|RETURNING)\b/i;
+const WHERE_ALLOWED_FUNCTIONS = new Set(['any', 'cast', 'date_trunc']);
+const WHERE_ALLOWED_STRING_LITERALS = /^(week|month|quarter|year|\d{1,4}\s+days?|1\s+month|3\s+months|7\s+days)$/i;
+
+function validateWhereClause(whereClause, paramCount) {
+  if (!whereClause) return '';
+  if (typeof whereClause !== 'string' || !whereClause.startsWith('WHERE ')) {
+    throw new Error('Invalid whereClause');
+  }
+  if (whereClause.length > 5000) {
+    throw new Error('whereClause too long');
+  }
+  if (/[;\u0000]/.test(whereClause) || /--|\/\*|\*\//.test(whereClause)) {
+    throw new Error('Unsafe whereClause syntax');
+  }
+  if (WHERE_BLOCKED_TOKENS.test(whereClause)) {
+    throw new Error('Unsafe whereClause keyword');
+  }
+
+  const literals = whereClause.match(/'([^']*)'/g) || [];
+  for (const literal of literals) {
+    const value = literal.slice(1, -1);
+    if (!WHERE_ALLOWED_STRING_LITERALS.test(value)) {
+      throw new Error('Unsafe whereClause literal');
+    }
+  }
+
+  const calls = whereClause.matchAll(/\b([a-z_][a-z0-9_]*)\s*\(/gi);
+  for (const match of calls) {
+    const fn = match[1].toLowerCase();
+    if (!WHERE_ALLOWED_FUNCTIONS.has(fn)) {
+      throw new Error(`Unsafe whereClause function: ${fn}`);
+    }
+  }
+
+  const placeholders = [...whereClause.matchAll(/\$(\d+)/g)].map((m) => parseInt(m[1], 10));
+  if (placeholders.some((n) => !Number.isInteger(n) || n < 1 || n > paramCount)) {
+    throw new Error('whereClause placeholder does not match params');
+  }
+
+  return whereClause;
+}
+
 app.post('/api/db/read', async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected.' });
   try {
@@ -686,11 +740,8 @@ app.post('/api/db/read', async (req, res) => {
     const safeLimit = Math.min(Math.max(parseInt(limit) || 200, 1), 5000);
     const safeOffset = Math.max(parseInt(offset) || 0, 0);
 
-    // Validate whereClause: only allow parameterized WHERE clauses (no raw strings)
-    const safeWhere = (whereClause && typeof whereClause === 'string' && whereClause.startsWith('WHERE '))
-      ? whereClause : '';
-
     const safeParams = Array.isArray(params) ? params : [];
+    const safeWhere = validateWhereClause(whereClause, safeParams.length);
     const n = safeParams.length;
 
     const sql = `SELECT * FROM ${queryTable} ${safeWhere} ORDER BY ${safeOrder} ${safeDir} LIMIT $${n + 1} OFFSET $${n + 2}`;
@@ -712,9 +763,8 @@ app.post('/api/db/count', async (req, res) => {
     }
 
     const queryTable = READ_TABLES[entity];
-    const safeWhere = (whereClause && typeof whereClause === 'string' && whereClause.startsWith('WHERE '))
-      ? whereClause : '';
     const safeParams = Array.isArray(params) ? params : [];
+    const safeWhere = validateWhereClause(whereClause, safeParams.length);
 
     const sql = `SELECT COUNT(*) AS total FROM ${queryTable} ${safeWhere}`;
     const result = await pool.query(sql, safeParams);
@@ -850,7 +900,7 @@ const SERVER_ALLOWED_COLS = {
   ]),
 };
 
-app.post('/api/db/update', async (req, res) => {
+app.post('/api/db/update', denyReadOnly, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected' });
   const { entity, id, fields } = req.body;
   if (!entity || !id || !fields || typeof fields !== 'object') {
@@ -920,7 +970,7 @@ const VALID_JUNCTION_COLS = new Set([
   'action_item_id', 'role',
 ]);
 
-app.post('/api/db/link', async (req, res) => {
+app.post('/api/db/link', denyReadOnly, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected' });
   const { junction, col1, id1, col2, id2, extras } = req.body;
   if (!junction || !col1 || !id1 || !col2 || !id2) {
@@ -958,7 +1008,7 @@ app.post('/api/db/link', async (req, res) => {
   }
 });
 
-app.post('/api/db/unlink', async (req, res) => {
+app.post('/api/db/unlink', denyReadOnly, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected' });
   const { junction, col1, id1, col2, id2 } = req.body;
   if (!junction || !col1 || !id1 || !col2 || !id2) {
@@ -993,7 +1043,7 @@ app.post('/api/db/unlink', async (req, res) => {
 // ── Safe parameterized create endpoint with duplicate detection ──
 // compositeMatcher is required below with CSV import routes (matchProperty, matchCompany, matchContact)
 
-app.post('/api/db/create', async (req, res) => {
+app.post('/api/db/create', denyReadOnly, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected' });
   const { entity, fields, skipDuplicateCheck } = req.body;
   if (!entity || !fields || typeof fields !== 'object') {
@@ -1022,7 +1072,7 @@ app.post('/api/db/create', async (req, res) => {
       let matchResult = null;
 
       if (entity === 'contacts') {
-        matchResult = await matchContactTargeted(pool, { full_name: fields.full_name, email_1: fields.email });
+        matchResult = await matchContactTargeted(pool, { full_name: fields.full_name, email_1: fields.email_1 || fields.email });
       } else if (entity === 'properties') {
         const existing = await pool.query(
           `SELECT property_id, property_address, city, zip FROM properties`
@@ -1084,7 +1134,7 @@ app.get('/api/db/status', async (_req, res) => {
 });
 
 // ── Safe parameterized delete endpoint ──────────────────────────────────
-app.post('/api/db/delete', async (req, res) => {
+app.post('/api/db/delete', denyReadOnly, async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not connected' });
   const { entity, id } = req.body;
   if (!entity || !id) return res.status(400).json({ error: 'entity and id required' });
@@ -1400,13 +1450,9 @@ app.get('/api/ai/status', async (_req, res) => {
 // FILE PARSING ROUTES
 // ============================================================
 //
-// NOTE on xlsx: the xlsx@0.18.5 package has two HIGH CVEs (prototype pollution
-// GHSA-4r6h-8v6p-xvw6 and ReDoS GHSA-5pgg-2g8v-p4x9) with NO fix available on
-// the npm registry. We can't upgrade without switching to `exceljs` or a
-// SheetJS Pro build. As a compensating control we enforce a strict 10 MB
-// size cap AND reject files with more than 25 worksheets. A crafted workbook
-// can still trigger prototype pollution within these bounds, so the eventual
-// fix is to migrate away from xlsx. QA audit 2026-04-15 P3-02.
+// Spreadsheet parsing uses @e965/xlsx, a maintained SheetJS-compatible fork
+// with fixes for the public xlsx@0.18.5 advisories. Keep the size/sheet caps
+// anyway; uploads are still untrusted input.
 const MAX_PARSE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_XLSX_SHEETS = 25;
 
@@ -1432,7 +1478,7 @@ app.post('/api/file/parse', async (req, res) => {
     }
 
     if (ext === '.xlsx' || ext === '.xls' || ext === '.xlsm') {
-      const XLSX = require('xlsx');
+      const XLSX = require('@e965/xlsx');
       const workbook = XLSX.read(buffer, { type: 'buffer', cellFormula: false, cellHTML: false });
       if (workbook.SheetNames.length > MAX_XLSX_SHEETS) {
         return res.status(413).json({
@@ -2260,7 +2306,7 @@ app.get('/api/ai/sandbox/:table', async (req, res) => {
 });
 
 // POST /api/ai/sandbox/:table/review — Approve or reject a sandbox item
-app.post('/api/ai/sandbox/:table/review', async (req, res) => {
+app.post('/api/ai/sandbox/:table/review', denyReadOnly, async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not configured' });
     const table = req.params.table;
@@ -2281,7 +2327,7 @@ app.post('/api/ai/sandbox/:table/review', async (req, res) => {
 });
 
 // POST /api/ai/sandbox/contacts/promote — Promote approved sandbox contact to production
-app.post('/api/ai/sandbox/contacts/promote', async (req, res) => {
+app.post('/api/ai/sandbox/contacts/promote', denyReadOnly, async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not configured' });
     const { sandbox_id } = req.body;
@@ -2418,7 +2464,7 @@ app.get('/api/sandbox-contacts', async (req, res) => {
 });
 
 // PATCH /api/sandbox-contacts/:id — Approve (with optional field edits + auto-promote) or reject
-app.patch('/api/sandbox-contacts/:id', async (req, res) => {
+app.patch('/api/sandbox-contacts/:id', denyReadOnly, async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not configured' });
     const { id } = req.params;
@@ -2699,7 +2745,7 @@ app.get('/api/ai/tpe-config', async (req, res) => {
 });
 
 // PATCH /api/ai/tpe-config — update one or more config values
-app.patch('/api/ai/tpe-config', async (req, res) => {
+app.patch('/api/ai/tpe-config', requireRole('admin'), async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not configured' });
     const updates = Array.isArray(req.body) ? req.body : [req.body];
@@ -2722,7 +2768,7 @@ app.patch('/api/ai/tpe-config', async (req, res) => {
 });
 
 // POST /api/ai/tpe-config/reset — restore all config values to seed defaults
-app.post('/api/ai/tpe-config/reset', async (req, res) => {
+app.post('/api/ai/tpe-config/reset', requireRole('admin'), async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not configured' });
     const defaults = {
@@ -3001,7 +3047,7 @@ app.get('/api/council/messages', async (req, res) => {
 });
 
 // POST /api/council/message — Admin posts message to council
-app.post('/api/council/message', async (req, res) => {
+app.post('/api/council/message', requireRole('admin'), async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not configured' });
   try {
     const { message } = req.body;
@@ -3047,7 +3093,7 @@ app.post('/api/council/message', async (req, res) => {
 });
 
 // POST /api/council/approve — Approve or reject a council proposal
-app.post('/api/council/approve', async (req, res) => {
+app.post('/api/council/approve', requireRole('admin'), async (req, res) => {
   if (!pool) return res.status(503).json({ error: 'Database not configured' });
   try {
     if (req.user.role !== 'admin') {
@@ -3205,7 +3251,7 @@ app.get('/api/views', async (req, res) => {
 });
 
 // POST /api/views — create a new view
-app.post('/api/views', async (req, res) => {
+app.post('/api/views', denyReadOnly, async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
     const { entity_type, view_name, filters, filter_logic, sort_column, sort_direction, visible_columns, position, column_order, group_by_column } = req.body;
@@ -3241,7 +3287,7 @@ app.post('/api/views', async (req, res) => {
 });
 
 // PATCH /api/views/:viewId — update a view (partial)
-app.patch('/api/views/:viewId', async (req, res) => {
+app.patch('/api/views/:viewId', denyReadOnly, async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
     const { viewId } = req.params;
@@ -3306,7 +3352,7 @@ app.patch('/api/views/:viewId', async (req, res) => {
 });
 
 // DELETE /api/views/:viewId — delete a view
-app.delete('/api/views/:viewId', async (req, res) => {
+app.delete('/api/views/:viewId', denyReadOnly, async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not connected. Set DATABASE_URL.' });
     const { viewId } = req.params;
@@ -3337,7 +3383,7 @@ app.get('/api/pdf-templates', async (req, res) => {
 });
 
 // POST /api/pdf-templates — create a template
-app.post('/api/pdf-templates', async (req, res) => {
+app.post('/api/pdf-templates', denyReadOnly, async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not connected.' });
     const { entity_type, name, primary_fields, linked_types } = req.body;
@@ -3354,7 +3400,7 @@ app.post('/api/pdf-templates', async (req, res) => {
 });
 
 // DELETE /api/pdf-templates/:id
-app.delete('/api/pdf-templates/:id', async (req, res) => {
+app.delete('/api/pdf-templates/:id', denyReadOnly, async (req, res) => {
   try {
     if (!pool) return res.status(503).json({ error: 'Database not connected.' });
     const result = await pool.query('DELETE FROM pdf_templates WHERE id = $1 RETURNING id', [req.params.id]);
@@ -3367,7 +3413,7 @@ app.delete('/api/pdf-templates/:id', async (req, res) => {
 
 // POST /api/files/upload — Generic file upload (Vercel Blob + local fallback)
 // Query param: ?folder=deals|properties|chat|general (default: general)
-app.post('/api/files/upload', upload.single('file'), async (req, res) => {
+app.post('/api/files/upload', denyReadOnly, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const file = req.file;
@@ -3435,7 +3481,7 @@ app.get('/api/dedup/stats', requireAuth, async (req, res) => {
 });
 
 // POST /api/dedup/resolve — dismiss or defer a candidate
-app.post('/api/dedup/resolve', requireAuth, async (req, res) => {
+app.post('/api/dedup/resolve', denyReadOnly, async (req, res) => {
   try {
     const { candidateId, status, notes } = req.body;
     if (!['dismissed', 'deferred'].includes(status)) {
@@ -3454,7 +3500,7 @@ app.post('/api/dedup/resolve', requireAuth, async (req, res) => {
 });
 
 // POST /api/dedup/merge — merge two properties (keep one, absorb the other)
-app.post('/api/dedup/merge', requireAuth, async (req, res) => {
+app.post('/api/dedup/merge', denyReadOnly, async (req, res) => {
   const client = await pool.connect();
   try {
     const { candidateId, keepId, removeId } = req.body;
@@ -3597,7 +3643,7 @@ app.get('/api/dedup/contact-stats', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/dedup/contact-resolve', requireAuth, async (req, res) => {
+app.post('/api/dedup/contact-resolve', denyReadOnly, async (req, res) => {
   try {
     const { candidateId, status, notes } = req.body;
     if (!['dismissed', 'deferred'].includes(status)) {
@@ -3615,7 +3661,7 @@ app.post('/api/dedup/contact-resolve', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/dedup/contact-merge', requireAuth, async (req, res) => {
+app.post('/api/dedup/contact-merge', denyReadOnly, async (req, res) => {
   const client = await pool.connect();
   try {
     const { candidateId, keepId, removeId } = req.body;
@@ -3741,7 +3787,7 @@ app.get('/api/dedup/company-stats', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/dedup/company-resolve', requireAuth, async (req, res) => {
+app.post('/api/dedup/company-resolve', denyReadOnly, async (req, res) => {
   try {
     const { candidateId, status, notes } = req.body;
     if (!['dismissed', 'deferred'].includes(status)) {
@@ -3759,7 +3805,7 @@ app.post('/api/dedup/company-resolve', requireAuth, async (req, res) => {
   }
 });
 
-app.post('/api/dedup/company-merge', requireAuth, async (req, res) => {
+app.post('/api/dedup/company-merge', denyReadOnly, async (req, res) => {
   const client = await pool.connect();
   try {
     const { candidateId, keepId, removeId } = req.body;
@@ -4030,7 +4076,7 @@ app.get('/api/dedup/clusters', requireAuth, async (req, res) => {
 });
 
 // POST /api/dedup/cluster-merge — field-level multi-record merge
-app.post('/api/dedup/cluster-merge', requireAuth, async (req, res) => {
+app.post('/api/dedup/cluster-merge', denyReadOnly, async (req, res) => {
   const client = await pool.connect();
   try {
     const { entityType, keeperId, removeIds, fieldOverrides = {} } = req.body;
@@ -4184,7 +4230,7 @@ app.post('/api/dedup/cluster-merge', requireAuth, async (req, res) => {
 });
 
 // POST /api/dedup/undo-merge — reverse a merge using audit snapshot
-app.post('/api/dedup/undo-merge', requireAuth, async (req, res) => {
+app.post('/api/dedup/undo-merge', denyReadOnly, async (req, res) => {
   const client = await pool.connect();
   try {
     const { auditId } = req.body;
@@ -4289,7 +4335,7 @@ app.get('/api/dedup/merge-history', requireAuth, async (req, res) => {
 });
 
 // POST /api/dedup/auto-merge — auto-merge 100% exact match clusters
-app.post('/api/dedup/auto-merge', requireAuth, async (req, res) => {
+app.post('/api/dedup/auto-merge', denyReadOnly, async (req, res) => {
   const client = await pool.connect();
   try {
     const entityType = req.body.entityType || 'property';

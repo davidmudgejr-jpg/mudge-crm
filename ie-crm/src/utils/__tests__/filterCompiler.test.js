@@ -48,6 +48,14 @@ describe('compileFilters', () => {
     });
   });
 
+  it('coerces non-string contains values before escaping', () => {
+    const filters = [{ column: 'city', operator: 'contains', value: 92507 }];
+    expect(compileFilters(filters, COLUMN_DEFS)).toEqual({
+      whereClause: 'WHERE city ILIKE $1',
+      params: ['%92507%'],
+    });
+  });
+
   it('compiles between with two params', () => {
     const filters = [{ column: 'rba', operator: 'between', value: [10000, 50000] }];
     expect(compileFilters(filters, COLUMN_DEFS)).toEqual({
@@ -85,6 +93,14 @@ describe('compileFilters', () => {
     expect(compileFilters(filters, COLUMN_DEFS)).toEqual({
       whereClause: 'WHERE lease_exp > $1',
       params: ['2025-01-01'],
+    });
+  });
+
+  it('clamps relative date windows to a bounded interval', () => {
+    const filters = [{ column: 'lease_exp', operator: 'in_next_n_days', value: '999999' }];
+    expect(compileFilters(filters, COLUMN_DEFS)).toEqual({
+      whereClause: "WHERE (lease_exp >= CURRENT_DATE AND lease_exp <= CURRENT_DATE + INTERVAL '3650 days')",
+      params: [],
     });
   });
 

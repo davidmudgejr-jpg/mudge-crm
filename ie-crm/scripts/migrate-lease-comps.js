@@ -5,7 +5,7 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 const { Pool } = require('pg');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 const { parseCoStarExcelRow } = require('../server/utils/rowParsers');
 const { processLeaseComps } = require('../server/utils/leaseCompEngine');
 

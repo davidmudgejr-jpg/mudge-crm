@@ -52,6 +52,18 @@ function requireAgentKeyOnly(req, res, next) {
   next();
 }
 
+function requireWritableUserOrAgent(req, res, next) {
+  if (req.authType === 'agent') return next();
+  if (req.user && ['admin', 'broker'].includes(req.user.role || 'broker')) return next();
+  return res.status(403).json({ error: 'admin or broker role required' });
+}
+
+function requireAdminOrAgent(req, res, next) {
+  if (req.authType === 'agent') return next();
+  if (req.user && req.user.role === 'admin') return next();
+  return res.status(403).json({ error: 'admin role or agent key required' });
+}
+
 // ============================================================
 // VISIBILITY FILTER — enforces business/david-only/internal
 // ============================================================
@@ -298,7 +310,7 @@ router.get('/entity/:table/:id', async (req, res) => {
 // PATCH /api/knowledge/node/:slug — Update status, tags, request merge
 // ============================================================
 
-router.patch('/node/:slug', async (req, res) => {
+router.patch('/node/:slug', requireWritableUserOrAgent, async (req, res) => {
   const pool = getPool();
   if (!pool) return res.status(503).json({ error: 'Database not configured' });
 
@@ -456,7 +468,7 @@ router.post('/sync', requireAgentKeyOnly, async (req, res) => {
 
 let lastSyncTrigger = 0;
 
-router.post('/sync/trigger', async (req, res) => {
+router.post('/sync/trigger', requireAdminOrAgent, async (req, res) => {
   const now = Date.now();
   if (now - lastSyncTrigger < 30000) {
     return res.json({ ok: true, skipped: true, message: 'Sync debounced (ran within 30s)' });

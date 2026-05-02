@@ -26,7 +26,7 @@ const { exportWafpkg } = require('../utils/wafpkgExporter');
 
 const PARSED_DIR = path.join(__dirname, '..', '..', 'air-cre-data', 'parsed');
 
-function mountContractRoutes(app, { getPool, requireAuth }) {
+function mountContractRoutes(app, { getPool, requireAuth, denyReadOnly }) {
   const router = express.Router();
   router.use(requireAuth);
 
@@ -184,7 +184,7 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
   });
 
   // ── POST /api/contracts — Create new package with 1+ forms ──
-  router.post('/', async (req, res) => {
+  router.post('/', denyReadOnly, async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
       const { dealId, formCodes, name } = req.body;
@@ -225,7 +225,7 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
   });
 
   // ── POST /api/contracts/:pkgId/forms — Add a form to existing package ──
-  router.post('/:pkgId/forms', async (req, res) => {
+  router.post('/:pkgId/forms', denyReadOnly, async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
       const pkgId = parseInt(req.params.pkgId, 10);
@@ -258,7 +258,7 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
   });
 
   // ── PATCH /api/contracts/:pkgId/forms/:contractId — Update form field values ──
-  router.patch('/:pkgId/forms/:contractId', async (req, res) => {
+  router.patch('/:pkgId/forms/:contractId', denyReadOnly, async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
       const contractId = parseInt(req.params.contractId, 10);
@@ -298,7 +298,7 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
   });
 
   // ── DELETE /api/contracts/:pkgId/forms/:contractId — Remove form from package ──
-  router.delete('/:pkgId/forms/:contractId', async (req, res) => {
+  router.delete('/:pkgId/forms/:contractId', denyReadOnly, async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
       const contractId = parseInt(req.params.contractId, 10);
@@ -314,7 +314,7 @@ function mountContractRoutes(app, { getPool, requireAuth }) {
   });
 
   // ── DELETE /api/contracts/:pkgId — Delete entire package ──
-  router.delete('/:pkgId', async (req, res) => {
+  router.delete('/:pkgId', denyReadOnly, async (req, res) => {
     const p = pool(req, res); if (!p) return;
     try {
       const pkgId = parseInt(req.params.pkgId, 10);

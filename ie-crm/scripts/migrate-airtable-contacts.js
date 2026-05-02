@@ -6,7 +6,7 @@
 //   node scripts/migrate-airtable-contacts.js --live --start-row=500  # resume
 
 const { Pool } = require('pg');
-const XLSX = require('xlsx');
+const XLSX = require('@e965/xlsx');
 const { parseAirtableContactRow } = require('../server/utils/airtableContactParser');
 const { processAirtableContacts } = require('../server/utils/airtableContactEngine');
 

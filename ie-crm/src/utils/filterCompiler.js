@@ -46,7 +46,8 @@ const RELATIVE_DATE_OPS = new Set([
 ]);
 
 function compileRelativeDate(column, operator, value) {
-  const n = parseInt(value) || 30;
+  const raw = parseInt(value, 10);
+  const n = Number.isFinite(raw) ? Math.min(Math.max(raw, 1), 3650) : 30;
   let sql;
   switch (operator) {
     case 'in_next_n_days':
@@ -79,8 +80,8 @@ function compileRelativeDate(column, operator, value) {
 const OPERATOR_SQL = {
   equals:       (col, i) => ({ sql: `${col} = $${i}`, count: 1 }),
   not_equals:   (col, i) => ({ sql: `${col} != $${i}`, count: 1 }),
-  contains:     (col, i) => ({ sql: `${col} ILIKE $${i}`, count: 1, transform: v => `%${v.replace(/[%_\\]/g, '\\$&')}%` }),
-  not_contains: (col, i) => ({ sql: `${col} NOT ILIKE $${i}`, count: 1, transform: v => `%${v.replace(/[%_\\]/g, '\\$&')}%` }),
+  contains:     (col, i) => ({ sql: `${col} ILIKE $${i}`, count: 1, transform: v => `%${String(v ?? '').replace(/[%_\\]/g, '\\$&')}%` }),
+  not_contains: (col, i) => ({ sql: `${col} NOT ILIKE $${i}`, count: 1, transform: v => `%${String(v ?? '').replace(/[%_\\]/g, '\\$&')}%` }),
   gt:           (col, i) => ({ sql: `${col} > $${i}`, count: 1 }),
   gte:          (col, i) => ({ sql: `${col} >= $${i}`, count: 1 }),
   lt:           (col, i) => ({ sql: `${col} < $${i}`, count: 1 }),
