@@ -1,0 +1,15 @@
+*
+!ie-crm/
+!ie-crm/**
+
+ie-crm/node_modules
+ie-crm/dist
+ie-crm/mobile
+ie-crm/.vercel
+ie-crm/.env
+ie-crm/.env.*
+!ie-crm/.env.example
+ie-crm/uploads
+ie-crm/public/textures
+ie-crm/public/hdri
+ie-crm/air-cre-data
