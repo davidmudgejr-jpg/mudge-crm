@@ -842,7 +842,13 @@ export default function VerificationQueue({ onCountChange }) {
       });
       const data = await res.json();
       if (res.ok) {
-        addToast(status === 'accepted' ? 'Confirmed -- value written to record' : 'Rejected', 'success');
+        if (status === 'accepted' && data.conflicts > 0) {
+          addToast('Accepted, but current CRM value conflicts; left for manual overwrite review', 'warning');
+        } else if (status === 'accepted') {
+          addToast(data.applied > 0 ? 'Confirmed -- value written to record' : 'Accepted', 'success');
+        } else {
+          addToast('Rejected', 'success');
+        }
         fetchData();
       } else {
         addToast(data.error || 'Failed to review', 'error');
@@ -862,7 +868,11 @@ export default function VerificationQueue({ onCountChange }) {
       });
       const data = await res.json();
       if (res.ok) {
-        addToast(`${data.processed || selectedIds.size} items ${status}`, 'success');
+        if (status === 'accepted' && data.conflicts > 0) {
+          addToast(`${data.applied || 0} applied, ${data.conflicts} need manual overwrite review`, 'warning');
+        } else {
+          addToast(`${data.processed || selectedIds.size} items ${status}`, 'success');
+        }
         setSelectedIds(new Set());
         fetchData();
       } else {
@@ -885,7 +895,11 @@ export default function VerificationQueue({ onCountChange }) {
       });
       const data = await res.json();
       if (res.ok) {
-        addToast(`${data.processed || pendingUpdateIds.length} updates approved`, 'success');
+        if (data.conflicts > 0) {
+          addToast(`${data.applied || 0} applied, ${data.conflicts} need manual overwrite review`, 'warning');
+        } else {
+          addToast(`${data.processed || pendingUpdateIds.length} updates approved`, 'success');
+        }
         fetchData();
       } else {
         addToast(data.error || 'Batch failed', 'error');
@@ -906,6 +920,7 @@ export default function VerificationQueue({ onCountChange }) {
     try {
       let totalApplied = 0;
       let totalFailed = 0;
+      let totalConflicts = 0;
       const allFailures = [];
 
       // Step 1: reject dropped fields (if any). We reject BEFORE accepting
@@ -940,6 +955,7 @@ export default function VerificationQueue({ onCountChange }) {
         }
         const accData = await accRes.json();
         totalApplied += accData.applied || 0;
+        totalConflicts += accData.conflicts || 0;
         totalFailed += accData.failed_count || 0;
         if (accData.failed?.length) allFailures.push(...accData.failed);
       }
@@ -953,6 +969,8 @@ export default function VerificationQueue({ onCountChange }) {
         // Partial success
         const firstErr = allFailures[0]?.error || 'see server logs';
         addToast(`${totalApplied} approved, ${totalFailed} failed (${firstErr})`, 'warning');
+      } else if (totalConflicts > 0) {
+        addToast(`${totalApplied} applied, ${totalConflicts} need manual overwrite review`, 'warning');
       } else {
         // Clean success
         const dropMsg = reject.length > 0 ? ` (${reject.length} dropped)` : '';
@@ -1016,6 +1034,8 @@ export default function VerificationQueue({ onCountChange }) {
       // The server stores { applied_value, original_suggestion } in
       // updated_data JSONB when applied_value differs — audit trail for free.
       let approved = 0;
+      let applied = 0;
+      let conflicts = 0;
       const failures = [];
       for (const edit of edits) {
         try {
@@ -1025,6 +1045,9 @@ export default function VerificationQueue({ onCountChange }) {
             body: JSON.stringify({ status: 'accepted', applied_value: edit.applied_value }),
           });
           if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            applied += data.applied || 0;
+            if (data.conflicts > 0) conflicts += data.conflicts;
             approved++;
           } else {
             const data = await res.json().catch(() => ({}));
@@ -1041,6 +1064,8 @@ export default function VerificationQueue({ onCountChange }) {
       } else if (failures.length > 0) {
         const firstErr = failures[0]?.error || 'see server logs';
         addToast(`${approved} approved with edits, ${failures.length} failed (${firstErr})`, 'warning');
+      } else if (conflicts > 0) {
+        addToast(`${applied} applied, ${conflicts} need manual overwrite review`, 'warning');
       } else {
         addToast(`${approved} fields approved with edits`, 'success');
       }

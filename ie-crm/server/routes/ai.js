@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 
 const instantly = require('../services/instantly');
+const { applyAcceptedSuggestions } = require('../services/suggestedUpdatesApply');
 
 // Constant-time comparison for secret strings — prevents timing side-channel
 // attacks that could brute-force AGENT_API_KEY byte-by-byte. `timingSafeEqual`
@@ -2022,7 +2023,28 @@ router.get('/suggested-updates', async (req, res) => {
   }
 });
 
-// 41. PATCH /api/ai/suggested-updates/:id — Accept or reject a suggested update
+// 41. POST /api/ai/suggested-updates/apply — Safely apply accepted suggestions
+// Safe worker: applies only when the target field is empty or already matches.
+// Conflicting accepted rows remain unapplied and are marked for manual overwrite review.
+router.post('/suggested-updates/apply', requireAdminOrAgent, async (req, res) => {
+  const pool = dbPool(res);
+  if (!pool) return;
+  try {
+    const { dry_run, limit, ids } = req.body || {};
+    const report = await applyAcceptedSuggestions(pool, {
+      dryRun: !!dry_run,
+      limit,
+      ids: Array.isArray(ids) ? ids : [],
+      actor: req.agentName || req.user?.display_name || 'suggested-update-api',
+    });
+    res.json(report);
+  } catch (err) {
+    console.error('[AI API] POST /suggested-updates/apply error:', err.message);
+    res.status(500).json({ error: 'Failed to apply accepted suggestions' });
+  }
+});
+
+// 42. PATCH /api/ai/suggested-updates/:id — Accept or reject a suggested update
 // Called from the CRM dashboard review UI
 router.patch('/suggested-updates/:id', async (req, res) => {
   const pool = dbPool(res);
@@ -2064,28 +2086,12 @@ router.patch('/suggested-updates/:id', async (req, res) => {
       [status, reviewerName, review_notes || null, id, updatedData]
     );
 
-    // If accepted, apply the change to the actual record
+    let applyReport = null;
     if (status === 'accepted') {
-      const tableMap = { contact: 'contacts', property: 'properties', company: 'companies' };
-      const idColMap = { contact: 'contact_id', property: 'property_id', company: 'company_id' };
-      const table = tableMap[s.entity_type];
-      const idCol = idColMap[s.entity_type];
-
-      if (table && idCol) {
-        // SECURITY: Houston audit C4 — 2026-03-30
-        // Validate field name via sqlSafety whitelist instead of information_schema
-        validateColumn(s.field_name, table);
-        await pool.query(
-          `UPDATE ${table} SET ${quoteIdentifier(s.field_name)} = $1 WHERE ${quoteIdentifier(idCol)} = $2`,
-          [valueToWrite, s.entity_id]
-        );
-
-        // Mark as applied
-        await pool.query(
-          'UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1',
-          [id]
-        );
-      }
+      applyReport = await applyAcceptedSuggestions(pool, {
+        ids: [parseInt(id, 10)],
+        actor: reviewerName,
+      });
     }
 
     // Emit socket event for live UI update
@@ -2094,14 +2100,21 @@ router.patch('/suggested-updates/:id', async (req, res) => {
       io.emit('suggested-update:reviewed', { id: parseInt(id), status, entity_type: s.entity_type, entity_id: s.entity_id });
     }
 
-    res.json({ ok: true, status, applied: status === 'accepted' });
+    const appliedCount = applyReport ? applyReport.applied + applyReport.already_applied : 0;
+    res.json({
+      ok: true,
+      status,
+      applied: appliedCount,
+      conflicts: applyReport?.conflicts || 0,
+      apply_report: applyReport,
+    });
   } catch (err) {
     console.error('[AI API] PATCH /suggested-updates/:id error:', err.message);
     res.status(500).json({ error: 'Failed to review suggested update' });
   }
 });
 
-// 42. POST /api/ai/suggested-updates/batch — Accept or reject multiple suggestions at once
+// 43. POST /api/ai/suggested-updates/batch — Accept or reject multiple suggestions at once
 router.post('/suggested-updates/batch', async (req, res) => {
   const pool = dbPool(res);
   if (!pool) return;
@@ -2116,9 +2129,9 @@ router.post('/suggested-updates/batch', async (req, res) => {
     }
 
     const reviewerName = req.agentName || req.user?.display_name || 'admin';
-    let appliedCount = 0;
     let reviewedCount = 0;
     const failed = []; // per-row failures — one bad row must NOT kill the whole batch
+    const acceptedIds = [];
 
     for (const id of ids) {
       // Per-iteration try/catch: prevents one row's error from aborting the
@@ -2142,29 +2155,19 @@ router.post('/suggested-updates/batch', async (req, res) => {
         );
         reviewedCount++;
 
-        // Apply if accepted
         if (status === 'accepted') {
-          const tableMap = { contact: 'contacts', property: 'properties', company: 'companies' };
-          const idColMap = { contact: 'contact_id', property: 'property_id', company: 'company_id' };
-          const table = tableMap[s.entity_type];
-          const idCol = idColMap[s.entity_type];
-
-          if (table && idCol) {
-            // SECURITY: Houston audit C4 — 2026-03-30
-            validateColumn(s.field_name, table);
-            await pool.query(
-              `UPDATE ${table} SET ${quoteIdentifier(s.field_name)} = $1 WHERE ${quoteIdentifier(idCol)} = $2`,
-              [s.suggested_value, s.entity_id]
-            );
-            await pool.query('UPDATE suggested_updates SET applied = true, applied_at = NOW() WHERE id = $1', [id]);
-            appliedCount++;
-          }
+          acceptedIds.push(parseInt(id, 10));
         }
       } catch (rowErr) {
         console.error(`[AI API] batch row ${id} failed:`, rowErr.message);
         failed.push({ id, error: rowErr.message });
       }
     }
+
+    const applyReport = status === 'accepted' && acceptedIds.length > 0
+      ? await applyAcceptedSuggestions(pool, { ids: acceptedIds, actor: reviewerName })
+      : null;
+    const appliedCount = applyReport ? applyReport.applied + applyReport.already_applied : 0;
 
     const io = getIo();
     if (io) {
@@ -2177,8 +2180,11 @@ router.post('/suggested-updates/batch', async (req, res) => {
       ok: true,
       reviewed: reviewedCount,
       applied: appliedCount,
+      conflicts: applyReport?.conflicts || 0,
+      target_missing: applyReport?.target_missing || 0,
       failed_count: failed.length,
       failed,
+      apply_report: applyReport,
       processed: reviewedCount, // alias kept for backward-compat with existing client code
     });
   } catch (err) {

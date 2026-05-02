@@ -17,6 +17,7 @@
     "start": "node server/index.js",
     "preview": "vite preview",
     "audit:schema-columns": "node scripts/audit-schema-columns.js",
+    "suggested-updates:apply": "node scripts/apply-suggested-updates.js",
     "migrate": "node scripts/migrate.js",
     "test": "vitest run"
   },
