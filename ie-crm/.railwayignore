@@ -5,6 +5,6 @@ dist
 ios
 android
 .next
-:public:textures:
-:public:hdri:
+public/textures
+public/hdri
 air-cre-data
